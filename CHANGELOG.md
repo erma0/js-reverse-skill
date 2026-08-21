@@ -1,6 +1,10 @@
 # CHANGELOG
 
-## 2.3.46 - 2026-08-17
+## 2.3.47 - 2026-08-21
+
+### 变更
+- **ruyiPage 升级至 1.2.62 + 适配**：`pip install ruyiPage --upgrade`（1.2.45 → 1.2.62）。ruyipage ≥1.2.62 已原生内置 Firefox 155+ 的 privileged-scope 兼容：`capture.start` 上下文订阅失败自动降级全局、`smart_fingerprint` 自带脚本可访问的 `about:blank` 启动页、提权窗口下 `allow_system_access` 按需自动开启。`forensic_ruyipage.py` 的 `_apply_ruyipage_capture_compat_patch` 增加版本门控（≥1.2.62 走原生、跳过补丁，<1.2.62 走原补丁）；`set_argument("--remote-allow-system-access")` 在 1.2.62 会被自动转发到 `allow_system_access()`，行为等价。文档 `references/tooling/ruyi-tooling.md` 同步更新兼容说明。
+- **RuyiTrace 确认为最新版本**：`tools/RuyiTrace-2.5.5`（Windows 新结构 `resources/kernel/`）经 `check_external_tools.js` 验证通过，与 GitHub release v2.5 一致，无需更新。检测脚本对比结果显示 ruyiPage 包已是 PyPI 最新 v1.2.62。
 
 ### 修复
 - **TRACE_CAPTURE 出口门禁复检（P0-1）**：新增 `scripts/check_trace_gate.js`，状态机内复检 Step 2（RuyiTrace NDJSON）是否真实产出。GATE-2 入口门禁只判定初始证据路由，TRACE_CAPTURE → CASE_LOOKUP 转换此前无脚本接住——AI 可声明「已采集 trace」但实际跳过 RuyiTrace 直接转静态分析 / EXTERNAL_LOOKUP 拼凑方案（geetest slide-popup 案例正是如此：声明跑 RuyiTrace 却全程没跑，最终用 4 个外部仓库拼凑 final.js）。现在 TRACE_CAPTURE / TRACE_RETRY 出口必须复跑 `check_trace_gate.js`，退出码 0（`step2.evidence=true`）才可进 CASE_LOOKUP，退出码 1 停在 TRACE_CAPTURE。脚本复用 `check_evidence.js` 的 `check()` 判定 `step2.evidence`，透传 `--require-target-signal` 同时卡目标信号命中；自测 5 项断言（step1-only/both/target-signal 未命中/step2-only/空目录）。

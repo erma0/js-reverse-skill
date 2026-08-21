@@ -15,18 +15,20 @@ ruyiPage 通用取证脚本
   - 导航后自检 navigator.webdriver === false
   - 抓所有包（targets=True），事后从 steps 过滤，避免漏掉 JS 文件
 
-正确 API（基于 ruyipage >=1.2.45 内省确认，151/155 runtime 均适用，含 v1.2.57+）：
+正确 API（基于 ruyipage >=1.2.45 内省确认，151/155 runtime 均适用，含 v1.2.57+/v1.2.62）：
   - page.capture.start(targets=True, collect_bodies=True)  # True=抓全部
   - page.capture.wait(timeout=, count=1)  -> 单个 CapturePacket 或 None
   - page.capture.steps                     -> list[CapturePacket]（全部包）
   - CapturePacket.to_dict(include_bodies=True) -> url/method/headers/status/bodies
   - opts.smart_fingerprint(...) -> FingerprintContext；ctx.apply_emulation(page)
 
-Firefox 155+ 兼容（共享脚本补齐，ruyipage 1.2.45~1.2.61 均未处理）：
-  - 启动参数补 --remote-allow-system-access：管理员/提权 Windows 会话下
-    Firefox 默认拒绝浏览器外的远程调试连接，缺参表现为"启动后连不上 BiDi"；
-  - capture 订阅降级：1.2.61 的 capture.start 在 session.subscribe 无条件传
-    contexts，privileged scope（Firefox 155+）下不支持，运行时包一层重试兜底。
+Firefox 155+ 兼容：
+  - ruyipage >=1.2.62 已原生内置：capture.start 订阅上下文失败自动降级全局；
+    smart_fingerprint 默认带脚本可访问的 about:blank 启动页，提权窗口下
+    allow_system_access 按需自动开启。旧版本（<1.2.62）依靠下方补丁：
+      * 启动参数补 --remote-allow-system-access：管理员/提权 Windows 会话下
+        Firefox 默认拒绝浏览器外的远程调试连接，缺参表现为"启动后连不上 BiDi"；
+      * capture 订阅降级：1.2.45 自带、1.2.61 回退，由 _apply_ruyipage_capture_compat_patch 兜底。
 """
 
 from __future__ import annotations
@@ -577,7 +579,8 @@ def build_options(args: argparse.Namespace, browser_path: str):
     opts.set_human_algorithm(args.human_algorithm)
     # Firefox 155+（v1.2.57+ runtime）在管理员/提权 Windows 会话下，远程调试
     # 连接默认只允许浏览器自身，必须显式放行系统级连接，否则 BiDi 握手表现为
-    # "浏览器启动了但连不上"。ruyipage 1.2.45~1.2.61 均未自动附加，由共享脚本补齐。
+    # "浏览器启动了但连不上"。ruyipage <1.2.62 均未自动附加，由共享脚本补齐。
+    # （1.2.62+ 该参数被 set_argument 自动转发到 allow_system_access()，等价。）
     try:
         opts.set_argument("--remote-allow-system-access")
     except Exception as e:
@@ -1082,16 +1085,37 @@ def _apply_ruyipage_anti_hang_patch():
         logger.warning("防挂补丁 response_body_timeout 调整失败：%s", e)
 
 
+def _ruyipage_geq(version: str, minv: str) -> bool:
+    """语义化版本 >= 判断：1.2.62 >= 1.2.61 为真。解析失败时返回 False（保守，走补丁）。"""
+    try:
+        a = tuple(int(x) for x in version.split(".")[:3])
+        b = tuple(int(x) for x in minv.split(".")[:3])
+        for i in range(3):
+            if a[i] != b[i]:
+                return a[i] > b[i]
+        return True
+    except Exception:
+        return False
+
+
 def _apply_ruyipage_capture_compat_patch():
     """Firefox 155+（privileged scope）兼容补丁（依赖 ruyipage 内部实现，失败仅告警不阻断）。
 
-    ruyipage 1.2.61 的 capture.start 在 session.subscribe 时无条件传 contexts，
-    而 Firefox 155+ 的 privileged scope 下不支持该参数，subscribe 直接抛错导致
-    抓包启动失败（1.2.45 自带降级，1.2.61 回退掉了）。这里给 subscribe 包一层：
-    带 contexts 失败时自动降级为全局订阅（不限定 context），事件仍覆盖全部标签页。
-    1.2.45 自带同类降级，包装后由本补丁统一处理：仍是一次失败 + 一次全局重试，
-    不产生额外 RPC，行为等效。
+    ruyipage 1.2.62+ 的 capture.start 已原生内置降级（capture.py：上下文的
+    session.subscribe 失败时自动重试全局订阅），本补丁仅对 <1.2.62 生效：
+    旧版本（1.2.61 及更早）的 capture.start 在 session.subscribe 时无条件传
+    contexts，而 Firefox 155+ 的 privileged scope 下不支持该参数，subscribe 直接
+    抛错导致抓包启动失败（1.2.45 自带降级，1.2.61 回退掉了）。这里给 subscribe
+    包一层：带 contexts 失败时自动降级为全局订阅（不限定 context），事件仍覆盖
+    全部标签页。1.2.45 自带同类降级，包装后由本补丁统一处理：仍是一次失败 + 一次
+    全局重试，不产生额外 RPC，行为等效。
     """
+    try:
+        import ruyipage
+        if _ruyipage_geq(getattr(ruyipage, "__version__", ""), "1.2.62"):
+            return
+    except Exception:
+        pass
     try:
         import ruyipage._bidi.session as _sess
         orig = _sess.subscribe

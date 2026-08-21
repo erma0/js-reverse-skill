@@ -298,7 +298,7 @@ new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, clientX: 3, clien
    - 全部已抓包用 `page.capture.steps`（**不是** `get_all`）读取。
    - `CapturePacket.to_dict(include_bodies=True)` 含 `url / method / request_headers / response_status / response_headers / request_body / response_body / is_failed`。
    - `ctx = opts.smart_fingerprint(...)` → `ctx.apply_emulation(page)`；`ctx.to_dict()` 持久化基线。
-   - **Firefox 155+ 兼容由共享脚本兜底，禁止改 site-packages/wheel 内部**：`forensic_ruyipage.py` 已自动补 `--remote-allow-system-access`（管理员/提权 Windows 下 Firefox 155+ 拒绝浏览器外的远程调试连接，ruyipage ≤1.2.61 均不自动加），并对 `session.subscribe` 的 privileged-scope 报错做全局订阅降级（ruyipage 1.2.61 回退了 1.2.45 自带的降级逻辑）。遇到这两个问题先修 `forensic_ruyipage.py`，不要在临时解压的 wheel / site-packages 里改 `capture.py` 或 `firefox_options.py`——升级或重装即丢失。
+   - **Firefox 155+ 兼容**：ruyipage ≥1.2.62 已原生内置（`capture.start` 上下文订阅失败自动降级全局；`smart_fingerprint` 自带脚本可访问的 `about:blank` 启动页；提权窗口下 `allow_system_access` 按需自动开启）。**旧版本（<1.2.62）由共享脚本兜底，禁止改 site-packages/wheel 内部**：`forensic_ruyipage.py` 已自动补 `--remote-allow-system-access`（管理员/提权 Windows 下 Firefox 155+ 拒绝浏览器外的远程调试连接，ruyipage ≤1.2.61 均不自动加），并对 `session.subscribe` 的 privileged-scope 报错做全局订阅降级（ruyipage 1.2.61 回退了 1.2.45 自带的降级逻辑）。遇到这两个问题先修 `forensic_ruyipage.py`，不要在临时解压的 wheel / site-packages 里改 `capture.py` 或 `firefox_options.py`——升级或重装即丢失。
 3. 抓包完成后 `page.capture.stop()` 会确保响应体加载；JS 文件优先从 `response_body` 落盘，不要改用普通 `requests` 重新下载（会丢失指纹上下文）。
 
 只有当 `node scripts/check_external_tools.js --markdown --project-dir <project-root>` 显示“默认解析路径是否为定制 Firefox：是”时，才可直接 `FirefoxPage()` 或 `launch(headless=False)`。否则必须显式指定已验证的定制 Firefox 路径。
