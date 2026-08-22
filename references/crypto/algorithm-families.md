@@ -1,6 +1,7 @@
 # 算法家族站点清单
 
 > **触发条件**：IDENTIFY 识别目标站点时读，匹配已知算法家族
+> **知识分级**：本文件的站点↔参数↔SDK 映射属于 T1 识别指纹（仅用于识别与路由，见 SKILL.md 厂商知识分级）；具体字段语义与加密结构（T2）以本次 case 证据、`references/captcha/captcha-providers.md` 与 `cases/` 为准。
 
 ## 站点速查表
 

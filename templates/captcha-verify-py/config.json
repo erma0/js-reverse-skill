@@ -1,17 +1,13 @@
 {
   "target": {
-    "page_url": "<目标页>",
-    "load_api": "<load/register 接口，如 https://api.geetest.com/register.php>",
-    "verify_api": "<verify 接口，如 https://api.geetest.com/ajax.php>",
-    "business_api": "<业务接口，消费 validate/ticket 等凭据>"
+    "page_url": "<本 case 目标页>"
   },
   "captcha": {
-    "provider": "geetest",
-    "captcha_type": "slider",
-    "gt_or_captcha_id": "<厂商标识，极验 v3=gt，v4=captcha_id>"
+    "provider": "<由本 case 证据确定>",
+    "captcha_type": "<由本 case 证据确定>"
   },
   "solver": {
-    "mode": "ddddocr",
+    "mode": "<case-defined>",
     "platform": "",
     "api_key": ""
   },

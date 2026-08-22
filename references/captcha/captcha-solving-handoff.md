@@ -12,7 +12,7 @@
 2. **点选/网格/区域题型的坐标必须由求解器给出**（ddddocr `detection` + 语义分类 / 打码平台），禁止人工瞎猜坐标或用图片中心点。
 3. 答案正确是验证通过的**必要非充分条件**：仍需配合人类轨迹（`scripts/generate_motion_track.py`）、合理 passtime/imgload、challenge 新鲜度。
 4. **求解失败时的正确动作**：报告"答案层求解失败/置信度低"，按 `gap-coordinate-source.md` 的「滑动距离获取失败预案」逐步升级（复核来源 → B 路线三级降级 / C 路线升级 → 打码平台 → 人工接管）——**不是**继续用错误答案提交并把失败归因为"视觉解题范畴不属逆向目标"。答案层求解是验证码逆向交付的组成部分，不是可跳过的可选步骤。
-5. 检测点：交付门禁 `scripts/check_final_artifact.js` 会检查 result 是否含答案层接入；连续失败复盘按 `verification-workflow.md` 的 5 次门槛走，不要把答案错误当作封装层 bug 反复调试。
+5. 检测点：交付门禁 `scripts/check_final_artifact.js` 检测到验证码交付（config 含 `captcha` 配置或引用 adapter 契约）时，会校验 `result/src/adapter.*` 与答案层接入（`src/solver.*` 或等效求解代码）同时存在，缺一即 FAIL；连续失败复盘按 `verification-workflow.md` 的 5 次门槛走，不要把答案错误当作封装层 bug 反复调试。
 
 ## 求解路径优先级
 
@@ -52,7 +52,7 @@ boxes = det2.detection(img_bytes)
 
 ## 人工接管降级（click_gap.py）
 
-当 ddddocr / OpenCV 自动识别不稳定时（典型：易盾拼图块重着色导致 Canny/Sobel/模板匹配失效），降级为人工接管。人工接管有两种形式：
+当 ddddocr / OpenCV 自动识别不稳定时（典型：拼图块重着色/背景像素扰动导致 Canny/Sobel/模板匹配失效），降级为人工接管。人工接管有两种形式：
 
 ```bash
 python scripts/click_gap.py bg.jpg front.png --scale 2
@@ -61,7 +61,7 @@ python scripts/click_gap.py bg.jpg front.png --scale 2
 # → ESC 取消输出 NO_CLICK
 ```
 
-输出 x 坐标直接喂给 final.js / final.py 的 `buildCheckData(token, x, width, trust)`。
+输出 x 坐标按 answer JSON 契约（`captcha-overview.md`）组装为 `offset.x`，交给本 case 的 `result/src/solver.*` 或直接进 `final` 入口的 solve 阶段；具体接口形态由 case adapter 决定，不使用任何厂商专属函数名。
 
 **形式二：RuyiTrace 窗口完整手动通过**——用户在 RuyiTrace Firefox 窗口手动完成验证码交互（点击/拖拽/登录），获取成功链路基线（HAR/NDJSON），用于取证分析或验证加密逻辑正确性。
 

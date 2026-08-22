@@ -107,7 +107,7 @@ node scripts/check_success_baseline.js --file success_samples.json --markdown
 2. 如果连续失败不足 5 次，继续收集样本和诊断证据，不急于切平台。
 3. 如果同一方案已有至少 1 次成功，不触发切换；输出“当前方案可用但需优化稳定性”，并继续分析失败样本。
 4. 如果失败原因仍明确属于图片识别、坐标映射、轨迹、切片乱序未还原、补环境/浏览器环境或 challenge 过期，优先修复对应问题，不急于切平台。
-5. 如果连续 5 次失败且无成功，图片/坐标/轨迹/切片还原/补环境/challenge 新鲜度均为 `ok`，输出 `escalation_decision: recommend-platform-control`，主动建议切换到打码平台做授权 QA 对照。
+5. 如果连续 5 次失败且无成功，图片/坐标/轨迹/切片还原/补环境/challenge 新鲜度均为 `ok`：当前方案**不是**人工接管时，先输出 `escalation_decision: try-manual-takeover`，降级人工接管（`click_gap.py` / RuyiTrace 窗口手动通过）做对照；当前方案已是人工接管或人工不适用（需自动化/规模化）时，输出 `escalation_decision: recommend-platform-control`，切换到打码平台做授权 QA 对照。与 `captcha-solving-handoff.md` 的「②人工接管 → ③打码平台」优先级链一致。
 6. `pow-challenge`、`waf-challenge`、`biometric-liveness` 不默认推荐普通打码平台；优先走官方协议、浏览器环境/厂商日志诊断、人工复核或厂商支持。
 
 复盘脚本示例：
@@ -224,4 +224,4 @@ attempts JSON 可以使用这个最小结构：
 - 图像识别、坐标映射、轨迹、切片乱序还原、补环境或 challenge 过期仍有明确异常：优先修复对应问题，不切换平台。
 - 平台任务失败：检查题型、sitekey/pageurl/action、TTL、代理/IP/session、图片坐标系。
 - 真实网页失败：优先诊断环境、浏览器模式、DPR、坐标映射、challenge 过期和厂商绑定。
-- 协议链路验证失败（非浏览器）：先加坐标扫描（人工/打码坐标误差 6-13px 是单点必 false 的主因），再怀疑轨迹/加密；成功样本先全字段解密（易盾 m 空串陷阱见 captcha-providers.md）
+- 协议链路验证失败（非浏览器）：**先读 verify 响应的错误码/错误语义归因**（对照厂商知识库与本次成功样本，SKILL.md REAL_VERIFY 的六类失败区分同样适用），再加坐标扫描（人工/打码坐标存在像素级误差，单点提交是协议链路失败主因；扫描步长按案例实测定，参考 `cases/yidun-jigsaw.md`），再怀疑轨迹/加密；成功样本先全字段解密（厂商字段陷阱见 captcha-providers.md）

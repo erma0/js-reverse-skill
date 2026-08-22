@@ -1,7 +1,9 @@
-# captcha-verify-py 验证码逆向交付模板（Python 版）
+# captcha-verify-py 验证码逆向交付骨架（Python 版）
 
-验证码逆向专用模板（load → solve → verify 三段链路 + 业务接口消费凭据），Python 版。
+验证码逆向通用骨架（load → solve → verify 三段链路 + 业务接口消费凭据），Python 版。
 与 `captcha-verify/`（Node 版）的区别：solver 直接 `import ddddocr`，答案层工具链原生可用，无需跨语言桥接。
+
+本目录只提供接口骨架，不内置任何真实平台协议。厂商、版本、接口顺序、HTTP 方法、JSONP、字段名、加密和成功凭据都必须从本 case 的抓包与 RuyiTrace 证据实现到 `result/src/adapter.py`。
 
 ## 何时选 Python 版
 
@@ -14,7 +16,7 @@
 | 文件 | 作用 |
 |------|------|
 | `final.py` | 唯一执行入口（带 `__main__` 守卫）：完整链路自验 + 可被 import 调用 |
-| `config.json` | 外置配置（与 Node 版字段一致，可共用） |
+| `config.json` | 外置配置（目标页、case 标识和 solver 配置；不预填平台接口） |
 | `requirements.txt` | 依赖契约（curl_cffi + ddddocr + opencv + pillow + numpy） |
 
 ## 使用方式
@@ -23,25 +25,26 @@
    ```
    cp templates/captcha-verify-py/final.py result/
    cp templates/captcha-verify-py/config.json result/
+   cp templates/captcha-verify-py/adapter_example.py result/src/adapter.py
    cp templates/captcha-verify-py/requirements.txt result/
    ```
 2. 从 `templates/python-request/client.py` 复制 TLS 客户端到 `result/src/request/client.py`
-3. 实现 `result/src/verifier.py`（加密入口：`encrypt_verify_param` + `build_verify_payload`，参考 `references/captcha/captcha-request-chain.md`）
+3. 实现 `result/src/adapter.py`，至少提供 `load_challenge`、`resolve_assets`、`prepare_answer`、`build_verify_request`、`parse_verify_response`、`consume_credential`
 4. 实现 `result/src/solver.py`（答案求解：`solve(image_bytes, captcha_type, options)` → answer dict，参考 `references/captcha/captcha-solving-handoff.md`）
-5. 实现 `result/src/track.py`（轨迹生成：`generate_motion_track`，可包装 `scripts/generate_motion_track.py` 或用 Python 重写）
+5. 轨迹生成或行为构造由 adapter / solver 按本 case 证据决定，不使用默认通用轨迹冒充真实协议
 
 ## 三段链路结构
 
 ```
 final.py（唯一执行入口）
-  ├── ① load_challenge()   → 拿 challenge + 素材地址（load/register 接口）
+  ├── ① adapter.load_challenge()   → 按本 case 证据完成 bootstrap/load 链
   │     └── result/src/request/client.py（TLS 客户端，复制自 python-request/）
   ├── ② solve_captcha()    → 下载素材 → 本地求解 → answer JSON（含 offset/points/track/challenge_binding）
   │     ├── result/src/solver.py（ddddocr / OpenCV / 打码平台适配器，直接 import ddddocr）
   │     └── result/src/track.py（轨迹生成，slider/drag-drop/scratch/trace）
-  ├── ③ verify_chain()     → 加密 answer+track → 提交 → 换取通过凭据（validate/seccode/ticket/pass）
-  │     └── result/src/verifier.py（encrypt_verify_param + build_verify_payload）
-  └── ④ call_business_api() → 业务接口消费凭据
+  ├── ③ adapter.build_verify_request() → 按本 case 原始请求语义构造 verify 请求
+  │     └── adapter.parse_verify_response() → 按本 case 响应格式解析凭据
+  └── ④ adapter.consume_credential() → 业务接口消费凭据
 ```
 
 ## solver.py 示例（ddddocr 直接调用）
@@ -78,5 +81,6 @@ def solve(image_bytes, captcha_type, options=None):
 
 - challenge 一次性：每次验证必须从 load 重新走，禁止复用旧 challenge
 - 素材下载用与业务请求一致的 TLS 指纹客户端 + Session cookie（部分厂商素材 URL 绑 Session）
-- 凭据形态按厂商不同（极验 validate/seccode、腾讯 ticket+randstr、数美 pass+rid），`call_business_api` 按实际组装
+- 凭据形态按 case 不同，由 adapter 按证据实现
+- 没有 adapter 时模板必须失败，不得猜测平台协议或把示例字段当作通用字段
 - config.json 与 Node 版完全一致，同一份配置可互换两版交付物

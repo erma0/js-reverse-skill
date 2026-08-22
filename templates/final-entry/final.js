@@ -16,6 +16,11 @@
  *   node final.js --sign-only              # 仅输出签名，不发真实请求（需用户明确指定）
  *   node final.js --cookie "name=value"    # 注入用户 cookie（覆盖设备 cookie 同名项）
  *
+ * 成功语义（自验）：HTTP 200 ≠ 成功。必须在 config.json 配置 responseValidation
+ * （jsonPath / minLength / contains，从本 case 真实成功样本提取）才能判「通过」；
+ * 未配置时所有 200 响应一律记为「未判定」，整体不能宣称通过。
+ * 退出码：0=全部通过；1=入口异常；2=存在失败；3=存在未判定（缺 responseValidation）。
+ *
  * 并发注意：signer 通常持有 vm context / WASM 实例 / Cookie 状态，非无状态。
  * 高并发场景需调用方自行池化 signer 实例（多个独立 vm context），不要跨线程/进程共享同一 signer。
  */
@@ -73,7 +78,8 @@ function loadConfig() {
       SIGN_PARAM_NAME: 'sign',
       DEVICE_COOKIE: '',
       extraHeaders: {},
-      // 可选：响应校验规则。配置后自验会按规则判定业务数据正确性，未配置则只校验 HTTP 200 + 非空响应体
+      // 响应校验规则：自验按规则判定业务数据是否成功。必须从本 case 真实成功样本提取。
+      // 未配置时 HTTP 200 只记「未判定」，拒绝宣称通过（风控接口常以 200 + 错误码返回）。
       // 形如 { "jsonPath": "data.list", "minLength": 1, "contains": "success" }
       responseValidation: null,
     },
@@ -210,21 +216,27 @@ function summarizeParameters(params) {
 }
 
 /**
- * 校验响应体是否符合预期业务数据。
- * 未配置 responseValidation 时退化为「非空即通过」。
- * 配置后按 jsonPath / minLength / contains 三选一或多选校验。
+ * 校验响应体是否符合预期业务数据（三态判定）。
  * @param {string} body
  * @param {Object} [rule] CONFIG.responseValidation
- * @returns {{ ok: boolean, reason: string }}
+ * @returns {{ judgment: 'pass'|'fail'|'unverified', reason: string }}
+ *   - pass:       规则全部命中，可计为成功
+ *   - fail:       规则命中失败或响应体为空
+ *   - unverified: 未配置 responseValidation —— HTTP 200 只代表传输成功，不能证明业务成功
  */
-function validateResponseBody(body, rule) {
-  if (!body) return { ok: false, reason: '响应体为空' };
-  if (!rule || typeof rule !== 'object') return { ok: true, reason: '' };
+function judgeResponseBody(body, rule) {
+  if (!body) return { judgment: 'fail', reason: '响应体为空' };
+  if (!rule || typeof rule !== 'object') {
+    return {
+      judgment: 'unverified',
+      reason: '未配置 responseValidation：HTTP 200 不能证明业务成功，请从真实成功样本提取响应判定规则写入 config.json',
+    };
+  }
 
   // contains：响应体包含指定字符串（适用于非 JSON 响应或宽松校验）
   if (typeof rule.contains === 'string' && rule.contains) {
     if (!body.includes(rule.contains)) {
-      return { ok: false, reason: `响应体未包含期望字符串 "${rule.contains}"` };
+      return { judgment: 'fail', reason: `响应体未包含期望字符串 "${rule.contains}"` };
     }
   }
 
@@ -232,7 +244,7 @@ function validateResponseBody(body, rule) {
   if (typeof rule.jsonPath === 'string' && rule.jsonPath) {
     let parsed;
     try { parsed = JSON.parse(body); } catch (e) {
-      return { ok: false, reason: `响应体非 JSON：${e.message}` };
+      return { judgment: 'fail', reason: `响应体非 JSON：${e.message}` };
     }
     const segments = rule.jsonPath.split('.');
     let cur = parsed;
@@ -241,17 +253,17 @@ function validateResponseBody(body, rule) {
       cur = cur[seg];
     }
     if (cur == null) {
-      return { ok: false, reason: `jsonPath "${rule.jsonPath}" 未命中` };
+      return { judgment: 'fail', reason: `jsonPath "${rule.jsonPath}" 未命中` };
     }
     if (typeof rule.minLength === 'number') {
       const len = Array.isArray(cur) ? cur.length : String(cur).length;
       if (len < rule.minLength) {
-        return { ok: false, reason: `jsonPath "${rule.jsonPath}" 长度 ${len} < minLength ${rule.minLength}` };
+        return { judgment: 'fail', reason: `jsonPath "${rule.jsonPath}" 长度 ${len} < minLength ${rule.minLength}` };
       }
     }
   }
 
-  return { ok: true, reason: '' };
+  return { judgment: 'pass', reason: '' };
 }
 
 // ============================================================
@@ -286,6 +298,8 @@ async function main() {
   // ----- 创建请求 Session -----
   const session = await createClient({ userCookie: opts.userCookie });
   const jar = new CookieJar();
+  // Cookie 生命周期交给请求层：每次请求自动携带 jar、响应后自动合并 Set-Cookie、过期自动清理
+  session.defaults({ jar });
 
   try {
     // ----- 动态资源刷新（可选）-----
@@ -300,6 +314,7 @@ async function main() {
     console.log(`\n--- 交叉验证 ${opts.verify} 次 ---`);
     let successCount = 0;
     let failCount = 0;
+    let unverifiedCount = 0;
     const attempts = [];
 
     for (let i = 0; i < opts.verify; i++) {
@@ -308,6 +323,7 @@ async function main() {
         httpStatus: 0,
         parameterSummary: '参数生成失败',
         sessionStage: 'target-api',
+        judgment: 'error',
         responseValid: false,
       };
       try {
@@ -319,22 +335,28 @@ async function main() {
         console.log(`  cookie: ${(jar.toString() || '').slice(0, 80)}...`);
 
         const res = await session.request(req.method, req.url, {
-          headers: Object.assign({ Cookie: jar.toString() }, req.headers),
+          headers: req.headers,
         });
 
         console.log(`  状态码: ${res.status}`);
         const body = res.body == null ? '' : (typeof res.body === 'string' ? res.body : JSON.stringify(res.body));
         console.log(`  响应: ${body.slice(0, 200)}`);
 
-        jar.merge(res.headers['set-cookie']);
+        attempt.httpStatus = res.status;
         if (res.status !== 200) {
           failCount++;
+          attempt.judgment = 'fail';
           console.log(`  [WARN] 状态码非 200`);
         } else {
-          // 业务数据正确性校验：未配置 responseValidation 时退化为「非空即通过」
-          const check = validateResponseBody(body, CONFIG.responseValidation);
-          if (check.ok) {
+          // 业务数据判定：未配置 responseValidation 时记「未判定」，不能计为成功
+          const check = judgeResponseBody(body, CONFIG.responseValidation);
+          attempt.judgment = check.judgment;
+          attempt.responseValid = check.judgment === 'pass';
+          if (check.judgment === 'pass') {
             successCount++;
+          } else if (check.judgment === 'unverified') {
+            unverifiedCount++;
+            console.log(`  [UNVERIFIED] ${check.reason}`);
           } else {
             failCount++;
             console.log(`  [WARN] 业务数据校验失败：${check.reason}`);
@@ -342,8 +364,10 @@ async function main() {
         }
       } catch (e) {
         failCount++;
+        attempt.judgment = 'error';
         console.log(`  [FAIL] 异常: ${e.message}`);
       }
+      attempts.push(attempt);
 
       if (i < opts.verify - 1) {
         await sleep(1000 + Math.random() * 2000);
@@ -351,10 +375,21 @@ async function main() {
     }
 
     console.log(`\n=== 验证结果 ===`);
-    console.log(`成功: ${successCount} / ${opts.verify}`);
+    console.log(`通过: ${successCount} / ${opts.verify}`);
     console.log(`失败: ${failCount} / ${opts.verify}`);
-    if (successCount < opts.verify) {
+    if (unverifiedCount > 0) {
+      console.log(`未判定: ${unverifiedCount} / ${opts.verify}（未配置 responseValidation，拒绝宣称通过）`);
+    }
+    writeValidationRecord({
+      mode: 'real-request',
+      responseValidation: CONFIG.responseValidation,
+      summary: { total: opts.verify, pass: successCount, fail: failCount, unverified: unverifiedCount },
+      attempts,
+    });
+    if (failCount > 0) {
       process.exitCode = 2;
+    } else if (unverifiedCount > 0) {
+      process.exitCode = 3;
     }
   } finally {
     if (session.close) {

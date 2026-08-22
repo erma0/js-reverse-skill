@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// 验证码成功样本基线评估（Phase 5）。
+// 验证码成功样本基线评估（REAL_VERIFY 阶段前置）。
 // 读 success_samples.json，统计每个 (authorization_scope, captcha_type) 的成功次数，
 // 规则：同一 scope 至少 5 次成功；新类型至少 2 次成功。不足时输出 missing 清单。
 // 与 references/captcha/verification-workflow.md 契约对齐。

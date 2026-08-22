@@ -13,7 +13,7 @@
 | `check_node_leakage.js` | 检查 Node 宿主常见泄露变量与 Web API 兼容层，给出阻断清单 | `node scripts/check_node_leakage.js --markdown` |
 | `check_node_runtime_compat.js` | 检测当前 Node 版本、ABI 与 nvm 可用性并给出恢复建议，不执行安装或切换 | `node scripts/check_node_runtime_compat.js --required-version 22.0.0 --markdown` |
 | `check_tls_clients.js` | 检测 TLS 指纹兼容客户端（CycleTLS / impers / curl-cffi-node / curl_cffi / cyCronet） | `node scripts/check_tls_clients.js --markdown` |
-| `check_web_verify_patcher.js` | 检测可选参考资源 web-verify-patcher 是否可用 | `node scripts/check_web_verify_patcher.js --markdown` |
+| `check_web_verify_patcher.js` | 检测可选参考资源 web-verify-patcher 是否可用。注：web-verify-patcher 是**外部可选 skill**，不在本仓库内；references 中提及它处均为方法论参考，缺失时按本仓流程执行，不构成阻塞依赖 | `node scripts/check_web_verify_patcher.js --markdown` |
 | `precheck_runtime.js` | 执行 Node.js 侧六项纯计算预检 | `node scripts/precheck_runtime.js --markdown` |
 
 ## 案例与项目管理（7 个）
@@ -99,7 +99,7 @@
 | `map_coordinates.py` | 将图片像素坐标换算为 CSS / 页面坐标，处理 DPR、偏移与滚动 | `python scripts/map_coordinates.py --image-size 300x150 --display-size 300x150 --point 120,75 --pretty` |
 | `generate_motion_track.py` | 生成滑块、拖放、刮刮卡或连线轨迹 JSON | `python scripts/generate_motion_track.py --mode slider --distance 128 --duration-ms 1100 --pretty` |
 | `click_gap.py` | OpenCV 人工点击缺口工具，输出缺口左边缘 CSS x 坐标 | `python scripts/click_gap.py bg.jpg front.png --scale 2` |
-| `solver_request_template.py` | 生成打码平台请求占位模板 | `python scripts/solver_request_template.py --platform yundama --captcha-type slide --pretty` |
+| `solver_request_template.py` | 生成打码平台请求占位模板 | `python scripts/solver_request_template.py --platform yundama --captcha-type slider --pretty` |
 
 ## 验证码验证门禁（3 个）
 

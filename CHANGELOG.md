@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 2.3.50 - 2026-08-22
+
+### 变更
+- **验证码模板 provider-neutral 化**：`templates/captcha-verify/` 与 `captcha-verify-py/` 改为纯流程骨架 + 六方法 adapter 契约（`adapter.example.js` / `adapter_example.py`），config 全占位；SKILL.md 纯协议红线新增模板边界条款——通用模板不得预填任何厂商接口名、字段名、HTTP 方法、JSONP、加密结构、凭据字段或默认轨迹，平台细节一律由本 case 抓包/RuyiTrace/成功样本驱动写入 `result/src/adapter.*`。
+- **入口成功语义收紧（HTTP 200 ≠ 成功）**：`final-entry/final.js` 与 `python-request/final.py` 自验引入 `responseValidation`（jsonPath/minLength/contains）三态判定——未配置规则时所有 200 响应记「未判定」，退出码 3，拒绝宣称通过（0=通过/1=异常/2=失败/3=未判定）；修复 Node 版 attempts 从未落盘、`验证记录.json` 仅 sign-only 模式写入的缺陷，两版统一写 `mode/responseValidation/summary{pass,fail,unverified}/attempts[].judgment`。
+- **请求层 Cookie 生命周期 + 原始请求描述符**：`node-request/client.js` 与 `python-request/client.py` 的 CookieJar 解析 Set-Cookie 属性（Domain/Path/Max-Age/Expires），Max-Age<=0 或过期即删除；`session.request` 支持 `{method, url, opts}` 描述符单对象形态（可直接透传 trace 导出/adapter 契约请求）；`session.defaults({jar})` 后自动携带 Cookie、响应后自动合并 Set-Cookie，显式 Cookie 头优先；Python 版补齐 `defaults()`/`body`/多条 Set-Cookie 提取。
+- **T1/T2 厂商知识分级政策**：SKILL.md 新增红线——识别指纹（参数名↔算法族、厂商 Cookie/组件名、响应码特征，T1）只允许留在标注过的识别参考与分类脚本；协议语义（字段语义、加密结构、接口链、实测轨迹参数，T2）只进 `captcha-providers.md`/`cases/`/case adapter 并带验证日期。algorithm-families、env-iframe、ip-risk-control、ast-patterns、SKILL.md 信号表加 T1 分级声明；experience-rules 易盾 m 空串语义、verification-workflow 案例实测数字、handoff 的 buildCheckData 厂商函数名、模板与 click_gap 易盾举例全部泛化为指针。
+
+### 修复
+- **classify_verify.py 路由死链（识别→下一步闭环断裂）**：PLAYBOOKS/VERIFICATION_FLOW 输出的 53 处 `references/*.md` 裸路径全部重映射到 `references/captcha/`、`references/tooling/` 真实路径；不存在的 `scripts/inspect_assets.py` 引用清零；新增语序点选题型 `word-order-click`（信号/playbook/求解链/自测），题型数对齐为 25 信号题型 + unknown-custom = 26 标签；self-test 从 5 例（全 slider）扩到 7 例并支持无 provider 期望用例。
+- **验证码答案层门禁从宣称变实现**：`check_final_artifact.js` 新增验证码交付检测（config 含 captcha 对象或引用 adapter 契约），强制校验 `result/src/adapter.*` 与答案层接入（`src/solver.*` 或等效求解代码）同时存在，缺一 FAIL，自带 3 组自测；`captcha-solving-handoff.md` 的门禁描述同步对齐。
+- **Step 2 可否跳过三文档互斥**：SKILL.md 状态机正式建模 `MATERIALS_FALLBACK` 节点（RuyiTrace 工具不可用且自动安装失败 + 用户材料经 check_evidence.js 校验通过 → CASE_LOOKUP，强制声明取证偏差、REAL_VERIFY 不可豁免），decision-tree 阻塞点#5、trace-flow 硬约束、SKILL.md IMPLEMENT 前置四处统一为同一语义。
+- **验证码门禁挂进主状态机**：SKILL.md 第 7 节挂 classify_verify + check_captcha_answer + 坐标来源 A/B/C 判定，第 9 节挂模板骨架与 solver 交付要求，第 10 节挂 success_baseline + attempts 复盘；此前按主文档执行的 agent 可完全绕过验证码专属门禁。
+- **5 连败决策机与优先级链不同轨**：`check_verification_attempts.js` 在 recommend-platform-control 之前补 `try-manual-takeover`（当前方案已是人工时才直接切平台），与 handoff「②人工接管 → ③打码平台」链一致；"Phase 5" 编号残留清理。
+- **文档失同步**：phase-flow 参数分类对齐 SKILL.md 六分类、IDENTIFY 定位为取证期观察（正式节点以状态机为准）、必填措辞修正；`check_fingerprint_fixture.js` 统一为「有 env 必跑/纯算豁免」；trace-runtime-conformance 对拍循环按实现路径分层（B/C/D 强制、A 豁免）；cleanup.md 目录树升为唯一权威版本（合并 snapshots/static/extracted/forensic/ruyi-trace/阶段报告）；样本对比放宽为 ≥2 组（区分计数器与随机存疑时补第 3 组）；web-verify-patcher 标注为外部可选 skill。
+- **验证码流补强**：协议失败先读 verify 错误码归因再进五键诊断；凭据 TTL/一次性消费实测提示（captcha-request-chain）；移动 H5 touch 轨迹形态说明（generate_motion_track 只产鼠标式，touch 由 case adapter 适配）；scripts/README 示例 `--captcha-type slide` 修正为 `slider`。
+
 ## 2.3.49 - 2026-08-22
 
 ### 修复

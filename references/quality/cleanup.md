@@ -11,21 +11,27 @@
 - **临时内容集中存放**：测试文件必须放入 `case/tmp/`；禁止在 case 根目录散落 `test_debug.js`、`capture_network.py`、`extract_xxx.py` 等脚本。
 - **取证脚本优先通用**：抓包/trace/提取优先使用 skill 的 `scripts/` 通用脚本；如需临时脚本放 `case/tmp/`，用完清理。
 - **脚本测试使用 finally**：编写测试命令时使用 `try/finally` 或等价逻辑，确保失败时也删除临时目录。
-- **每次交付前复查**：最终回复用户前，必须执行一次清理 dry-run 或说明未执行原因；若 dry-run 发现普通临时产物，应立即 `--force` 清理并再次 dry-run。最终交付还必须运行 `check_fingerprint_fixture.js` 与 `check_final_artifact.js`，并手动复核 NativeProtect 保护证据。
+- **每次交付前复查**：最终回复用户前，必须执行一次清理 dry-run 或说明未执行原因；若 dry-run 发现普通临时产物，应立即 `--force` 清理并再次 dry-run。最终交付还必须运行 `check_final_artifact.js` 并手动复核 NativeProtect 保护证据；`check_fingerprint_fixture.js` 仅当 `result/src/env/` 存在（补环境交付）时必跑（可带 `--require canvas,webgl,audio,dom`），纯算法/无 env 交付自动豁免（与 phase-flow.md 5.3/5.4 门禁一致）。
 - **敏感材料例外**：登录态 Profile、Cookie、localStorage、IndexedDB、Authorization 等敏感材料不自动删除或交付；删除前必须确认用户意图。
 
 ## 目录约定
 
-case 根目录只允许两个子目录：
+case 根目录只允许两个子目录（本树为全项目唯一权威版本，`dynamic-resource.md`、`phase-flow.md` 的目录引用均以此为准）：
 
 ```text
 <case 根>/
 ├── case/              # 取证材料
 │   ├── js/
-│   │   ├── original/  # 原始 JS
-│   │   └── pretty/    # 格式化 JS
+│   │   ├── original/  # 原始 JS（取证落盘）
+│   │   ├── pretty/    # 格式化 JS
+│   │   ├── snapshots/ # 动态资源快照（只用于分析，见 dynamic-resource.md）
+│   │   ├── static/    # 已确认可长期复用的静态 bundle
+│   │   └── extracted/ # 抠出的算法/模块（如 sign_logic.js）
+│   ├── forensic/      # 取证产物：document.html / bodies/ / wasm/ / target-hits.json 等
+│   ├── ruyi-trace/    # RuyiTrace NDJSON 日志（logs/）
 │   ├── fixtures/      # 采样 fixture
-│   ├── notes/         # 分析笔记
+│   ├── notes/         # 分析笔记（ruyitrace-summary / entry-chain / missing-env-priority 等）
+│   ├── 阶段报告/      # 默认不生成；多轮复杂 case 或用户要求时按 stage-reports.md 生成
 │   └── tmp/           # 临时脚本（调试/抓包/提取），用完清理
 └── result/            # 交付物
     ├── final.js       # 唯一执行入口

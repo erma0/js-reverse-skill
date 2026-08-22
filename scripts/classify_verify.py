@@ -406,6 +406,12 @@ TYPE_SIGNALS: dict[str, list[Signal]] = {
         Signal("命中点选英文文案", r"picture-click|click-select|click captcha|icon captcha|\b(?:click|select|tap)\b.{0,40}\b(?:word|icon|object|target|in order|picture|image)\b", 2.5),
         Signal("命中坐标文案", r"坐标|目标点|click coordinates|target coordinates", 2),
     ],
+    "word-order-click": [
+        Signal("命中语序点选组句文案", r"语序点选|连词成句|组(?:成|合).{0,8}(?:一句话|通顺|句子|短语)", 3),
+        Signal("命中语序点击字词文案", r"依次点击.{0,10}(?:汉字|文字|词语|字词)|按(?:正确)?顺序点击.{0,10}(?:字|词|文字)", 3),
+        Signal("命中语序点选英文文案", r"\b(?:word order|click the words|words in (?:the )?correct order|form (?:a|the) (?:sentence|phrase)|sentence captcha)\b", 2.5),
+        Signal("命中语序字段", r"\b(?:wordOrder|word_order|wordClick|word_click|sentenceOrder)\b", 2.5),
+    ],
     "rotate": [
         Signal("命中旋转中文文案", r"旋转|转正|拖动.*(?:角度|旋转)|调整.*方向", 3),
         Signal("命中旋转英文文案", r"\b(?:rotate|rotation|angle|upright|orientation)\b", 2.5),
@@ -447,31 +453,32 @@ TILE_SCRAMBLE_SIGNALS = [
 
 
 PLAYBOOKS = {
-    "audio": "references/solution-playbooks.md#audio",
-    "drag-drop": "references/solution-playbooks.md#drag-drop",
-    "trace-draw": "references/solution-playbooks.md#trace-draw",
-    "scratch": "references/solution-playbooks.md#scratch",
-    "image-restore": "references/solution-playbooks.md#image-restore",
-    "area-select": "references/solution-playbooks.md#area-select",
-    "difference-click": "references/solution-playbooks.md#difference-click",
-    "font-identify": "references/solution-playbooks.md#font-identify",
-    "semantic-reasoning": "references/solution-playbooks.md#semantic-reasoning",
-    "game-challenge": "references/solution-playbooks.md#game-challenge",
-    "pow-challenge": "references/solution-playbooks.md#pow-challenge",
-    "risk-score": "references/solution-playbooks.md#risk-score",
-    "one-click": "references/solution-playbooks.md#one-click",
-    "multi-step": "references/solution-playbooks.md#multi-step",
-    "qa-logic": "references/solution-playbooks.md#qa-logic",
-    "biometric-liveness": "references/solution-playbooks.md#biometric-liveness",
-    "text": "references/solution-playbooks.md#text",
-    "math": "references/solution-playbooks.md#math",
-    "slider": "references/solution-playbooks.md#slider",
-    "click-select": "references/solution-playbooks.md#click-select",
-    "rotate": "references/solution-playbooks.md#rotate",
-    "grid": "references/solution-playbooks.md#grid",
-    "token-widget": "references/solution-playbooks.md#token-widget",
-    "waf-challenge": "references/solution-playbooks.md#waf-challenge",
-    "unknown-custom": "references/solution-playbooks.md#unknown-custom",
+    "audio": "references/captcha/solution-playbooks.md#audio",
+    "drag-drop": "references/captcha/solution-playbooks.md#drag-drop",
+    "trace-draw": "references/captcha/solution-playbooks.md#trace-draw",
+    "scratch": "references/captcha/solution-playbooks.md#scratch",
+    "image-restore": "references/captcha/solution-playbooks.md#image-restore",
+    "area-select": "references/captcha/solution-playbooks.md#area-select",
+    "difference-click": "references/captcha/solution-playbooks.md#difference-click",
+    "font-identify": "references/captcha/solution-playbooks.md#font-identify",
+    "semantic-reasoning": "references/captcha/solution-playbooks.md#semantic-reasoning",
+    "game-challenge": "references/captcha/solution-playbooks.md#game-challenge",
+    "pow-challenge": "references/captcha/solution-playbooks.md#pow-challenge",
+    "risk-score": "references/captcha/solution-playbooks.md#risk-score",
+    "one-click": "references/captcha/solution-playbooks.md#one-click",
+    "multi-step": "references/captcha/solution-playbooks.md#multi-step",
+    "qa-logic": "references/captcha/solution-playbooks.md#qa-logic",
+    "biometric-liveness": "references/captcha/solution-playbooks.md#biometric-liveness",
+    "text": "references/captcha/solution-playbooks.md#text",
+    "math": "references/captcha/solution-playbooks.md#math",
+    "slider": "references/captcha/solution-playbooks.md#slider",
+    "click-select": "references/captcha/solution-playbooks.md#click-select",
+    "word-order-click": "references/captcha/solution-playbooks.md#click-select",
+    "rotate": "references/captcha/solution-playbooks.md#rotate",
+    "grid": "references/captcha/solution-playbooks.md#grid",
+    "token-widget": "references/captcha/solution-playbooks.md#token-widget",
+    "waf-challenge": "references/captcha/solution-playbooks.md#waf-challenge",
+    "unknown-custom": "references/captcha/solution-playbooks.md#unknown-custom",
 }
 
 
@@ -496,6 +503,7 @@ NEXT_EVIDENCE = {
     "math": ["表达式图片/文本", "运算符集合", "服务端接受的答案格式"],
     "slider": ["背景图", "滑块/拼图块图片", "轨道宽度", "厂商 verify 接口名"],
     "click-select": ["题面文本", "完整挑战截图", "元素边界框", "目标点击顺序"],
+    "word-order-click": ["目标句子/短语原文", "候选字元素边界与顺序", "点击顺序判定规则", "坐标系"],
     "rotate": ["挑战图片", "轨道宽度", "角度范围", "已知校准样本"],
     "grid": ["题面文本", "完整网格截图", "格子边界", "轮次/状态信息"],
     "token-widget": ["脚本/iframe URL", "sitekey", "页面 URL", "action/cdata/rqdata", "callback 名"],
@@ -506,125 +514,129 @@ NEXT_EVIDENCE = {
 
 VERIFICATION_FLOW_BY_TYPE: dict[str, dict[str, list[str]]] = {
     "text": {
-        "references": ["references/verification-workflow.md", "references/open-source-recipes.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md"],
+        "scripts": ["scripts/solver_request_template.py"],
     },
     "math": {
-        "references": ["references/verification-workflow.md", "references/open-source-recipes.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md"],
+        "scripts": ["scripts/solver_request_template.py"],
     },
     "slider": {
         "references": [
-            "references/verification-workflow.md",
-            "references/open-source-recipes.md",
-            "references/motion-and-coordinate.md",
-            "references/provider-execution-notes.md",
+            "references/captcha/verification-workflow.md",
+            "references/captcha/open-source-recipes.md",
+            "references/captcha/captcha-motion-encryption.md", "references/captcha/gap-coordinate-source.md",
+            "references/captcha/provider-execution-notes.md",
         ],
-        "scripts": ["scripts/inspect_assets.py", "scripts/map_coordinates.py", "scripts/generate_motion_track.py"],
+        "scripts": ["scripts/map_coordinates.py", "scripts/generate_motion_track.py"],
     },
     "click-select": {
-        "references": ["references/verification-workflow.md", "references/open-source-recipes.md", "references/motion-and-coordinate.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/map_coordinates.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md", "references/captcha/captcha-motion-encryption.md", "references/captcha/gap-coordinate-source.md"],
+        "scripts": ["scripts/map_coordinates.py", "scripts/solver_request_template.py"],
+    },
+    "word-order-click": {
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md", "references/captcha/gap-coordinate-source.md"],
+        "scripts": ["scripts/map_coordinates.py", "scripts/solver_request_template.py"],
     },
     "rotate": {
-        "references": ["references/verification-workflow.md", "references/open-source-recipes.md", "references/motion-and-coordinate.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/map_coordinates.py", "scripts/generate_motion_track.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md", "references/captcha/captcha-motion-encryption.md", "references/captcha/gap-coordinate-source.md"],
+        "scripts": ["scripts/map_coordinates.py", "scripts/generate_motion_track.py"],
     },
     "grid": {
-        "references": ["references/verification-workflow.md", "references/open-source-recipes.md", "references/motion-and-coordinate.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/map_coordinates.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md", "references/captcha/captcha-motion-encryption.md", "references/captcha/gap-coordinate-source.md"],
+        "scripts": ["scripts/map_coordinates.py", "scripts/solver_request_template.py"],
     },
     "audio": {
-        "references": ["references/verification-workflow.md", "references/open-source-recipes.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md"],
+        "scripts": ["scripts/solver_request_template.py"],
     },
     "drag-drop": {
-        "references": ["references/verification-workflow.md", "references/motion-and-coordinate.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/map_coordinates.py", "scripts/generate_motion_track.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/captcha-motion-encryption.md", "references/captcha/gap-coordinate-source.md"],
+        "scripts": ["scripts/map_coordinates.py", "scripts/generate_motion_track.py"],
     },
     "trace-draw": {
-        "references": ["references/verification-workflow.md", "references/motion-and-coordinate.md", "references/open-source-recipes.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/generate_motion_track.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/captcha-motion-encryption.md", "references/captcha/gap-coordinate-source.md", "references/captcha/open-source-recipes.md"],
+        "scripts": ["scripts/generate_motion_track.py"],
     },
     "scratch": {
-        "references": ["references/verification-workflow.md", "references/motion-and-coordinate.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/generate_motion_track.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/captcha-motion-encryption.md", "references/captcha/gap-coordinate-source.md"],
+        "scripts": ["scripts/generate_motion_track.py"],
     },
     "image-restore": {
-        "references": ["references/verification-workflow.md", "references/open-source-recipes.md", "references/motion-and-coordinate.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/analyze_tile_restore.py", "scripts/map_coordinates.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md", "references/captcha/captcha-motion-encryption.md", "references/captcha/gap-coordinate-source.md"],
+        "scripts": ["scripts/analyze_tile_restore.py", "scripts/map_coordinates.py", "scripts/solver_request_template.py"],
     },
     "area-select": {
-        "references": ["references/verification-workflow.md", "references/open-source-recipes.md", "references/motion-and-coordinate.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/map_coordinates.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md", "references/captcha/captcha-motion-encryption.md", "references/captcha/gap-coordinate-source.md"],
+        "scripts": ["scripts/map_coordinates.py", "scripts/solver_request_template.py"],
     },
     "difference-click": {
-        "references": ["references/verification-workflow.md", "references/open-source-recipes.md", "references/motion-and-coordinate.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/map_coordinates.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md", "references/captcha/captcha-motion-encryption.md", "references/captcha/gap-coordinate-source.md"],
+        "scripts": ["scripts/map_coordinates.py", "scripts/solver_request_template.py"],
     },
     "font-identify": {
-        "references": ["references/verification-workflow.md", "references/open-source-recipes.md", "references/motion-and-coordinate.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/map_coordinates.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md", "references/captcha/captcha-motion-encryption.md", "references/captcha/gap-coordinate-source.md"],
+        "scripts": ["scripts/map_coordinates.py", "scripts/solver_request_template.py"],
     },
     "semantic-reasoning": {
-        "references": ["references/verification-workflow.md", "references/open-source-recipes.md", "references/motion-and-coordinate.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/map_coordinates.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md", "references/captcha/captcha-motion-encryption.md", "references/captcha/gap-coordinate-source.md"],
+        "scripts": ["scripts/map_coordinates.py", "scripts/solver_request_template.py"],
     },
     "game-challenge": {
         "references": [
-            "references/verification-workflow.md",
-            "references/provider-execution-notes.md",
-            "references/solver-platform-recipes.md",
+            "references/captcha/verification-workflow.md",
+            "references/captcha/provider-execution-notes.md",
+            "references/captcha/solver-platform-recipes.md",
         ],
-        "scripts": ["scripts/inspect_assets.py", "scripts/solver_request_template.py"],
+        "scripts": ["scripts/solver_request_template.py"],
     },
     "pow-challenge": {
-        "references": ["references/verification-workflow.md", "references/provider-execution-notes.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/provider-execution-notes.md"],
+        "scripts": ["scripts/solver_request_template.py"],
     },
     "risk-score": {
         "references": [
-            "references/verification-workflow.md",
-            "references/provider-execution-notes.md",
-            "references/solver-platform-recipes.md",
+            "references/captcha/verification-workflow.md",
+            "references/captcha/provider-execution-notes.md",
+            "references/captcha/solver-platform-recipes.md",
         ],
-        "scripts": ["scripts/inspect_assets.py", "scripts/solver_request_template.py"],
+        "scripts": ["scripts/solver_request_template.py"],
     },
     "one-click": {
-        "references": ["references/verification-workflow.md", "references/provider-execution-notes.md", "references/solver-platform-recipes.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/provider-execution-notes.md", "references/captcha/solver-platform-recipes.md"],
+        "scripts": ["scripts/solver_request_template.py"],
     },
     "multi-step": {
-        "references": ["references/verification-workflow.md", "references/open-source-recipes.md", "references/motion-and-coordinate.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/map_coordinates.py", "scripts/generate_motion_track.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md", "references/captcha/captcha-motion-encryption.md", "references/captcha/gap-coordinate-source.md"],
+        "scripts": ["scripts/map_coordinates.py", "scripts/generate_motion_track.py"],
     },
     "qa-logic": {
-        "references": ["references/verification-workflow.md", "references/open-source-recipes.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/open-source-recipes.md"],
+        "scripts": ["scripts/solver_request_template.py"],
     },
     "biometric-liveness": {
-        "references": ["references/verification-workflow.md", "references/provider-execution-notes.md"],
-        "scripts": ["scripts/inspect_assets.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/provider-execution-notes.md"],
+        "scripts": ["scripts/classify_verify.py"],
     },
     "token-widget": {
         "references": [
-            "references/verification-workflow.md",
-            "references/provider-execution-notes.md",
-            "references/solver-platform-recipes.md",
+            "references/captcha/verification-workflow.md",
+            "references/captcha/provider-execution-notes.md",
+            "references/captcha/solver-platform-recipes.md",
         ],
-        "scripts": ["scripts/inspect_assets.py", "scripts/solver_request_template.py"],
+        "scripts": ["scripts/solver_request_template.py"],
     },
     "waf-challenge": {
         "references": [
-            "references/verification-workflow.md",
-            "references/browser-acquisition.md",
-            "references/provider-execution-notes.md",
+            "references/captcha/verification-workflow.md",
+            "references/tooling/browser-acquisition.md",
+            "references/captcha/provider-execution-notes.md",
         ],
-        "scripts": ["scripts/inspect_assets.py", "scripts/solver_request_template.py"],
+        "scripts": ["scripts/solver_request_template.py"],
     },
     "unknown-custom": {
-        "references": ["references/verification-workflow.md", "references/captcha-types.md", "references/provider-products.md"],
-        "scripts": ["scripts/inspect_assets.py", "scripts/solver_request_template.py"],
+        "references": ["references/captcha/verification-workflow.md", "references/captcha/captcha-types.md", "references/captcha/provider-products.md"],
+        "scripts": ["scripts/solver_request_template.py"],
     },
 }
 
@@ -653,6 +665,12 @@ SOLUTION_OPTIONS: dict[str, dict[str, Any]] = {
         "fallback_platforms": ["云码/JFBYM 坐标/点选类型", "超级鹰坐标类型", "2Captcha Coordinates/ClickCaptcha", "CapSolver ComplexImageTask"],
         "when_to_switch": ["目标重叠", "题面语义复杂", "多轮点选或顺序评分导致本地模型不稳定"],
         "notes": "必须同时输出题面、目标顺序、截图坐标和元素相对坐标。",
+    },
+    "word-order-click": {
+        "open_source_first": ["ddddocr detection 检出候选字 + OCR 识别字面", "分词/语言模型把候选字排成通顺句子", "VLM 直接返回点击顺序"],
+        "fallback_platforms": ["云码/JFBYM 点选/语序类型", "超级鹰坐标类型", "2Captcha Coordinates/ClickCaptcha"],
+        "when_to_switch": ["候选字重叠或小字号导致检测不稳", "句子歧义大、语序模型错误率高"],
+        "notes": "输出点击顺序时必须与题面目标句子逐一核对；答案 = 字面识别 + 语序推理两层，缺一不可。",
     },
     "rotate": {
         "open_source_first": ["OpenCV 特征/主方向检测", "图像匹配估计角度", "VLM 辅助判断正向"],
@@ -1266,6 +1284,21 @@ SELF_TEST_CASES = [
         "expect_provider": "netease-yidun",
         "expect_type": "slider",
     },
+    {
+        "name": "语序点选（自研）",
+        "html": '<div class="captcha-word-panel">请依次点击文字，组成一句通顺的话</div>',
+        "url": [],
+        "text": ["请依次点击文字组成一句通顺的话", "word_order"],
+        "expect_provider": "custom-or-unknown",
+        "expect_type": "word-order-click",
+    },
+    {
+        "name": "PoW 工作量证明（FriendlyCaptcha）",
+        "html": '<div class="friendly-captcha"><script src="https://cdn.friendlycaptcha.com/friendly-challenge/widget.min.js">',
+        "url": ["https://cdn.friendlycaptcha.com/friendly-challenge/widget.min.js"],
+        "text": ["friendly-captcha"],
+        "expect_type": "pow-challenge",
+    },
 ]
 
 
@@ -1278,11 +1311,12 @@ def run_self_test() -> int:
             url=case.get("url"),
             text=case.get("text"),
         )
-        provider_ok = result["provider"] == case["expect_provider"]
+        expect = case.get("expect_provider")
+        provider_ok = expect is None or result["provider"] == expect
         type_ok = result["captcha_type"] == case["expect_type"]
         ok = provider_ok and type_ok
         status = "PASS" if ok else "FAIL"
-        detail = f"provider={result['provider']}(expect {case['expect_provider']}) type={result['captcha_type']}(expect {case['expect_type']})"
+        detail = f"provider={result['provider']}(expect {expect}) type={result['captcha_type']}(expect {case['expect_type']})"
         print(f"  [{status}] {case['name']}: {detail}")
         if ok:
             passed += 1

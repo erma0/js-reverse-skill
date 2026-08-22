@@ -80,6 +80,8 @@ GATE-2 EVIDENCE（硬阻断）
 - 不把目标网页作为最终签名服务，不通过打开网页、执行页面脚本或读取浏览器状态生成参数。
 - 允许取证阶段使用 ruyipage 定制 Firefox 和 RuyiTrace；允许把取证得到的算法、静态资源、必要 fixture 转化为纯协议实现。
 - 交付入口必须是 Node.js `final.js` 或 Python `final.py`，运行时只使用 HTTP、TLS、密码学、序列化和必要的最小 JS 沙箱能力。
+- 通用模板只提供 provider-neutral 的流程骨架和 adapter 契约；不得在 `templates/` 中预填真实厂商的接口名、字段名、HTTP 方法、JSONP、加密结构、凭据字段或默认轨迹。所有平台细节必须由本 case 的抓包、RuyiTrace 和成功样本驱动，落在 case adapter/result 中。
+- 厂商知识分级（T1 识别指纹 / T2 协议语义）：参数名↔算法族映射、厂商 Cookie/组件名、响应码特征等**识别信号（T1）**只允许保留在标注过的识别参考（如 `references/crypto/algorithm-families.md`、`references/network/ip-risk-control.md`）与分类脚本（`scripts/classify_verify.py`）中；字段语义、加密结构、接口链、实测轨迹参数等**协议知识（T2）**只能存在于 `references/captcha/captcha-providers.md` 厂商知识库、`cases/*.md` 案例与 case adapter，并带验证日期。通用 workflow/质量文档引用 T2 内容时只写「见 <知识库/案例>」指针，不复制具体参数。
 - 交付物不得依赖 skill 仓库路径、临时脚本、系统浏览器 profile 或用户机器上的登录态。
 - 关键 Cookie 必须区分静态配置、运行时生成值、服务端下发值和会话绑定值；禁止把成功样本中的动态秘密直接复制进代码。
 
@@ -98,9 +100,14 @@ ENV_READY
   └─ 环境缺失 → ENV_READY
 EVIDENCE_GATE
   ├─ Step 1 与 Step 2 均具备 → CASE_LOOKUP
+  ├─ 只有 Step 1 且 RuyiTrace 工具不可用（install_all.js 自动安装失败）→ MATERIALS_FALLBACK
   ├─ 只有 Step 1 → TRACE_CAPTURE
   ├─ 只有 Step 2 → STEP2_ONLY
   └─ 两步均缺失 → FORENSIC_CAPTURE
+MATERIALS_FALLBACK（工具不可用降级，细则见 decision-tree.md 阻塞点#5）
+  ├─ 用户材料（JS/cURL/HAR）经 check_evidence.js 内容校验通过 → CASE_LOOKUP
+  │   （强制声明：经验沉淀与最终总结写明未走 ruyipage/RuyiTrace、证据为手动材料 + 真实请求反证）
+  └─ 仅 URL 或材料校验不通过 → FORENSIC_CAPTURE（先修复工具）
 STEP2_ONLY → CASE_LOOKUP
 FORENSIC_CAPTURE → TRACE_CAPTURE
 TRACE_CAPTURE
@@ -273,7 +280,7 @@ node scripts/write_stage_report.js --case-dir <project-root> --stage <阶段> --
 
 **上下文防耗尽检查点（硬约束）**：TRACE_ANALYZE / IMPLEMENT / REAL_VERIFY 任一阶段消耗大量步骤（20+ 步未推进）或上下文接近耗尽时，先回看上条两份文件是否已覆盖当前崩溃点：未覆盖先补全再继续；已覆盖仍打转时落阶段报告。判定标准：trace 已定位到关键资源/入口，或当前节点已消耗 20+ 步仍未推进（TRACE_ANALYZE 未进 IMPLEMENT、IMPLEMENT 黑盒调试打转、REAL_VERIFY 反复排查未定位根因）。
 
-**IMPLEMENT 硬前置条件**：必须满足「trace 质量达标（含目标信号命中）」或「用户明确确认轻量路径」。两条均不满足时停在 TRACE_ANALYZE，不得以 mock、猜测或实验性实现替代证据。EXTERNAL_LOOKUP 的假设若与本次 trace 定位的 builder/writer 冲突，以 trace 为准，禁止先去测未被 trace 证明的 SDK 导出接口。**Step 2 缺失（check_trace_gate.js 退出码 1）时不得进入 IMPLEMENT**：不得以 EXTERNAL_LOOKUP 网络方案、边界声明、同族算法替代或 mock 填补 Step 2 证据缺口；轻量路径豁免的前提是 Step 1 + Step 2 齐备（见 4.3），Step 2 未产出不构成豁免条件。
+**IMPLEMENT 硬前置条件**：必须满足「trace 质量达标（含目标信号命中）」或「用户明确确认轻量路径」。两条均不满足时停在 TRACE_ANALYZE，不得以 mock、猜测或实验性实现替代证据。EXTERNAL_LOOKUP 的假设若与本次 trace 定位的 builder/writer 冲突，以 trace 为准，禁止先去测未被 trace 证明的 SDK 导出接口。**Step 2 缺失（check_trace_gate.js 退出码 1）时不得进入 IMPLEMENT**：不得以 EXTERNAL_LOOKUP 网络方案、边界声明、同族算法替代或 mock 填补 Step 2 证据缺口；轻量路径豁免的前提是 Step 1 + Step 2 齐备（见 4.3），Step 2 未产出不构成豁免条件。唯一例外是状态机中的 MATERIALS_FALLBACK 节点（RuyiTrace 工具不可用且自动安装失败 + 用户材料经 check_evidence.js 校验通过）：该路径以「Node 直连真实接口、服务端响应反证」替代 Step 2，REAL_VERIFY 不可豁免，且必须在经验沉淀与最终总结写明取证偏差。
 
 ## 5. CASE_LOOKUP
 
@@ -292,7 +299,9 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 
 ## 7. IDENTIFY
 
-先比较至少三组请求，把字段分为固定值、时间值、随机值、会话值、服务端下发值、加密值。对每个目标参数建立 `source → entry → builder → writer` 链。
+先比较至少两组请求（区分计数器递增与纯随机存疑时补第三组），把字段分为固定值、时间值、随机值、会话值、服务端下发值、加密值。对每个目标参数建立 `source → entry → builder → writer` 链。
+
+下表为 T1 识别信号路由（识别指纹 → 初始路径；识别≠协议复现，协议细节以本 case 证据与厂商知识库为准）：
 
 | 信号 | 初始路径 |
 |---|---|
@@ -308,6 +317,8 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 识别结果必须引用落盘资源、NDJSON 或网络包具体字段，不以站点名称直接定类。
 
 验证码/JSONP 链路的最低证据要求：`callback 注册 → script.src/请求参数构造 → script 插入或等价网络写入 → load/verify 请求 → callback 执行 → 结果回调`。仅命中 `createElement`、`appendChild` 或页面初始化 API 不算 writer 覆盖；若 trace 只覆盖环境读取，必须在阶段报告和最终总结中明确未证明请求写入。
+
+验证码链路的配套门禁（识别为验证码 case 后必用）：题型/厂商判定跑 `python scripts/classify_verify.py`；滑块先判缺口坐标来源（`references/captcha/gap-coordinate-source.md` 的 A/B/C 路线）；answer JSON 提交前过 `node scripts/check_captcha_answer.js` 门禁，FAIL 不得进入参数化实现。
 
 ## 8. TRACE_ANALYZE
 
@@ -341,7 +352,7 @@ C. WASM：复现加载、内存、导入和导出调用，固定输入输出契�
 D. 环境伪装：仅补 trace 证明必要的 Web API、对象形状、Realm、时间、随机数和指纹行为。
 E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定向和动态资源预热。
 
-中间值必须可单独验证；时间、随机数、UA、指纹和会话状态必须有明确来源；静态配置外置，秘密从环境变量或用户运行时输入读取。验证码拆成 `load → solve → verify`，封装层只负责接口参数和轨迹加密；成功样本先逐字段确认明文类型、长度和绑定关系，再编写生成器，不得把一次性 challenge、ticket 或答案固定到代码。
+中间值必须可单独验证；时间、随机数、UA、指纹和会话状态必须有明确来源；静态配置外置，秘密从环境变量或用户运行时输入读取。验证码拆成 `load → solve → verify`，按 `templates/captcha-verify/`（Node）或 `templates/captcha-verify-py/`（Python）骨架 + 本 case `result/src/adapter` 实现，答案层接入（`result/src/solver`）是交付组成部分；成功样本先逐字段确认明文类型、长度和绑定关系，再编写生成器，不得把一次性 challenge、ticket 或答案固定到代码。
 
 ## 10. REAL_VERIFY
 
@@ -356,7 +367,7 @@ E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定�
 - Cookie、Token、TLS、Header、Body 序列化和请求顺序不依赖浏览器状态。
 - 失败请求能区分签名错误、会话过期、资源过期、频率限制、IP 风控和业务参数错误。
 
-至少保留一份脱敏验证摘要和可复现命令；不得输出完整 Authorization、Cookie、Token、密钥或验证码答案。401/403/412/429 先诊断，不得用浏览器自动化或硬编码成功样本绕过。
+至少保留一份脱敏验证摘要和可复现命令；不得输出完整 Authorization、Cookie、Token、密钥或验证码答案。401/403/412/429 先诊断，不得用浏览器自动化或硬编码成功样本绕过。验证码交付在此之上追加两项记录：手动成功样本基线（`node scripts/check_success_baseline.js`，要求与豁免条件见 `references/captcha/verification-workflow.md`）与逐次尝试 attempts 复盘（`node scripts/check_verification_attempts.js`）；成功标准以「verify 返回通过凭据且业务接口消费凭据返回正确业务数据」为准，视觉答案正确不算通过。
 
 真实验证失败时不得进入 `DELIVER`。可以交付“未完成/诊断中”的中间材料，但执行入口、最终总结和状态行必须标为 `REAL_VERIFY_FAILED`，不得使用“已完成还原”“服务端已接受”或等价成功措辞；只有 sign-only 明确豁免，且必须单独标注未做真实验证。
 

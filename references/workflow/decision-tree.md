@@ -26,7 +26,7 @@
 | 5. 工具不可用 | ruyipage/RuyiTrace 未安装 | 默认按 GATE-1 自动安装（`install_all.js --yes`，执行前先宣布安装目标与规模）；自动安装失败时暂停让用户安装 / 提供路径；若用户已提供 JS/cURL/HAR（白名单③），转「用户手动取证」模式继续，不暂停 |
 | 6. 最终方案违反红线 | 滑向浏览器自动化作为最终交付 | 回到实现梯度逐级尝试，最终交付必须保持纯协议入口 |
 
-> **阻塞点 #5 例外（合规降级）**：取证工具链（ruyipage/RuyiTrace）整体不可用时，**不强制暂停**——只要用户手动提供了**真实存在的** JS 文件 / cURL / HAR（白名单③合法来源，先经 `node scripts/check_evidence.js --case-dir <project-root> --url <目标URL> --inputs <材料路径> --markdown` 验证，仅 URL 不算材料、不触发降级），即可跳过 FORENSIC_CAPTURE ruyipage 抓包，直接进入参数识别 + 静态分析，并以「Node 直连真实接口、服务端 `code:0` 反证」作为正确性证据（坑#8）。此路径合规，但**必须在 `result/经验沉淀-<站点>.md` 写明取证偏差**（未走 ruyipage/RuyiTrace、证据来源为手动材料 + 黑盒反证）。注意：该降级路径的前提是目标接口无登录态要求，可直接用真实响应校验还原结果；且用户仅提供 URL 时不允许降级，仍须先安装工具链走完整两步取证。
+> **阻塞点 #5 例外（合规降级，即 SKILL.md 状态机的 MATERIALS_FALLBACK 节点）**：取证工具链（ruyipage/RuyiTrace）整体不可用且 `install_all.js` 自动安装失败时，**不强制暂停**——只要用户手动提供了**真实存在的** JS 文件 / cURL / HAR（白名单③合法来源，先经 `node scripts/check_evidence.js --case-dir <project-root> --url <目标URL> --inputs <材料路径> --markdown` 验证，仅 URL 不算材料、不触发降级），即可走 MATERIALS_FALLBACK → CASE_LOOKUP → IDENTIFY，并以「Node 直连真实接口、服务端 `code:0` 反证」作为正确性证据（坑#8）。此路径合规，但**必须在 `result/经验沉淀-<站点>.md` 与最终总结写明取证偏差**（未走 ruyipage/RuyiTrace、证据来源为手动材料 + 黑盒反证），且 REAL_VERIFY 不可豁免。注意：该降级路径的前提是目标接口无登录态要求，可直接用真实响应校验还原结果；且用户仅提供 URL 时不允许降级，仍须先安装工具链走完整两步取证。
 
 ## JSVMP 路径选择决策树
 

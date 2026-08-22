@@ -1,6 +1,7 @@
 # 站点 / 混淆家族规则
 
 > 检测器（`scripts/detect-patterns.js`）命中后，只读取本文件对应章节。
+> **知识分级**：本文件的站点专用 pass 属厂商还原资产（T2，来自对应案例，见各章节与 `cases/`）；通用 pass 与站点 pass 的装配见 `scripts/pipeline-config.js`。还原结论以本次样本为准。
 
 ## reese84
 

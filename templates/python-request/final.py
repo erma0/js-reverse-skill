@@ -16,6 +16,11 @@ final.py — JS 逆向交付物【单一入口】（Python 轻量：自验 + 可
   python final.py --sign-only           # 仅输出签名，不发真实请求（需用户明确指定）
   python final.py --cookie "name=value" # 注入用户 cookie（覆盖设备 cookie 同名项）
 
+成功语义（自验）：HTTP 200 ≠ 成功。必须在 config.json 配置 responseValidation
+（jsonPath / minLength / contains，从本 case 真实成功样本提取）才能判「通过」；
+未配置时所有 200 响应一律记为「未判定」，整体不能宣称通过。
+退出码：0=全部通过；1=入口异常；2=存在失败；3=存在未判定（缺 responseValidation）。
+
 并发注意：signer 通常持有 vm context / WASM 实例 / Cookie 状态，非无状态。
 高并发场景需调用方自行池化 signer 实例（多个独立 vm context），不要跨线程/进程共享同一 signer。
 """
@@ -90,6 +95,8 @@ def load_config() -> dict:
         "SIGN_PARAM_NAME": "sign",
         "DEVICE_COOKIE": "",
         "extraHeaders": {},
+        # 响应校验规则：从本 case 真实成功样本提取。未配置时 HTTP 200 只记「未判定」，拒绝宣称通过
+        "responseValidation": None,
     }
     merged = dict(defaults)
     merged.update(cfg)
@@ -211,6 +218,59 @@ def create_client(opts: dict | None = None) -> object:
 
 
 # ============================================================
+# 响应判定 + 验证记录（与 Node final.js 语义对齐）
+# ============================================================
+def judge_response_body(body: str, rule: dict | None) -> dict:
+    """
+    校验响应体是否符合预期业务数据（三态判定）。
+
+    @returns: { "judgment": "pass"|"fail"|"unverified", "reason": str }
+      - pass:       规则全部命中，可计为成功
+      - fail:       规则命中失败或响应体为空
+      - unverified: 未配置 responseValidation —— HTTP 200 不能证明业务成功
+    """
+    if not body:
+        return {"judgment": "fail", "reason": "响应体为空"}
+    if not isinstance(rule, dict):
+        return {
+            "judgment": "unverified",
+            "reason": "未配置 responseValidation：HTTP 200 不能证明业务成功，请从真实成功样本提取响应判定规则写入 config.json",
+        }
+
+    contains = rule.get("contains")
+    if isinstance(contains, str) and contains and contains not in body:
+        return {"judgment": "fail", "reason": f"响应体未包含期望字符串 \"{contains}\""}
+
+    json_path = rule.get("jsonPath")
+    if isinstance(json_path, str) and json_path:
+        try:
+            cur: object = json.loads(body)
+        except json.JSONDecodeError as e:
+            return {"judgment": "fail", "reason": f"响应体非 JSON：{e}"}
+        for seg in json_path.split("."):
+            if not isinstance(cur, dict) or seg not in cur:
+                cur = None
+                break
+            cur = cur[seg]
+        if cur is None:
+            return {"judgment": "fail", "reason": f"jsonPath \"{json_path}\" 未命中"}
+        min_length = rule.get("minLength")
+        if isinstance(min_length, int):
+            length = len(cur) if isinstance(cur, list) else len(str(cur))
+            if length < min_length:
+                return {"judgment": "fail", "reason": f"jsonPath \"{json_path}\" 长度 {length} < minLength {min_length}"}
+
+    return {"judgment": "pass", "reason": ""}
+
+
+def _write_validation_record(record: dict) -> None:
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "验证记录.json"), "w", encoding="utf-8") as f:
+        json.dump(record, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
+# ============================================================
 # 主流程（仅自验时运行）
 # ============================================================
 def _parse_args(argv=None):
@@ -242,6 +302,9 @@ def main(argv=None) -> int:
     # ----- 创建请求 Session -----
     session = create_client()
     jar = CookieJar() if CookieJar else None
+    # Cookie 生命周期交给请求层：每次请求自动携带 jar、响应后自动合并 Set-Cookie、过期自动清理
+    if jar and hasattr(session, "defaults"):
+        session.defaults(jar=jar)
 
     try:
         # ----- 动态资源刷新（可选）-----
@@ -255,44 +318,79 @@ def main(argv=None) -> int:
 
         # ----- 交叉验证 -----
         print(f"\n--- 交叉验证 {args.verify} 次 ---")
-        success = fail = 0
+        success = fail = unverified = 0
+        attempts: list[dict] = []
         for i in range(args.verify):
+            attempt: dict = {
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "httpStatus": 0,
+                "parameterSummary": "参数生成失败",
+                "sessionStage": "target-api",
+                "judgment": "error",
+                "responseValid": False,
+            }
             try:
                 req = build_signed_request({"userCookie": args.cookie})
+                attempt["parameterSummary"] = {
+                    "names": sorted(req["params"].keys()),
+                    "count": len(req["params"]),
+                }
                 print(f"\n[第 {i + 1} 次请求]")
                 print(f"  URL: {req['url']}")
                 print(f"  sign: {req['signature']}")
                 cookie_str = jar.to_string() if jar else ""
                 print(f"  cookie: {cookie_str[:80]}...")
 
-                headers = dict(req["headers"])
-                if cookie_str:
-                    headers["Cookie"] = cookie_str
-                res = session.request(req["method"], req["url"], headers=headers)
+                res = session.request(req["method"], req["url"], headers=req["headers"])
 
                 text = res.text() if hasattr(res, "text") else ""
-                print(f"  状态码: {getattr(res, 'status_code', '?')}")
+                status = getattr(res, "status_code", 0)
+                attempt["httpStatus"] = status
+                print(f"  状态码: {status}")
                 print(f"  响应: {text[:200]}")
 
-                if getattr(res, "status_code", 0) == 200 and text:
-                    success += 1
-                else:
+                if status != 200:
                     fail += 1
-                    if getattr(res, "status_code", 0) != 200:
-                        print("  [WARN] 状态码非 200")
-                    if not text:
-                        print("  [WARN] 响应体为空，视为验证失败")
+                    attempt["judgment"] = "fail"
+                    print("  [WARN] 状态码非 200")
+                else:
+                    # 业务数据判定：未配置 responseValidation 时记「未判定」，不能计为成功
+                    check = judge_response_body(text, CONFIG.get("responseValidation"))
+                    attempt["judgment"] = check["judgment"]
+                    attempt["responseValid"] = check["judgment"] == "pass"
+                    if check["judgment"] == "pass":
+                        success += 1
+                    elif check["judgment"] == "unverified":
+                        unverified += 1
+                        print(f"  [UNVERIFIED] {check['reason']}")
+                    else:
+                        fail += 1
+                        print(f"  [WARN] 业务数据校验失败：{check['reason']}")
             except Exception as e:
                 fail += 1
+                attempt["judgment"] = "error"
                 print(f"  [FAIL] 异常: {e}")
+            attempts.append(attempt)
 
             if i < args.verify - 1:
                 time.sleep(1.0 + random.random() * 2.0)
 
         print("\n=== 验证结果 ===")
-        print(f"成功: {success} / {args.verify}")
+        print(f"通过: {success} / {args.verify}")
         print(f"失败: {fail} / {args.verify}")
-        return 2 if success < args.verify else 0
+        if unverified:
+            print(f"未判定: {unverified} / {args.verify}（未配置 responseValidation，拒绝宣称通过）")
+        _write_validation_record({
+            "mode": "real-request",
+            "responseValidation": CONFIG.get("responseValidation"),
+            "summary": {"total": args.verify, "pass": success, "fail": fail, "unverified": unverified},
+            "attempts": attempts,
+        })
+        if fail > 0:
+            return 2
+        if unverified > 0:
+            return 3
+        return 0
     finally:
         if hasattr(session, "close"):
             session.close()

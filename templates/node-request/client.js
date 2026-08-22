@@ -88,9 +88,22 @@ async function createRequestSession(options = {}) {
   }
 
   // 统一包装 request 方法（适配 curl-cffi-node / impers）
+  // 支持两种调用形态：
+  //   session.request(method, url, opts)                    —— 常规三参
+  //   session.request({ method, url, ...opts })             —— 原始请求描述符（trace/抓包导出形态，
+  //                                                            也兼容 adapter 契约的 { method, url, opts } 嵌套）
   const rawRequest = session.request ? session.request.bind(session) : null;
   if (rawRequest) {
-    session.request = async function (method, url, opts = {}) {
+    session.request = async function (methodOrDescriptor, urlArg, optsArg = {}) {
+      let method = methodOrDescriptor;
+      let url = urlArg;
+      let opts = optsArg;
+      if (methodOrDescriptor && typeof methodOrDescriptor === 'object' && !urlArg) {
+        const { method: m, url: u, opts: nested = {}, ...rest } = methodOrDescriptor;
+        method = m;
+        url = u;
+        opts = { ...rest, ...nested };
+      }
       // 合并 defaults
       const defaults = session._defaults || {};
       const mergedOpts = { ...defaults, ...opts };
@@ -121,6 +134,11 @@ async function createRequestSession(options = {}) {
           ? new URLSearchParams(mergedOpts.data).toString()
           : String(mergedOpts.data);
         if (!merged.headers['Content-Type']) merged.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      }
+      // Cookie 生命周期：请求带 jar 时自动携带（显式 Cookie 头优先）
+      if (mergedOpts.jar && typeof mergedOpts.jar.toString === 'function' && !merged.headers.Cookie && !merged.headers.cookie) {
+        const cookieStr = mergedOpts.jar.toString();
+        if (cookieStr) merged.headers.Cookie = cookieStr;
       }
       const res = await rawRequest(merged);
       const response = {
@@ -165,22 +183,44 @@ async function createRequestSession(options = {}) {
 }
 
 // ============================================================
-// Cookie Jar 简易实现（与 Session 绑定）
+// Cookie Jar（与 Session 绑定；含 Set-Cookie 属性解析与过期清理）
 // ============================================================
 class CookieJar {
   constructor() { this.cookies = new Map(); }
 
-  set(name, value, domain = '') {
-    this.cookies.set(`${domain}:${name}`, { value, domain });
+  /**
+   * 添加/覆盖单条 cookie。
+   * @param {Object} [attrs] { path, expires } —— expires 为 ms 时间戳；已过期则直接删除
+   */
+  set(name, value, domain = '', attrs = {}) {
+    const expires = typeof attrs.expires === 'number' ? attrs.expires : null;
+    const key = `${domain}:${name}`;
+    if (expires !== null && expires <= Date.now()) {
+      this.cookies.delete(key);
+      return;
+    }
+    this.cookies.set(key, { value, domain, path: attrs.path || '/', expires });
   }
 
   get(name, domain = '') {
-    return this.cookies.get(`${domain}:${name}`)?.value;
+    const entry = this.cookies.get(`${domain}:${name}`);
+    if (!entry) return undefined;
+    if (entry.expires !== null && entry.expires <= Date.now()) {
+      this.cookies.delete(`${domain}:${name}`);
+      return undefined;
+    }
+    return entry.value;
+  }
+
+  delete(name, domain = '') {
+    this.cookies.delete(`${domain}:${name}`);
   }
 
   toString(domain = '') {
+    const now = Date.now();
     const items = [];
     for (const [key, c] of this.cookies) {
+      if (c.expires !== null && c.expires <= now) { this.cookies.delete(key); continue; }
       if (!domain || c.domain === domain || key.endsWith(`:${domain}`)) {
         items.push(`${key.split(':').pop()}=${c.value}`);
       }
@@ -188,16 +228,51 @@ class CookieJar {
     return items.join('; ');
   }
 
+  /**
+   * 从 Set-Cookie 响应头批量合并。
+   * 解析属性：Domain / Path / Max-Age / Expires（大小写不敏感）；
+   * 删除语义：Max-Age<=0 或 Expires 已过期 → 移除同名 cookie（服务端下线 cookie 的标准方式）。
+   */
   merge(setCookieHeader, domain = '') {
     if (!setCookieHeader) return;
     const list = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
     for (const item of list) {
-      const pair = item.split(';')[0];
+      const parts = String(item).split(';');
+      const pair = parts[0];
       const eq = pair.indexOf('=');
       if (eq < 0) continue;
       const name = pair.slice(0, eq).trim();
       const value = pair.slice(eq + 1).trim();
-      if (name) this.set(name, value, domain);
+      if (!name) continue;
+
+      const attrs = { path: '/', expires: null };
+      let cookieDomain = domain;
+      let expired = false;
+      for (const raw of parts.slice(1)) {
+        const attrEq = raw.indexOf('=');
+        const attrName = (attrEq < 0 ? raw : raw.slice(0, attrEq)).trim().toLowerCase();
+        const attrValue = attrEq < 0 ? '' : raw.slice(attrEq + 1).trim();
+        if (attrName === 'domain' && attrValue) {
+          cookieDomain = attrValue.replace(/^\./, '').toLowerCase();
+        } else if (attrName === 'path' && attrValue) {
+          attrs.path = attrValue;
+        } else if (attrName === 'max-age') {
+          const seconds = parseInt(attrValue, 10);
+          if (Number.isFinite(seconds)) {
+            if (seconds <= 0) expired = true;
+            else attrs.expires = Date.now() + seconds * 1000;
+          }
+        } else if (attrName === 'expires' && attrValue) {
+          const ts = Date.parse(attrValue);
+          if (Number.isFinite(ts)) {
+            if (ts <= Date.now()) expired = true;
+            else attrs.expires = ts;
+          }
+        }
+        // Secure / HttpOnly / SameSite：纯协议请求层无需特殊处理，忽略
+      }
+      if (expired) { this.delete(name, cookieDomain); continue; }
+      this.set(name, value, cookieDomain, attrs);
     }
   }
 }
@@ -209,30 +284,33 @@ class CookieJar {
 // const { createRequestSession, CookieJar } = require('./request/client');
 //
 // async function main() {
-//   const session = createRequestSession({
+//   const session = await createRequestSession({
 //     impersonate: 'chrome135',
 //     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ...',
 //   });
 //   const jar = new CookieJar();
+//   // Cookie 生命周期交给请求层：自动携带、自动合并 Set-Cookie（含 Domain/Max-Age/Expires 属性与删除语义）
+//   session.defaults({ jar });
 //
 //   try {
-//     // 1. 访问主页刷新 Cookie
-//     const home = await session.request('GET', 'https://example.com/');
-//     jar.merge(home.headers['set-cookie']);
+//     // 1. 访问主页刷新 Cookie（无需手动拼 Cookie 头）
+//     await session.request('GET', 'https://example.com/');
 //
-//     // 2. 调用前置接口
-//     const init = await session.request('GET', 'https://example.com/api/init', {
-//       headers: { Cookie: jar.toString() },
-//     });
-//     jar.merge(init.headers['set-cookie']);
+//     // 2. 调用前置接口（需要手动控制 Cookie 时仍可显式传 headers.Cookie 覆盖）
+//     const init = await session.request('GET', 'https://example.com/api/init');
 //     const { secretKey } = init.json();
 //
 //     // 3. 生成签名
 //     const sign = generateSign({ ts: Date.now() }, secretKey);
 //
-//     // 4. 发送目标请求
+//     // 4. 发送目标请求（常规三参 / 原始请求描述符两种形态等价）
 //     const res = await session.request('GET', 'https://example.com/api/search', {
-//       headers: { 'x-sign': sign, Cookie: jar.toString() },
+//       headers: { 'x-sign': sign },
+//     });
+//     const res2 = await session.request({            // 描述符形态：method/url/opts 与 adapter 契约一致，
+//       method: 'GET',                                // 可直接透传 trace 导出的请求描述
+//       url: 'https://example.com/api/search',
+//       opts: { headers: { 'x-sign': sign } },
 //     });
 //     console.log(res.json());
 //

@@ -12,7 +12,7 @@
 - 两种情况下都需下载目标 JS 文件用于识别反爬类型
 
 ### 0.2 信息完整性门禁
-- **必填**：目标 URL、目标参数名（可为空，自动识别）
+- **必填**：目标 URL；目标参数名尽量提供，缺省时从证据自动识别（与 SKILL.md INTENT 一致）
 - **必填**：取证证据门禁结果（`check_evidence.js` 输出：Step 1 / Step 2 证据是否具备、可跳过哪些步骤）
 - **用户提供时**：目标 API、请求方法、参数位置、成功请求样本、响应特征
 - **自动获取时**（FORENSIC_CAPTURE ruyipage 抓包填充）：上述字段
@@ -51,16 +51,18 @@ install_all.js 内部流程：检测缺失组件 → pip install ruyiPage reques
 
 ### 0.4 项目目录创建
 
-case 根目录只允许两个子目录：
+case 根目录只允许两个子目录（完整权威目录树见 `references/quality/cleanup.md`）：
 ```
 <case 根>/
-├── case/          # 取证材料（原始 JS、请求样本、fixtures、notes、tmp）
+├── case/          # 取证材料（js/、forensic/、ruyi-trace/、fixtures、notes、tmp 等）
 └── result/        # 交付物（final.js + 最终项目总结.md + src/）
 ```
 
-## FORENSIC_CAPTURE 与 IDENTIFY（Step 1）
+## FORENSIC_CAPTURE（Step 1）与取证期参数观察
 
 > 用户提供 cURL/HAR/JS 文件（经 `check_evidence.js` 门禁确认）时，跳过 1.1 抓包，从 1.2 开始。仅提供 URL → 必须从 1.1 开始完整抓包。
+>
+> 本节 1.2–1.4 是**取证期的初步观察记录**；正式 IDENTIFY 节点按 SKILL.md 状态机在 CASE_LOOKUP 之后执行，结论以该节点为准，避免与状态机顺序冲突。
 
 ### 1.1 ruyipage 抓包（目标未命中需重采）
 1. 目标接口已知时运行通用脚本 `python scripts/forensic_ruyipage.py --url <目标页> --case-dir <project-root> --targets <目标接口URL或关键词> --markdown`（内部已用 `targets=True` 抓全部包并落盘 JS 到 `case/js/original/`，不必手写 `page.capture.start`）。指定 `--targets/--targets-regex` 后，未捕获到非 OPTIONS 2xx 目标响应时脚本退出码非 0，必须停在 `EVIDENCE_GATE` 重采或请用户补 cURL/HAR，不得把同域无关请求当成 Step 1 证据。
@@ -81,11 +83,14 @@ case 根目录只允许两个子目录：
 详细识别标准与动作见 `references/workflow/decision-tree.md`「反爬类型识别」。
 
 ### 1.3 加密参数识别
-对比多次请求，区分：
+对比 ≥2 组请求（区分计数器递增与纯随机存疑时补第 3 组），按 SKILL.md IDENTIFY 六分类区分：
 | 参数类型 | 特征 | 处理方式 |
 |---|---|---|
 | 固定值 | 每次请求相同 | 直接硬编码或从页面提取 |
-| 动态值 | 有规律变化 | 判断变化因子（时间戳、页码、随机数、自增） |
+| 时间值 | 随请求时间线性变化 | 确认时间源与单位后本地生成 |
+| 随机值 | 无规律变化 | 确认随机源后本地生成 |
+| 会话值 | 同会话相同、跨会话变化 | 从会话链获取，不硬编码 |
+| 服务端下发值 | 由前置接口响应携带 | 分析前置接口 + Session 链（见 `references/network/protocol-analysis.md`） |
 | 加密值 | 看似随机 | 根据长度、字符集、格式判断算法类型 |
 
 ### 1.4 四层链路定位（source→entry→builder→writer）
@@ -176,7 +181,7 @@ RuyiTrace NDJSON 狙击式采集:
 - 纪律：**只观察不篡改，命中后尽快移除**
 
 ### 3.4 多次请求对比
-≥3 次请求，确认变化因子（时间戳/随机数/签名值）
+≥2 次请求，确认变化因子（时间戳/随机数/签名值；区分计数器递增与纯随机存疑时补第 3 次）
 
 ## IMPLEMENT
 
@@ -239,10 +244,11 @@ RuyiTrace NDJSON 狙击式采集:
 ### 5.4 交付加分（用户要求"生产级交付"时强制）
 
 - `node scripts/check_final_artifact.js --case-dir . --production --markdown` —— 在默认门禁基础上追加校验最终总结的 9 个生产级附加章节
-- Session 模式 / 代码风格检查 / `check_code_quality.js` / `check_fingerprint_fixture.js` / `check_trace_api_coverage.js`
+- Session 模式 / 代码风格检查 / `check_code_quality.js` / `check_trace_api_coverage.js`
 - 默认 8 章与 9 个生产级附加章节 / trace 覆盖矩阵 / 选用 sdenv 路径时额外执行 runtime 自检
 
 > 默认只执行 5.2 解题必需 + 5.3 默认交付门禁。用户明确要求"生产级交付"时才执行 5.4 加分项。
+> `check_fingerprint_fixture.js` 不在本加分项内：只要 `result/src/env/` 存在（补环境交付）它就是 5.3 默认门禁（必跑，可带 `--require canvas,webgl,audio,dom`）；纯算法/无 env 交付自动豁免。
 
 ### 5.5 最终项目总结
 - 默认：精简总结（8 章，模板见 `references/quality/final-summary.md`）

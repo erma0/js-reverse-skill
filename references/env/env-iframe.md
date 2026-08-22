@@ -2,6 +2,8 @@
 
 进入 Node.js 补环境阶段、目标 JS 创建或访问 `iframe`、`frame`、`contentWindow`、`contentDocument`、`postMessage` 跨 frame 通信、验证码 SDK iframe 等场景时读取本文件。本文件聚焦 iframe 的 realm 隔离、跨 frame 通信、取证方式与补环境模拟策略；通用对象模型遵循 `env-object-model.md`，行为矩阵门禁遵循 `webapi-env-detection-matrix.md`。
 
+> **知识分级**：本文件中出现的厂商 iframe 端点与 SDK 全局入口属于 T1 识别指纹（仅用于识别"目标 JS 在访问哪个验证码 iframe"，见 SKILL.md 厂商知识分级）；各厂商协议与字段结构（T2）以 `references/captcha/` 厂商知识库与 case 证据为准。
+
 ## 总体原则
 
 ```text

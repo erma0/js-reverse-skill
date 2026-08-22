@@ -10,6 +10,7 @@
 2. Hook 必须在验证码 SDK 加载**之前**安装（经验法则 #1），否则处理器已绑定、轨迹已进加密流程。
 3. 在 RuyiTrace NDJSON 中按 `api=addEventListener` + 事件类型过滤，找到 SDK 注册的处理器位置；再按时间邻近度找到轨迹数组的读写函数。
 4. 注意 SDK 可能用 `addEventListener` 的 capture 阶段、或挂在 `document`/`window` 上代理——按 stack 确认，不要只看元素本身。
+5. **移动 H5 / touch 场景**：先从成功样本确认 SDK 实际采集的是 mouse 还是 touch 事件形态（字段集可能含 touch 点列表/力度等额外维度）。`generate_motion_track.py` 目前只产鼠标式 `{x,y,t}` 轨迹；touch 形态需按成功样本明文字段由 case adapter 适配，不要把鼠标轨迹直接当 touch 轨迹提交。
 
 ## 轨迹数据结构（典型形态）
 

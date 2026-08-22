@@ -1,9 +1,8 @@
 /**
  * final.js — 验证码逆向交付物【单一入口】（load → solve → verify 三段链路）。
  *
- * 与签名逆向模板（final-entry/）的区别：
- *   - 签名逆向：生成参数 → 请求（单段）
- *   - 验证码：load（拿 challenge+素材）→ solve（求解答案）→ verify（提交加密答案+轨迹换凭据）→ 业务接口消费凭据（三段+消费）
+ * 这是 provider-neutral 骨架。真实平台协议必须由本 case 的 src/adapter.js 提供；
+ * 本文件不假设厂商、接口名、HTTP 方法、JSONP、字段名或加密方案。
  *
  * 双重角色：
  *   - 自验：   node final.js            → 完整走 load→solve→verify→业务接口，交叉验证 5 次
@@ -31,8 +30,9 @@ const path = require('path');
 // ============================================================
 // 请求客户端：从 templates/node-request/client.js 复制到 result/src/request/client.js
 const { createRequestSession, CookieJar } = require('./src/request/client');
-// verify 加密入口：用户自行实现（参考 cases/ + references/captcha/），需导出 encryptVerifyParam + buildVerifyPayload
-const verifier = require('./src/verifier');
+// 真实平台协议适配器：必须由本 case 根据 trace/抓包实现。
+let adapter = null;
+try { adapter = require('./src/adapter'); } catch (_) { adapter = null; }
 // 答案求解器：本地 ddddocr 或打码平台适配器，需导出 solve(imageBytes, type, options) → answer JSON
 let solver = null;
 try { solver = require('./src/solver'); } catch (_) { solver = null; }
@@ -46,19 +46,13 @@ function loadConfig() {
     cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
   } catch (_) {}
   return Object.assign({
-    target: {
-      page_url: '<目标页>',
-      load_api: '<load/register 接口>',
-      verify_api: '<verify 接口>',
-      business_api: '<业务接口>',
-    },
+    target: { page_url: '<本 case 目标页>' },
     captcha: {
-      provider: 'geetest',
-      captcha_type: 'slider',
-      gt_or_captcha_id: '<厂商标识>',
+      provider: '<由本 case 证据确定>',
+      captcha_type: '<由本 case 证据确定>',
     },
     solver: {
-      mode: 'ddddocr',
+      mode: '<case-defined>',
       platform: '',
       api_key: '',
     },
@@ -71,18 +65,11 @@ function loadConfig() {
 // ============================================================
 
 /**
- * ① load 阶段：拿 challenge 标识 + 素材地址
- * 返回：{ challenge, gt_or_captcha_id, bg_url, slice_url, ... }
+ * ① load/bootstrap 阶段：完全交给 case adapter。
  */
 async function loadChallenge(session, config) {
-  const res = await session.get(config.target.load_api, {
-    params: { gt: config.captcha.gt_or_captcha_id, /* 或 captcha_id */ },
-  });
-  const data = res.data;
-  if (!data.challenge && !data.lot_number) {
-    throw new Error('load 响应缺少 challenge/lot_number：' + JSON.stringify(data).slice(0, 200));
-  }
-  return data;
+  assertAdapter();
+  return adapter.loadChallenge(session, config);
 }
 
 /**
@@ -91,74 +78,47 @@ async function loadChallenge(session, config) {
  *
  * solver 求解路径（按优先级）：
  *   1. 本地开源：ddddocr slide_match / OpenCV 模板匹配（solver.mode='ddddocr'）
- *   2. 人工接管：ddddocr/OpenCV 失效时（如易盾拼图块重着色），用 scripts/click_gap.py 点击缺口
+ *   2. 人工接管：ddddocr/OpenCV 失效时（如拼图块重着色、背景像素扰动），用 scripts/click_gap.py 点击缺口
  *      → Node 侧通过 child_process 调 Python click_gap.py，或预存坐标后命令行传入
  *   3. 打码平台：solver.mode='platform'，走 solver_request_template.py 生成请求
  */
 async function solveCaptcha(session, config, loadResult) {
-  // 下载素材（用与业务请求一致的 TLS 指纹客户端 + Session cookie）
-  const bgUrl = loadResult.bg || loadResult.fullbg;
-  const sliceUrl = loadResult.slice;
-  const bgBytes = (await session.get(bgUrl, { responseType: 'arraybuffer' })).data;
-  const sliceBytes = sliceUrl ? (await session.get(sliceUrl, { responseType: 'arraybuffer' })).data : null;
+  assertAdapter();
+  const assets = await adapter.resolveAssets(session, config, loadResult);
 
   if (!solver) throw new Error('未配置 solver，请实现 result/src/solver.js');
-  const answer = await solver.solve(bgBytes, config.captcha.captcha_type, {
-    slice: sliceBytes,
+  const answer = await solver.solve(assets.primary, config.captcha.captcha_type, {
+    ...assets,
     provider: config.captcha.provider,
-    source_image_size: loadResult.bg_size ? [loadResult.bg_size.w, loadResult.bg_size.h] : undefined,
   });
-
-  // 生成轨迹（slider/drag-drop/scratch/trace）
-  if (answer.offset && answer.offset.x != null && !answer.track) {
-    answer.track = require('./src/track').generateMotionTrack({
-      mode: 'slider', distance: answer.offset.x, duration_ms: 1100,
-    });
-  }
-
-  // 填入 challenge 绑定
-  answer.challenge_binding = {
-    gt: loadResult.gt || config.captcha.gt_or_captcha_id,
-    challenge: loadResult.challenge || '',
-    lot_number: loadResult.lot_number || '',
-  };
-  return answer;
+  return adapter.prepareAnswer(answer, { session, config, loadResult, assets });
 }
 
 /**
  * ③ verify 阶段：加密 answer+track → 提交 → 换取通过凭据
- * 返回：{ validate, seccode, ticket, randstr, pass, rid, ... }（按厂商不同）
+ * 返回：由本 case adapter 定义的已验证凭据对象。
  */
 async function verifyChain(session, config, loadResult, answer) {
-  // 校验 answer JSON（交付门禁）
-  // 命令行可跑：node scripts/check_captcha_answer.js --file answer.json
-  const encrypted = verifier.encryptVerifyParam(answer, loadResult);
-  const payload = verifier.buildVerifyPayload(encrypted, loadResult);
-
-  // ⚠ 提交方式按厂商不同，禁止无脑 POST：
-  //   极验 v3：必须 GET + JSONP（callback=geetest_<ts>，w 等参数全拼 query string），POST 返回 error_31
-  //   且 w 含自定义 base64 的 ()，encodeURIComponent 后须把 %28/%29 还原为字面括号，否则被 WAF 拦
-  //   其他厂商多为 POST
-  const res = await session.post(config.target.verify_api, { data: payload });
-  const cred = res.data;
-  if (!cred.validate && !cred.seccode && !cred.ticket && !cred.pass) {
-    throw new Error('verify 响应缺少通过凭据：' + JSON.stringify(cred).slice(0, 200));
+  const request = await adapter.buildVerifyRequest({ session, config, loadResult, answer });
+  if (!request || typeof request !== 'object' || !request.method || !request.url) {
+    throw new Error('adapter.buildVerifyRequest 必须返回 { method, url, opts }');
   }
-  return cred;
+  const response = await session.request(request.method, request.url, request.opts || {});
+  return adapter.parseVerifyResponse(response, { session, config, loadResult, answer, request });
 }
 
 /**
  * ④ 业务接口消费凭据
  */
 async function callBusinessApi(session, config, credential) {
-  const res = await session.post(config.target.business_api, { json: { credential } });
-  return res.data;
+  return adapter.consumeCredential(session, config, credential);
 }
 
 // ============================================================
 // 主流程：完整链路 + 交叉验证
 // ============================================================
 async function runOnce(config, cookieStr) {
+  assertAdapter();
   const session = await createRequestSession({
     headers: cookieStr ? { Cookie: cookieStr } : {},
   });
@@ -183,6 +143,7 @@ async function main() {
     default: { verify: null },
   });
   const config = loadConfig();
+  assertAdapter();
   const verifyCount = args.verify || config.verify_count || 5;
 
   console.log(`[captcha-verify] provider=${config.captcha.provider} type=${config.captcha.captcha_type} verify=${verifyCount}`);
@@ -192,8 +153,8 @@ async function main() {
     try {
       const loadResult = await loadChallenge(session, config);
       const answer = await solveCaptcha(session, config, loadResult);
-      const encrypted = verifier.encryptVerifyParam(answer, loadResult);
-      console.log(JSON.stringify({ load: loadResult, answer, encrypted }, null, 2));
+      const verifyRequest = await adapter.buildVerifyRequest({ session, config, loadResult, answer });
+      console.log(JSON.stringify({ load: loadResult, answer, verifyRequest }, null, 2));
     } finally {
       if (session.close) session.close();
     }
@@ -220,3 +181,10 @@ if (require.main === module) {
 }
 
 module.exports = { loadChallenge, solveCaptcha, verifyChain, callBusinessApi, runOnce };
+
+function assertAdapter() {
+  const required = ['loadChallenge', 'resolveAssets', 'prepareAnswer', 'buildVerifyRequest', 'parseVerifyResponse', 'consumeCredential'];
+  if (!adapter) throw new Error('缺少 result/src/adapter.js：请先根据本 case 的真实 trace/抓包实现平台适配器');
+  const missing = required.filter((name) => typeof adapter[name] !== 'function');
+  if (missing.length) throw new Error(`adapter 缺少方法：${missing.join(', ')}`);
+}

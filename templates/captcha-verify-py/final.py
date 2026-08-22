@@ -41,12 +41,19 @@ try:
 except ImportError:
     create_request_session = None
 
-# verify 加密入口：用户自行实现（参考 cases/ + references/captcha/），需导出 encrypt_verify_param + build_verify_payload
+# 真实平台协议适配器：必须由本 case 根据 trace/抓包实现。
 try:
-    from src.verifier import encrypt_verify_param, build_verify_payload
+    from src.adapter import (
+        load_challenge as adapter_load_challenge,
+        resolve_assets as adapter_resolve_assets,
+        prepare_answer as adapter_prepare_answer,
+        build_verify_request as adapter_build_verify_request,
+        parse_verify_response as adapter_parse_verify_response,
+        consume_credential as adapter_consume_credential,
+    )
 except ImportError:
-    encrypt_verify_param = None
-    build_verify_payload = None
+    adapter_load_challenge = adapter_resolve_assets = adapter_prepare_answer = None
+    adapter_build_verify_request = adapter_parse_verify_response = adapter_consume_credential = None
 
 # 答案求解器：ddddocr / OpenCV / 打码平台适配器，需导出 solve(image_bytes, captcha_type, options) → answer dict
 try:
@@ -54,15 +61,8 @@ try:
 except ImportError:
     solve = None
 
-# 轨迹生成：可包装 scripts/generate_motion_track.py 或用 Python 重写
-try:
-    from src.track import generate_motion_track
-except ImportError:
-    generate_motion_track = None
-
-
 # ============================================================
-# 配置（与 Node 版 config.json 字段一致，可共用）
+# 配置（provider-neutral；真实接口属于 case adapter）
 # ============================================================
 def load_config() -> dict:
     cfg = {}
@@ -73,19 +73,13 @@ def load_config() -> dict:
     except (FileNotFoundError, json.JSONDecodeError):
         pass
     defaults = {
-        "target": {
-            "page_url": "<目标页>",
-            "load_api": "<load/register 接口>",
-            "verify_api": "<verify 接口>",
-            "business_api": "<业务接口>",
-        },
+        "target": {"page_url": "<本 case 目标页>"},
         "captcha": {
-            "provider": "geetest",
-            "captcha_type": "slider",
-            "gt_or_captcha_id": "<厂商标识>",
+            "provider": "<由本 case 证据确定>",
+            "captcha_type": "<由本 case 证据确定>",
         },
         "solver": {
-            "mode": "ddddocr",
+            "mode": "<case-defined>",
             "platform": "",
             "api_key": "",
         },
@@ -106,80 +100,52 @@ def load_config() -> dict:
 # ============================================================
 
 def load_challenge(session: object, config: dict) -> dict:
-    """① load 阶段：拿 challenge 标识 + 素材地址。"""
-    res = session.get(config["target"]["load_api"], params={
-        "gt": config["captcha"].get("gt_or_captcha_id"),
-    })
-    data = res.json()
-    if not data.get("challenge") and not data.get("lot_number"):
-        raise ValueError(f"load 响应缺少 challenge/lot_number: {json.dumps(data, ensure_ascii=False)[:200]}")
-    return data
+    """① bootstrap/load 阶段：完全交给 case adapter。"""
+    require_adapter()
+    return adapter_load_challenge(session, config)
 
 
 def solve_captcha(session: object, config: dict, load_result: dict) -> dict:
     """② solve 阶段：下载素材 → 本地求解/打码 → answer JSON。"""
     if solve is None:
         raise RuntimeError("未配置 solver，请实现 result/src/solver.py")
+    require_adapter()
 
-    bg_url = load_result.get("bg") or load_result.get("fullbg")
-    slice_url = load_result.get("slice")
+    assets = adapter_resolve_assets(session, config, load_result)
 
-    bg_bytes = session.get(bg_url).body
-    slice_bytes = session.get(slice_url).body if slice_url else None
-
-    answer = solve(bg_bytes, config["captcha"]["captcha_type"], {
-        "slice": slice_bytes,
+    answer = solve(assets["primary"], config["captcha"]["captcha_type"], {
+        **assets,
         "provider": config["captcha"]["provider"],
-        "source_image_size": [load_result["bg_size"]["w"], load_result["bg_size"]["h"]]
-            if load_result.get("bg_size") else None,
     })
-
-    # 生成轨迹（slider/drag-drop/scratch/trace）
-    if answer.get("offset", {}).get("x") is not None and not answer.get("track"):
-        if generate_motion_track is None:
-            raise RuntimeError("未配置 track，请实现 result/src/track.py")
-        answer["track"] = generate_motion_track(
-            mode="slider", distance=answer["offset"]["x"], duration_ms=1100,
-        )
-
-    # 填入 challenge 绑定
-    answer["challenge_binding"] = {
-        "gt": load_result.get("gt") or config["captcha"].get("gt_or_captcha_id", ""),
-        "challenge": load_result.get("challenge", ""),
-        "lot_number": load_result.get("lot_number", ""),
-    }
-    return answer
+    return adapter_prepare_answer(answer, session=session, config=config,
+                          load_result=load_result, assets=assets)
 
 
 def verify_chain(session: object, config: dict, load_result: dict, answer: dict) -> dict:
     """③ verify 阶段：加密 answer+track → 提交 → 换取通过凭据。"""
-    if encrypt_verify_param is None or build_verify_payload is None:
-        raise RuntimeError("未配置 verifier，请实现 result/src/verifier.py")
-
-    encrypted = encrypt_verify_param(answer, load_result)
-    payload = build_verify_payload(encrypted, load_result)
-
-    # ⚠ 提交方式按厂商不同，禁止无脑 POST：
-    #   极验 v3：必须 GET + JSONP（callback=geetest_<ts>，w 等参数全拼 query string），POST 返回 error_31
-    #   且 w 含自定义 base64 的 ()，quote 后须把 %28/%29 还原为字面括号，否则被 WAF 拦
-    #   其他厂商多为 POST
-    res = session.post(config["target"]["verify_api"], data=payload)
-    cred = res.json()
-    if not any(cred.get(k) for k in ("validate", "seccode", "ticket", "pass")):
-        raise ValueError(f"verify 响应缺少通过凭据: {json.dumps(cred, ensure_ascii=False)[:200]}")
-    return cred
+    require_adapter()
+    request = adapter_build_verify_request(session=session, config=config,
+                                   load_result=load_result, answer=answer)
+    if not isinstance(request, dict) or not request.get("method") or not request.get("url"):
+        raise ValueError("adapter.build_verify_request 必须返回 {method, url, opts}")
+    opts = request.get("opts") or {}
+    res = session.request(request["method"], request["url"], **opts)
+    return adapter_parse_verify_response(res, session=session, config=config,
+                                 load_result=load_result, answer=answer,
+                                 request=request)
 
 
 def call_business_api(session: object, config: dict, credential: dict) -> dict:
-    """④ 业务接口消费凭据。"""
-    res = session.post(config["target"]["business_api"], json_body={"credential": credential})
-    return res.json()
+    """④ 业务接口消费凭据，由 case adapter 决定请求和成功判定。"""
+    require_adapter()
+    return adapter_consume_credential(session, config, credential)
 
 
 # ============================================================
 # 主流程：完整链路 + 交叉验证
 # ============================================================
 def run_once(config: dict, cookie_str: str = "") -> dict:
+    require_adapter()
     headers = {"Cookie": cookie_str} if cookie_str else {}
     session = create_request_session(headers=headers)
     try:
@@ -202,6 +168,7 @@ def main(argv=None) -> int:
     config = load_config()
     verify_count = args.verify or config.get("verify_count", 5)
 
+    require_adapter()
     print(f"[captcha-verify-py] provider={config['captcha']['provider']} "
           f"type={config['captcha']['captcha_type']} verify={verify_count}")
 
@@ -210,8 +177,9 @@ def main(argv=None) -> int:
         try:
             load_result = load_challenge(session, config)
             answer = solve_captcha(session, config, load_result)
-            encrypted = encrypt_verify_param(answer, load_result)
-            print(json.dumps({"load": load_result, "answer": answer, "encrypted": encrypted},
+            request = adapter_build_verify_request(session=session, config=config,
+                                                   load_result=load_result, answer=answer)
+            print(json.dumps({"load": load_result, "answer": answer, "verify_request": request},
                              ensure_ascii=False, indent=2))
         finally:
             session.close()
@@ -232,6 +200,20 @@ def main(argv=None) -> int:
     print(f"[captcha-verify-py] 完成 {success}/{verify_count}")
     # 要求全部成功才算通过（与 README ≥5 次交叉验证一致）
     return 0 if success == verify_count else 1
+
+
+def require_adapter() -> None:
+    required = {
+        "load_challenge": adapter_load_challenge,
+        "resolve_assets": adapter_resolve_assets,
+        "prepare_answer": adapter_prepare_answer,
+        "build_verify_request": adapter_build_verify_request,
+        "parse_verify_response": adapter_parse_verify_response,
+        "consume_credential": adapter_consume_credential,
+    }
+    missing = [name for name, fn in required.items() if not callable(fn)]
+    if missing:
+        raise RuntimeError("缺少 result/src/adapter.py 或方法：" + ", ".join(missing))
 
 
 if __name__ == "__main__":

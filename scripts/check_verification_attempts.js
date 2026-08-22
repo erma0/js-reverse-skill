@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
-// 验证码验证失败复盘（Phase 5）。
+// 验证码验证失败复盘（REAL_VERIFY 阶段）。
 // 读 attempts.json，按 (authorization_scope, captcha_type, chosen_solution) 分组，
-// 规则：有成功→方案可用需优化；连续5次失败+诊断全ok+无成功→建议切打码平台做授权QA对照。
+// 规则：有成功→方案可用需优化；连续5次失败+诊断全ok+无成功→先降级人工接管（人工不适用再切打码平台）。
 // 与 references/captcha/verification-workflow.md 契约对齐。
 
 const fs = require('fs');
@@ -112,8 +112,13 @@ function evaluate(data) {
     decision = 'official-or-manual';
     reason = `${captchaType} 不默认推荐普通打码平台，优先走官方协议/环境诊断/人工复核`;
   } else {
-    decision = 'recommend-platform-control';
-    reason = `连续 ${maxConsecutiveFailures} 次失败且无成功，诊断全 ok → 建议切换打码平台做授权 QA 对照`;
+    // 与 captcha-solving-handoff.md 的优先级链对齐：②人工接管 在 ③打码平台 之前。
+    // 当前方案已是人工接管时才直接推荐打码平台；否则先降级到人工接管（click_gap / RuyiTrace 手动通过）。
+    const isManualSolution = /人工|manual|click_gap/i.test(chosenSolution);
+    decision = isManualSolution ? 'recommend-platform-control' : 'try-manual-takeover';
+    reason = isManualSolution
+      ? `连续 ${maxConsecutiveFailures} 次失败且无成功，诊断全 ok，当前已是人工接管 → 建议切换打码平台做授权 QA 对照`
+      : `连续 ${maxConsecutiveFailures} 次失败且无成功，诊断全 ok → 先降级人工接管（click_gap.py / RuyiTrace 手动通过）；人工不适用（需自动化/规模化）时再切打码平台`;
   }
 
   return {

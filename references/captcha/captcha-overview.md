@@ -6,9 +6,11 @@
 
 ## 四层分工模型
 
+> **模板边界**：`templates/captcha-verify/` 与 `templates/captcha-verify-py/` 只提供 provider-neutral 的入口和 adapter 契约，不代表任何真实厂商协议。平台接口顺序、HTTP 方法、JSONP、字段、加密和成功凭据必须由当前 case 的抓包/RuyiTrace/成功样本确定，写入 `result/src/adapter.*`；不得把历史案例字段复制回通用模板。
+
 | 层 | 内容 | 归属 |
 |---|---|---|
-| 识别层 | 题型 / 厂商分类（26 题型标签 + 厂商信号表） | 本 skill（`scripts/classify_verify.py`） |
+| 识别层 | 题型 / 厂商分类（25 个信号题型 + unknown-custom 兜底，共 26 标签；厂商信号表） | 本 skill（`scripts/classify_verify.py`） |
 | 答案层 | 图像求解：ddddocr / OpenCV / 自训模型 / 打码平台 | 本 skill（`open-source-recipes.md` + scripts） |
 | 轨迹层 | 坐标换算、轨迹生成 | 两 skill 共用脚本（本 skill `scripts/` 已移植） |
 | 封装层 | verify 接口参数加密、轨迹加密、token 绑定还原 | **本 skill** |
@@ -37,7 +39,7 @@
 ```json
 {
   "captcha_type": "slider",
-  "provider": "geetest",
+  "provider": "<case provider>",
   "solver": "ddddocr-slide_match",
   "confidence": 0.95,
   "coordinate_space": "image-pixel",

@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -60,17 +62,19 @@ def detect_available_client() -> str:
 
 
 # ============================================================
-# CookieJar：与 Node 版 client.js 的 CookieJar 接口对齐
+# CookieJar：与 Node 版 client.js 的 CookieJar 接口对齐（含属性解析与过期清理）
 # ============================================================
 class CookieJar:
     """
-    简易 Cookie Jar，与 templates/node-request/client.js 的 CookieJar 接口对齐。
+    Cookie Jar，与 templates/node-request/client.js 的 CookieJar 接口对齐。
 
     提供：
-        - set(name, value, domain='')            添加/覆盖单条 cookie
-        - get(name, domain='')                   读取单条 cookie 值
-        - merge(set_cookie_headers, domain='')   从 Set-Cookie 响应头批量合并
-        - to_string(domain='')                   生成请求 Cookie 头字符串
+        - set(name, value, domain='', path='/', expires=None)  添加/覆盖单条 cookie（已过期则删除）
+        - get(name, domain='')                   读取单条 cookie 值（过期自动清理）
+        - delete(name, domain='')                删除单条 cookie
+        - merge(set_cookie_headers, domain='')   从 Set-Cookie 响应头批量合并（解析 Domain/Path/Max-Age/Expires；
+                                                  Max-Age<=0 或 Expires 已过期 → 删除语义）
+        - to_string(domain='')                   生成请求 Cookie 头字符串（过滤已过期条目）
         - to_dict(domain='')                     转为 dict（用于调试）
         - cookies                                属性：Dict[str, dict] 存储
 
@@ -80,49 +84,109 @@ class CookieJar:
     """
 
     def __init__(self) -> None:
-        # key: "domain:name", value: {"value": str, "domain": str}
-        self.cookies: Dict[str, Dict[str, str]] = {}
+        # key: "domain:name", value: {"value": str, "domain": str, "path": str, "expires": float|None(epoch 秒)}
+        self.cookies: Dict[str, Dict[str, Any]] = {}
 
-    def set(self, name: str, value: str, domain: str = "") -> None:
-        self.cookies[f"{domain}:{name}"] = {"value": value, "domain": domain}
+    def set(self, name: str, value: str, domain: str = "", path: str = "/", expires: Optional[float] = None) -> None:
+        key = f"{domain}:{name}"
+        if expires is not None and expires <= time.time():
+            self.cookies.pop(key, None)
+            return
+        self.cookies[key] = {"value": value, "domain": domain, "path": path, "expires": expires}
 
     def get(self, name: str, domain: str = "") -> Optional[str]:
-        entry = self.cookies.get(f"{domain}:{name}")
-        return entry["value"] if entry else None
+        key = f"{domain}:{name}"
+        entry = self.cookies.get(key)
+        if not entry:
+            return None
+        if entry["expires"] is not None and entry["expires"] <= time.time():
+            self.cookies.pop(key, None)
+            return None
+        return entry["value"]
+
+    def delete(self, name: str, domain: str = "") -> None:
+        self.cookies.pop(f"{domain}:{name}", None)
 
     def merge(self, set_cookie_headers: Any, domain: str = "") -> None:
-        """从响应头 set-cookie（单条 str 或 List[str]）批量合并。"""
+        """从响应头 set-cookie（单条 str 或 List[str]）批量合并，解析属性并处理删除语义。"""
         if not set_cookie_headers:
             return
         if isinstance(set_cookie_headers, (list, tuple)):
-            items: List[str] = list(set_cookie_headers)
+            items: List[str] = [str(i) for i in set_cookie_headers]
         else:
             items = [str(set_cookie_headers)]
 
         for item in items:
-            # set-cookie 头形如: "name=value; Path=/; HttpOnly; ..."
-            pair = item.split(";")[0].strip()
+            # set-cookie 头形如: "name=value; Path=/; Max-Age=3600; HttpOnly"
+            parts = [p.strip() for p in item.split(";")]
+            pair = parts[0]
             if "=" not in pair:
                 continue
             name, value = pair.split("=", 1)
-            name = name.strip()
-            value = value.strip()
-            if name:
-                self.set(name, value, domain)
+            name, value = name.strip(), value.strip()
+            if not name:
+                continue
+
+            cookie_domain = domain
+            path = "/"
+            expires: Optional[float] = None
+            expired = False
+            for raw in parts[1:]:
+                attr_eq = raw.find("=")
+                attr_name = (raw if attr_eq < 0 else raw[:attr_eq]).strip().lower()
+                attr_value = "" if attr_eq < 0 else raw[attr_eq + 1:].strip()
+                if attr_name == "domain" and attr_value:
+                    cookie_domain = attr_value.lstrip(".").lower()
+                elif attr_name == "path" and attr_value:
+                    path = attr_value
+                elif attr_name == "max-age":
+                    try:
+                        seconds = int(attr_value)
+                    except ValueError:
+                        continue
+                    if seconds <= 0:
+                        expired = True
+                    else:
+                        expires = time.time() + seconds
+                elif attr_name == "expires" and attr_value:
+                    try:
+                        dt = parsedate_to_datetime(attr_value)
+                    except (TypeError, ValueError):
+                        continue
+                    ts = dt.timestamp()
+                    if ts <= time.time():
+                        expired = True
+                    else:
+                        expires = ts
+                # Secure / HttpOnly / SameSite：纯协议请求层无需特殊处理，忽略
+
+            if expired:
+                self.delete(name, cookie_domain)
+                continue
+            self.set(name, value, cookie_domain, path=path, expires=expires)
 
     def to_string(self, domain: str = "") -> str:
-        """生成请求 Cookie 头字符串（与 Node 版 toString 对齐）。"""
+        """生成请求 Cookie 头字符串（与 Node 版 toString 对齐；过滤已过期条目）。"""
+        now = time.time()
         items: List[str] = []
-        for key, c in self.cookies.items():
+        for key in list(self.cookies.keys()):
+            c = self.cookies[key]
+            if c["expires"] is not None and c["expires"] <= now:
+                del self.cookies[key]
+                continue
             if not domain or c["domain"] == domain or key.endswith(f":{domain}"):
-                # key 形如 "domain:name"，取冒号后的 name
                 name = key.split(":", 1)[-1]
                 items.append(f"{name}={c['value']}")
         return "; ".join(items)
 
     def to_dict(self, domain: str = "") -> Dict[str, str]:
+        now = time.time()
         result: Dict[str, str] = {}
-        for key, c in self.cookies.items():
+        for key in list(self.cookies.keys()):
+            c = self.cookies[key]
+            if c["expires"] is not None and c["expires"] <= now:
+                del self.cookies[key]
+                continue
             if not domain or c["domain"] == domain or key.endswith(f":{domain}"):
                 name = key.split(":", 1)[-1]
                 result[name] = c["value"]
@@ -218,6 +282,7 @@ class RequestSession:
         self._client_name = client_name
         self._impersonate = impersonate
         self._closed = False
+        self._defaults: Dict[str, Any] = {}
 
     @property
     def client_name(self) -> str:
@@ -227,35 +292,78 @@ class RequestSession:
     def impersonate(self) -> str:
         return self._impersonate
 
+    def defaults(self, **kwargs) -> "RequestSession":
+        """设置默认请求参数（如 jar=CookieJar() 实现 Cookie 自动携带与合并）。"""
+        self._defaults.update(kwargs)
+        return self
+
     def request(
         self,
-        method: str,
-        url: str,
-        *,
-        headers: Optional[Dict[str, str]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        data: Any = None,
-        json_body: Any = None,
-        timeout: Optional[int] = None,
+        method: Any = None,
+        url: Any = None,
+        **kwargs,
     ) -> "Response":
-        """发送请求。"""
+        """
+        发送请求。支持两种调用形态：
+
+            session.request(method, url, **kwargs)              —— 常规形式
+            session.request({"method": ..., "url": ...})        —— 原始请求描述符
+                描述符顶层键即请求字段（headers/params/data/json/body/timeout/jar 等）；
+                adapter 契约的 {"method", "url", "opts"} 嵌套形式同样支持，
+                可直接透传 trace/抓包导出的请求描述。body 映射为原始请求体。
+
+        Cookie 生命周期：kwargs 或 defaults 传入 jar 时自动携带 Cookie（显式 Cookie 头优先），
+        响应后自动合并 Set-Cookie（含 Domain/Max-Age/Expires 属性与删除语义）。
+        """
         if self._closed:
             raise RuntimeError("Session 已关闭")
 
-        kwargs: Dict[str, Any] = {}
-        if headers:
-            kwargs["headers"] = headers
-        if params:
-            kwargs["params"] = params
-        if data is not None:
-            kwargs["data"] = data
-        if json_body is not None:
-            kwargs["json"] = json_body
-        if timeout is not None:
-            kwargs["timeout"] = timeout
+        if isinstance(method, dict) and url is None:
+            descriptor = dict(method)
+            method = descriptor.pop("method", None)
+            url = descriptor.pop("url", None)
+            opts = descriptor.pop("opts", None)
+            if isinstance(opts, dict):
+                descriptor.update(opts)
+            if "body" in descriptor:
+                descriptor["data"] = descriptor.pop("body")
+            if "json" in descriptor:
+                descriptor["json_body"] = descriptor.pop("json")
+            # 显式 kwargs 优先于描述符同名字段
+            for key, val in kwargs.items():
+                descriptor[key] = val
+            kwargs = descriptor
 
-        raw_res = self._raw.request(method.upper(), url, **kwargs)
-        return Response(raw_res)
+        if "body" in kwargs:
+            kwargs["data"] = kwargs.pop("body")
+
+        jar = kwargs.pop("jar", None) or self._defaults.get("jar")
+
+        # Cookie 生命周期：请求带 jar 时自动携带（显式 Cookie 头优先）
+        headers = dict(kwargs.get("headers") or {})
+        if jar is not None and hasattr(jar, "to_string"):
+            if not (headers.get("Cookie") or headers.get("cookie")):
+                auto_cookie = jar.to_string()
+                if auto_cookie:
+                    headers["Cookie"] = auto_cookie
+        kwargs["headers"] = headers
+
+        request_kwargs: Dict[str, Any] = {}
+        for key in ("headers", "params", "data", "json", "timeout"):
+            if key in kwargs and kwargs[key] is not None:
+                request_kwargs[key] = kwargs[key]
+        if "json_body" in kwargs and kwargs["json_body"] is not None:
+            request_kwargs["json"] = kwargs["json_body"]
+
+        raw_res = self._raw.request(method.upper(), url, **request_kwargs)
+        response = Response(raw_res)
+
+        # Cookie 生命周期：响应后自动合并 Set-Cookie
+        if jar is not None and hasattr(jar, "merge"):
+            set_cookies = response.set_cookies()
+            if set_cookies:
+                jar.merge(set_cookies)
+        return response
 
     def get(self, url: str, **kwargs) -> "Response":
         return self.request("GET", url, **kwargs)
@@ -283,14 +391,36 @@ class RequestSession:
 # Response 包装类
 # ============================================================
 class Response:
-    """统一封装响应，对外暴露 status/headers/body/text/json。"""
+    """统一封装响应，对外暴露 status/headers/body/text/json/set_cookies。"""
 
     def __init__(self, raw_response):
         self._raw = raw_response
         self.status_code: int = getattr(raw_response, "status_code", 0)
-        self.headers: Dict[str, str] = dict(getattr(raw_response, "headers", {}))
+        self.headers: Dict[str, str] = dict(getattr(raw_response, "headers", {}) or {})
         self._body: bytes = getattr(raw_response, "content", b"") or b""
         self._text_cache: Optional[str] = None
+        self._set_cookies: List[str] = self._extract_set_cookies(raw_response)
+
+    @staticmethod
+    def _extract_set_cookies(raw_response) -> List[str]:
+        """提取全部 Set-Cookie 值（多条头并存时尽量取全，供 CookieJar.merge 使用）。"""
+        raw_headers = getattr(raw_response, "headers", None)
+        if raw_headers is None:
+            return []
+        for getter_name in ("get_list", "getlist"):
+            getter = getattr(raw_headers, getter_name, None)
+            if callable(getter):
+                try:
+                    values = getter("set-cookie")
+                    if values:
+                        return [str(v) for v in values]
+                except Exception:
+                    pass
+        for key in ("set-cookie", "Set-Cookie"):
+            value = raw_headers.get(key) if hasattr(raw_headers, "get") else None
+            if value:
+                return [str(value)] if isinstance(value, str) else [str(v) for v in value]
+        return []
 
     @property
     def body(self) -> bytes:
@@ -299,6 +429,10 @@ class Response:
     @property
     def ok(self) -> bool:
         return 200 <= self.status_code < 300
+
+    def set_cookies(self) -> List[str]:
+        """返回全部 Set-Cookie 原始值列表。"""
+        return list(self._set_cookies)
 
     def text(self, encoding: str = "utf-8") -> str:
         if self._text_cache is None:
@@ -321,27 +455,29 @@ class Response:
 #         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ...",
 #     )
 #     jar = CookieJar()
+#     # Cookie 生命周期交给请求层：自动携带、自动合并 Set-Cookie（含 Domain/Max-Age/Expires 属性与删除语义）
+#     session.defaults(jar=jar)
 #     try:
-#         # 1. 访问主页刷新 Cookie
-#         home = session.get("https://example.com/")
-#         jar.merge(home.headers.get("set-cookie"))
+#         # 1. 访问主页刷新 Cookie（无需手动拼 Cookie 头）
+#         session.get("https://example.com/")
 #
-#         # 2. 调用前置接口（带 cookie）
-#         init = session.get(
-#             "https://example.com/api/init",
-#             headers={"Cookie": jar.to_string()},
-#         )
-#         jar.merge(init.headers.get("set-cookie"))
+#         # 2. 调用前置接口（需要手动控制 Cookie 时仍可显式传 headers={"Cookie": ...} 覆盖）
+#         init = session.get("https://example.com/api/init")
 #         secret_key = init.json().get("secretKey")
 #
 #         # 3. 生成签名
 #         sign = generate_sign({"ts": int(time.time() * 1000)}, secret_key)
 #
-#         # 4. 发送目标请求
+#         # 4. 发送目标请求（常规形式 / 原始请求描述符两种形态等价）
 #         res = session.get(
 #             "https://example.com/api/search",
-#             headers={"x-sign": sign, "Cookie": jar.to_string()},
+#             headers={"x-sign": sign},
 #         )
+#         res2 = session.request({                  # 描述符形态：与 adapter 契约一致，
+#             "method": "GET",                      # 可直接透传 trace 导出的请求描述
+#             "url": "https://example.com/api/search",
+#             "opts": {"headers": {"x-sign": sign}},
+#         })
 #         print(res.json())
 #     finally:
 #         session.close()
@@ -351,13 +487,20 @@ class Response:
 
 
 if __name__ == "__main__":
-    # 自检：检测可用客户端
+    # 自检：检测可用客户端 + CookieJar 生命周期（属性解析/过期删除）
     try:
         name = detect_available_client()
         print(f"检测到可用 TLS 客户端：{name}")
-        # CookieJar 烟雾测试
-        jar = CookieJar()
-        jar.merge(["sessionid=abc123; Path=/", "token=xyz; HttpOnly"])
-        print(f"CookieJar 测试: {jar} -> {jar.to_string()!r}")
     except ImportError as e:
         print(str(e))
+    jar = CookieJar()
+    jar.merge([
+        "sessionid=abc123; Path=/; Max-Age=3600",
+        "token=xyz; HttpOnly",
+        "dropme=1; Path=/; Max-Age=0",                        # 删除语义
+        "expired=1; Expires=Thu, 01 Jan 1970 00:00:00 GMT",   # 已过期 → 删除
+    ])
+    assert jar.get("sessionid") == "abc123"
+    assert jar.get("dropme") is None
+    assert jar.get("expired") is None
+    print(f"CookieJar 测试: {jar} -> {jar.to_string()!r}")

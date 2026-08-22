@@ -722,6 +722,47 @@ function inspectValidationRecord(resultDir, networkMode) {
   return { result, problems, warnings };
 }
 
+// 验证码答案层接入检查：检测到验证码交付（config 含 captcha 对象，或代码引用 adapter 契约）时，
+// 要求 result/src/adapter.*（平台协议）与答案层接入（src/solver.* 或等效求解代码）同时存在。
+// 对应 references/captcha/captcha-solving-handoff.md 的交付要求：答案层求解是交付组成部分。
+const CAPTCHA_ADAPTER_REF_RE = /require\(['"]\.\/src\/adapter|from\s+src\.adapter|src[\/\\]adapter/;
+const CAPTCHA_SOLVER_REF_RE = /ddddocr|slide_match|slide_comparison|solver|打码|click_gap/i;
+
+function inspectCaptchaAnswerLayer(resultDir, resultFiles) {
+  const problems = [];
+  const warnings = [];
+  let isCaptcha = false;
+  const configPath = path.join(resultDir, 'config.json');
+  if (exists(configPath)) {
+    try {
+      const cfg = JSON.parse(readText(configPath));
+      if (cfg && typeof cfg === 'object' && cfg.captcha && typeof cfg.captcha === 'object') isCaptcha = true;
+    } catch (_) { /* config.json 解析失败由其他检查处理 */ }
+  }
+  if (!isCaptcha) {
+    for (const f of resultFiles) {
+      if (!['.js', '.mjs', '.cjs', '.py'].includes(ext(f))) continue;
+      const st = stat(f);
+      if (!st || !st.isFile()) continue;
+      if (CAPTCHA_ADAPTER_REF_RE.test(readText(f))) { isCaptcha = true; break; }
+    }
+  }
+  if (!isCaptcha) return { result: { isCaptcha: false }, problems, warnings };
+
+  const adapterPresent = ['src/adapter.js', 'src/adapter.py'].some((p) => exists(path.join(resultDir, p)));
+  if (!adapterPresent) {
+    problems.push('检测到验证码交付（captcha 配置或 adapter 契约引用），但缺少 result/src/adapter.js 或 src/adapter.py：真实平台协议必须由本 case 的 adapter 实现（契约示例见 templates/captcha-verify*/adapter*）');
+  }
+  const solverFilePresent = ['src/solver.js', 'src/solver.py'].some((p) => exists(path.join(resultDir, p)));
+  const solverRefPresent = resultFiles
+    .filter((p) => ['.js', '.mjs', '.cjs', '.py'].includes(ext(p)) && stat(p) && stat(p).isFile())
+    .some((p) => CAPTCHA_SOLVER_REF_RE.test(readText(p)));
+  if (!solverFilePresent && !solverRefPresent) {
+    problems.push('验证码交付缺少答案层接入：result/src/solver.js|py 不存在，代码中也无 ddddocr/slide_match/打码等求解痕迹。答案层求解是验证码交付的组成部分（见 references/captcha/captcha-solving-handoff.md），不得只交封装层');
+  }
+  return { result: { isCaptcha: true, adapterPresent, solverPresent: solverFilePresent || solverRefPresent }, problems, warnings };
+}
+
 function check(args) {
   if (!args.caseDir && !args.file) throw new Error('必须提供 --case-dir 或 --file');
   const caseDir = args.caseDir ? path.resolve(args.caseDir) : path.resolve(path.dirname(args.file), '..');
@@ -918,6 +959,14 @@ function check(args) {
   problems.push(...experience.problems);
   warnings.push(...experience.warnings);
 
+  const captchaLayer = exists(resultDir) ? inspectCaptchaAnswerLayer(resultDir, resultFiles) : {
+    result: { isCaptcha: false },
+    problems: [],
+    warnings: [],
+  };
+  problems.push(...captchaLayer.problems);
+  warnings.push(...captchaLayer.warnings);
+
   return {
     caseDir,
     caseSubdir,
@@ -937,6 +986,7 @@ function check(args) {
     traceCoverage: traceCoverage.result,
     experience: experience.result,
     stageReports: stageReports.result,
+    captchaAnswerLayer: captchaLayer.result,
     finalSummaryOptOut: args.finalSummaryOptOut,
     experienceOptOut: args.experienceOptOut,
     resultFiles: resultFiles.map(p => rel(caseDir, p)),
@@ -1089,6 +1139,30 @@ function runSelfTest() {
     const covCleanCheck = inspectTraceCoverageDeclaration(covCleanCase, covCleanResult, true);
     if (covCleanCheck.problems.length > 0 || covCleanCheck.result.signalMissed !== false) {
       throw new Error('summary 无未命中信号 → 不应产生问题');
+    }
+
+    // 验证码答案层检查：captcha config 存在时要求 adapter + solver；普通交付不触发
+    const capRoot = path.join(root, 'captcha');
+    fs.mkdirSync(path.join(capRoot, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(capRoot, 'config.json'), JSON.stringify({ target: {}, captcha: { provider: 'x', captcha_type: 'slider' } }), 'utf8');
+    const capFiles = [path.join(capRoot, 'config.json')];
+    const capMissing = inspectCaptchaAnswerLayer(capRoot, capFiles);
+    if (capMissing.result.isCaptcha !== true || capMissing.problems.length !== 2) {
+      throw new Error(`captcha 交付缺 adapter+solver → 应产生 2 个问题，实际 ${capMissing.problems.length}`);
+    }
+    fs.writeFileSync(path.join(capRoot, 'src', 'adapter.js'), 'module.exports = {};\n', 'utf8');
+    fs.writeFileSync(path.join(capRoot, 'src', 'solver.js'), 'const ddddocr = require("ddddocr");\n', 'utf8');
+    capFiles.push(path.join(capRoot, 'src', 'adapter.js'), path.join(capRoot, 'src', 'solver.js'));
+    const capComplete = inspectCaptchaAnswerLayer(capRoot, capFiles);
+    if (capComplete.problems.length > 0 || capComplete.result.solverPresent !== true) {
+      throw new Error('captcha 交付含 adapter+solver → 应通过');
+    }
+    const plainRoot = path.join(root, 'plain');
+    fs.mkdirSync(plainRoot, { recursive: true });
+    fs.writeFileSync(path.join(plainRoot, 'config.json'), JSON.stringify({ TARGET_URL: 'https://example.com/api' }), 'utf8');
+    const plainCheck = inspectCaptchaAnswerLayer(plainRoot, [path.join(plainRoot, 'config.json')]);
+    if (plainCheck.result.isCaptcha !== false || plainCheck.problems.length > 0) {
+      throw new Error('普通交付（无 captcha 配置）→ 不应触发答案层检查');
     }
     return { clean: true, cases: cases.length };
   } finally {

@@ -11,8 +11,8 @@
 | `python-request/` | Python 基础入口与请求模块 | `final.py` + `client.py` + `requirements.txt` | A/B/C/D |
 | `vm-sandbox/` | Node.js 运行时模块 | `install-env.js` + `vm-context.js` + `native-protect.js` | B/D |
 | `wasm-loader/` | Node.js WASM 模块 | `loader.js`（干净 `.wasm` + 导出函数）；`emscripten-bundle-blackbox.js`（整包 Emscripten glue 黑盒，webpack 内嵌 wasm base64） | C |
-| `captcha-verify/` | Node.js 验证码完整入口 | `final.js` + `config.json` + `package.json` | 验证码封装层主要在 Node.js 还原 |
-| `captcha-verify-py/` | Python 验证码完整入口 | `final.py` + `config.json` + `requirements.txt` | 答案层主要使用 ddddocr/OpenCV/Whisper |
+| `captcha-verify/` | Node.js 验证码协议骨架 | `final.js` + `config.json` + `adapter.example.js` | 真实平台协议必须由 case adapter 实现 |
+| `captcha-verify-py/` | Python 验证码协议骨架 | `final.py` + `config.json` + `adapter_example.py` | 答案层主要使用 ddddocr/OpenCV/Whisper |
 
 ## 实际组合
 
@@ -28,7 +28,12 @@
 | 验证码 Node.js | `captcha-verify/` | 封装层需要 vm 时加入 `vm-sandbox/`；请求层需要 TLS 适配时复用 `node-request/` |
 | 验证码 Python | `captcha-verify-py/` | solver 直接使用 Python 答案层库；只有封装层必须执行原始 JS 时才桥接 Node.js 模块 |
 
-`final-entry/` 和 `python-request/` 已分别承担常规 Node.js、Python 交付入口；`captcha-verify/` 与 `captcha-verify-py/` 已承担验证码三段链入口。一个交付物只保留一个最终执行入口。
+`final-entry/` 和 `python-request/` 已分别承担常规 Node.js、Python 交付入口；`captcha-verify/` 与 `captcha-verify-py/` 只承担 provider-neutral 验证码三段链骨架。真实平台协议放在 case adapter，一个交付物只保留一个最终执行入口。
+
+## 入口成功语义与请求层约定
+
+- 所有执行入口统一：HTTP 200 ≠ 成功。`final-entry/final.js` 与 `python-request/final.py` 的自验必须配置 `config.json` 的 `responseValidation`（`jsonPath` / `minLength` / `contains`，从本 case 真实成功样本提取）；未配置时 200 响应记「未判定」并以退出码 3 结束，不能宣称通过（退出码：0=全部通过、1=入口异常、2=存在失败、3=存在未判定）。
+- 请求层（`node-request/client.js` 与 `python-request/client.py`）的 `CookieJar` 解析 Set-Cookie 属性（Domain / Path / Max-Age / Expires），支持过期删除语义；`session.request` 额外接受 `{ method, url, opts }` 原始请求描述符（可直接透传 trace 导出或 adapter 契约返回的请求描述）；传入 `jar`（或 `session.defaults({ jar })`）时自动携带 Cookie、响应后自动合并 Set-Cookie，显式 Cookie 头优先。
 
 ## 组合结构
 
