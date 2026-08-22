@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { assertTraceSignals } = require('./lib/trace-signal-policy');
 
 function parseArgs(argv) {
   const args = {
@@ -58,6 +59,7 @@ function signalSets(args) {
     ? args.requireNetworkSignal : legacy;
   const trace = Array.isArray(args.requireTraceSignal) && args.requireTraceSignal.length
     ? args.requireTraceSignal : legacy;
+  assertTraceSignals(trace, 'require-trace-signal');
   return { network, trace, legacy };
 }
 
@@ -886,6 +888,12 @@ function runSelfTest() {
     assert.match(sigHitCli.stdout, /目标信号未命中/);
     const sigBoth = childProcess.spawnSync(process.execPath, [__filename, '--case-dir', sigRoot, '--url', targetUrl, '--require-target-signal', targetUrl, '--markdown'], { encoding: 'utf8' });
     assert.strictEqual(sigBoth.status, 0); // 信号命中 → 通过
+
+    // 泛化 DOM API 不能作为 writer 证据；必须在 CLI 层硬拒绝，避免 createElement
+    // 这类高频初始化调用把未触发目标请求的 trace 误判为覆盖完整。
+    const genericSignalCli = childProcess.spawnSync(process.execPath, [__filename, '--case-dir', sigRoot, '--url', targetUrl, '--require-trace-signal', 'createElement', '--json'], { encoding: 'utf8' });
+    assert.strictEqual(genericSignalCli.status, 1);
+    assert.match(genericSignalCli.stderr, /裸泛化 DOM/);
 
     // 分离信号：网络 URL 只约束 Step 1，trace writer 只约束 Step 2。
     const splitSignals = check({

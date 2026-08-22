@@ -110,7 +110,7 @@ node scripts/check_external_tools.js --python python --ruyipage-browser-path <fi
 - 安装 / 提供 RuyiTrace 路径，并等待安装完成与检测通过。
 - 明确降级为“仅 ruyiPage”，后续不再假设存在 RuyiTrace NDJSON。
 
-只有用户明确确认降级后，才可以进入仅 ruyiPage 取证；否则应保持 ruyiPage + RuyiTrace 模式，并先完成 RuyiTrace 安装 / 路径确认。RuyiTrace 检测通过后，采集方式**默认自动 trace**（运行 `scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <project-root> --target-signal <信号> --import-after --markdown` 自动捕获）；自动失败、需登录/验证码/复杂交互或用户已提供日志时转手动 trace（用户用 RuyiTrace GUI 采集后提供 NDJSON，用 `scripts/capture_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-root> --markdown` 导入）。不询问用户选择采集方式。
+只有用户明确确认降级后，才可以进入仅 ruyiPage 取证；否则应保持 ruyiPage + RuyiTrace 模式，并先完成 RuyiTrace 安装 / 路径确认。RuyiTrace 检测通过后，采集方式**默认自动 trace**（运行 `scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <project-root> --evidence-signal <信号> --import-after --markdown` 自动捕获；需要提前收尾时另加明确的 `--end-signal`）；自动失败、需登录/验证码/复杂交互或用户已提供日志时转手动 trace（用户用 RuyiTrace GUI 采集后提供 NDJSON，用 `scripts/capture_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-root> --markdown` 导入）。不询问用户选择采集方式。
 
 ### ruyiPage 定制 Firefox 强制校验
 

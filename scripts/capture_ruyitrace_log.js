@@ -2,9 +2,11 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const paths = require('./lib/paths');
+const { assertTraceSignals } = require('./lib/trace-signal-policy');
 
 function parseArgs(argv) {
   const args = {
@@ -21,12 +23,15 @@ function parseArgs(argv) {
     ptype: '',
     targetSignals: [],
     traceSignals: [],
+    evidenceSignals: [],
+    endSignals: [],
     signalPolicy: 'strict',
     dryRun: false,
     importAfter: false,
     json: false,
     markdown: false,
     help: false,
+    selfTest: false,
   };
   for (let i = 2; i < argv.length; i += 1) {
     const a = argv[i];
@@ -42,13 +47,25 @@ function parseArgs(argv) {
     else if (a === '--duration') args.duration = Number(nextVal('120'));
     else if (a === '--limit') args.limit = Number(nextVal('200000'));
     else if (a === '--ptype') args.ptype = nextVal('');
-    else if (a === '--target-signal') args.targetSignals.push(nextVal(''));
-    else if (a === '--trace-signal') args.traceSignals.push(nextVal(''));
+    else if (a === '--target-signal') {
+      const signal = nextVal('');
+      args.targetSignals.push(signal);
+      args.evidenceSignals.push(signal);
+      args.endSignals.push(signal);
+    }
+    else if (a === '--trace-signal') {
+      const signal = nextVal('');
+      args.traceSignals.push(signal);
+      args.evidenceSignals.push(signal);
+    }
+    else if (a === '--evidence-signal') args.evidenceSignals.push(nextVal(''));
+    else if (a === '--end-signal') args.endSignals.push(nextVal(''));
     else if (a === '--signal-policy') args.signalPolicy = nextVal('strict');
     else if (a === '--dry-run') args.dryRun = true;
     else if (a === '--import-after') args.importAfter = true;
     else if (a === '--json') args.json = true;
     else if (a === '--markdown') args.markdown = true;
+    else if (a === '--self-test') args.selfTest = true;
     else if (a === '--help' || a === '-h') args.help = true;
     else throw new Error(`未知参数：${a}`);
   }
@@ -57,7 +74,11 @@ function parseArgs(argv) {
   if (!Number.isFinite(args.limit) || args.limit <= 0) args.limit = 200000;
   if (!['strict', 'advisory'].includes(args.signalPolicy)) args.signalPolicy = 'strict';
   args.traceSignals = args.traceSignals.filter((s) => s && s.trim());
-  if (args.traceSignals.length) args.targetSignals = args.traceSignals.slice();
+  args.evidenceSignals = args.evidenceSignals.filter((s) => s && s.trim());
+  args.endSignals = args.endSignals.filter((s) => s && s.trim());
+  assertTraceSignals(args.evidenceSignals, 'evidence-signal');
+  assertTraceSignals(args.endSignals, 'end-signal');
+  if (args.evidenceSignals.length) args.targetSignals = args.evidenceSignals.slice();
   return args;
 }
 
@@ -69,12 +90,15 @@ function usage() {
   node scripts/capture_ruyitrace_log.js --input <用户trace生成的.ndjson> --case-dir . --markdown
   # 仅检测环境并打印计划（不启动浏览器）
   node scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir . --dry-run --json
+  # 本地自测（不启动浏览器）
+  node scripts/capture_ruyitrace_log.js --self-test
 
 说明：--case-dir 指项目根目录（其下应有 case/ 和 result/ 两个平级子目录），默认当前目录。
 --project-dir <dir>：用户工程目录（tools/ 所在），未传时从 --case-dir 推断；安装模式下需靠此定位 RuyiTrace。
 --url 与 --input 互斥：--url 为自动捕获（需 RuyiTrace 完整安装）；--input 为手动 trace 后直接导入用户指定的 NDJSON，无需 RuyiTrace 安装检测。
---trace-signal <信号>（可多次）：导入时只扫描 trace 的环境 API / writer / 参数写入点；推荐用于 JSONP、script 或导航请求。
---target-signal <信号>（兼容旧参数）：等价于 --trace-signal；不要传目标网络 URL。
+--trace-signal / --evidence-signal <信号>（可多次）：只用于导入和证据门禁，扫描环境 API / writer / 参数写入点。
+--end-signal <信号>（可多次）：仅用于自动采集提前结束；不传时只在用户关闭或 duration 到期时结束。
+--target-signal <信号>（兼容旧参数）：同时作为 evidence-signal 和 end-signal；新流程不要使用。
 --signal-policy strict|advisory：strict 未命中退出非 0；advisory 只记录覆盖不足，适合用户手动结束或信号尚未确定的采集。
 --ptype <list>：启用 trace 的进程类型（逗号分隔，透传 MOZ_DOM_TRACE_PTYPE），不传则全部进程类型；大页面可只留主/content 进程减少无关日志。`;
 }
@@ -250,23 +274,60 @@ function waitForExit(child, timeoutMs) {
   });
 }
 
-function tailContains(files, signals) {
+// 增量扫描新写入的 NDJSON。旧实现只扫描文件尾部 1MB，早先命中的 signal
+// 在日志继续增长后会被漏掉；同时记录每个文件的 offset，避免反复读取大日志。
+function scanSignalsIncremental(files, signals, state) {
   if (!signals || !signals.length || !files.length) return false;
+  state.offsets = state.offsets || new Map();
+  state.carry = state.carry || new Map();
   const needles = signals.map((s) => String(s).toLowerCase());
-  const observed = new Set();
+  const observed = state.observed || new Set();
+  state.observed = observed;
   for (const file of files) {
     try {
       const st = fs.statSync(file);
-      const size = Math.min(st.size, 1024 * 1024);
+      const previous = state.offsets.get(file) || 0;
+      const start = st.size < previous ? 0 : previous;
+      const length = st.size - start;
+      if (length <= 0) continue;
       const fd = fs.openSync(file, 'r');
-      const buf = Buffer.alloc(size);
-      fs.readSync(fd, buf, 0, size, Math.max(0, st.size - size));
+      let carry = st.size < previous ? '' : (state.carry.get(file) || '');
+      let cursor = start;
+      const chunkSize = 1024 * 1024;
+      while (cursor < st.size) {
+        const size = Math.min(chunkSize, st.size - cursor);
+        const buf = Buffer.alloc(size);
+        fs.readSync(fd, buf, 0, size, cursor);
+        const text = `${carry}${buf.toString('utf8')}`.toLowerCase();
+        needles.forEach((needle, index) => {
+          if (text.includes(needle)) observed.add(index);
+        });
+        carry = text.slice(-Math.max(0, Math.max(...needles.map((n) => n.length)) - 1));
+        cursor += size;
+      }
       fs.closeSync(fd);
-      const text = buf.toString('utf8').toLowerCase();
-      needles.forEach((n, idx) => { if (text.includes(n)) observed.add(idx); });
+      state.offsets.set(file, st.size);
+      state.carry.set(file, carry);
     } catch { /* file may still be rotating */ }
   }
   return observed.size === needles.length;
+}
+
+function runSelfTest() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capture-trace-signal-'));
+  const file = path.join(root, 'trace.ndjson');
+  const state = { offsets: new Map(), carry: new Map(), observed: new Set() };
+  try {
+    fs.writeFileSync(file, '{"api":"hand', 'utf8');
+    if (scanSignalsIncremental([file], ['handshake'], state)) throw new Error('拆分信号不应在首段提前命中');
+    fs.appendFileSync(file, 'shake"}\n', 'utf8');
+    if (!scanSignalsIncremental([file], ['handshake'], state)) throw new Error('跨写入边界的信号应被命中');
+    fs.appendFileSync(file, 'x'.repeat(1024 * 1024 + 128), 'utf8');
+    if (!scanSignalsIncremental([file], ['handshake'], state)) throw new Error('日志继续增长后应记住已命中的信号');
+    return { clean: true, tests: 3 };
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 }
 
 function mainTraceFiles(files) {
@@ -426,11 +487,12 @@ async function capture(args, plan) {
     const pollMs = 1500;
     const deadline = Date.now() + args.duration * 1000;
     let everSeen = false;
+    const signalState = { offsets: new Map(), carry: new Map(), observed: new Set() };
     while (Date.now() < deadline) {
       const currentLogs = mainTraceFiles(listNdjsonFiles(plan.outDir, startedAt));
-      if (args.targetSignals.length && tailContains(currentLogs, args.targetSignals)) {
-        result.endReason = 'target-signal-observed';
-        console.log('[capture] 已在日志尾部观察到全部 trace 信号，开始收尾');
+      if (args.endSignals.length && scanSignalsIncremental(currentLogs, args.endSignals, signalState)) {
+        result.endReason = 'end-signal-observed';
+        console.log('[capture] 已观察到全部 end-signal，开始收尾');
         break;
       }
       const alive = await kernelFirefoxAlive(plan.firefoxExe);
@@ -507,7 +569,7 @@ async function capture(args, plan) {
       : args.signalPolicy;
     result.importSignalPolicy = importSignalPolicy;
     if (effectiveMain.length) {
-      result.importResults.push(importLog(plan.caseDir, effectiveMain, args.markdown, args.targetSignals, true, importSignalPolicy));
+      result.importResults.push(importLog(plan.caseDir, effectiveMain, args.markdown, args.evidenceSignals, true, importSignalPolicy));
       result.logLabels.push(`主 DOM trace（合并 ${effectiveMain.length} 个进程文件）`);
     }
     for (const file of catFiles) {
@@ -538,7 +600,8 @@ function renderMarkdown(obj) {
   if (result.importSignalPolicy && result.importSignalPolicy !== args.signalPolicy) {
     lines.push(`- 实际导入策略：${result.importSignalPolicy}（人工关闭/浏览器退出时保留有效 NDJSON，覆盖门禁仍由 check_trace_gate.js 执行）`);
   }
-  if (args.targetSignals.length) lines.push(`- trace 信号：${args.targetSignals.join('、')}（策略 ${args.signalPolicy}）`);
+  if (args.evidenceSignals.length) lines.push(`- evidence-signal：${args.evidenceSignals.join('、')}（策略 ${args.signalPolicy}）`);
+  if (args.endSignals.length) lines.push(`- end-signal：${args.endSignals.join('、')}`);
   lines.push(`- DOM trace 行数上限：${args.limit}`);
   lines.push(`- 启动参数：${[plan.firefoxExe].concat(plan.firefoxArgs).join(' ')}`);
   lines.push(`- 环境变量：MOZ_DOM_TRACE=1，MOZ_DOM_TRACE_FILE=<case trace file>，MOZ_DOM_TRACE_LIMIT=${args.limit}${args.ptype ? `，MOZ_DOM_TRACE_PTYPE=${args.ptype}` : ''}，MOZ_DISABLE_LAUNCHER_PROCESS=1`);
@@ -584,11 +647,16 @@ async function main() {
     console.log(usage());
     return;
   }
+  if (args.selfTest) {
+    const result = runSelfTest();
+    console.log(`capture_ruyitrace_log.js 自测通过：${result.tests} 项断言`);
+    return;
+  }
   // 手动 trace 模式：用户已用 RuyiTrace 手动采集完成，直接导入指定 NDJSON
   if (args.input) {
     const inputPath = path.resolve(args.input);
     if (!exists(inputPath)) throw new Error(`日志文件不存在：${inputPath}`);
-    const ret = importLog(args.caseDir || '.', inputPath, args.markdown, args.targetSignals, true, args.signalPolicy);
+    const ret = importLog(args.caseDir || '.', inputPath, args.markdown, args.evidenceSignals, true, args.signalPolicy);
     if (args.markdown) {
       const lines = ['# RuyiTrace 手动日志导入', ''];
       lines.push(`- 手动 trace 日志：${inputPath}`);

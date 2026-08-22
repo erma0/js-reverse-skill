@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2.3.49 - 2026-08-22
+
+### 修复
+- **trace 证据与生命周期语义拆分**：新增 `--evidence-signal` / `--end-signal`，证据信号不再自动承担浏览器关闭条件；采集器改用增量日志扫描，避免 signal 滚出尾部 1MB 后漏判；新增信号策略门禁，拒绝裸 `createElement`、`appendChild`、`querySelector` 等泛化 API 作为 writer 证据；补充验证码/JSONP 的 callback→参数构造→网络写入→回调最小链路要求。
+
 ## 2.3.48 - 2026-08-22
 
 ### 修复

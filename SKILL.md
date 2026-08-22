@@ -1,13 +1,11 @@
 ---
 name: js-reverse-skill
-version: 2.3.48
 description: >
   网页端 JavaScript 加密参数逆向与纯协议还原。逆向还原浏览器请求中加密参数、签名、token、
   cookie、设备指纹的生成逻辑；适用于各类动态参数的生成逻辑分析，覆盖标准算法、自定义混淆、
   obfuscator.io、JSVMP 黑盒补环境、WASM 加密、TLS 指纹模拟、Session 请求链、验证码 verify、
   反爬风控对抗等场景。覆盖桌面网页、移动 H5 与内置浏览器，交付 Node.js/Python 实现。
   不用于 App、小程序、桌面程序及 Native 逆向；JSVMP 默认黑盒执行或最小环境复现。
-argument-hint: "<目标网站 URL> <要还原的参数名> [目标接口 URL]"
 ---
 
 # 通用网页端 JS 逆向技能
@@ -203,15 +201,19 @@ Windows 下若 Python 脚本输出仍现编码异常，用 `PYTHONUTF8=1` 前缀
 日志采集：
 
 ```powershell
-node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-root> --trace-signal <环境API或签名写入点关键词> --import-after --markdown
-# --trace-signal 匹配 RuyiTrace 记录的环境 API / 写入点（如 fetch、XMLHttpRequest.send、handshake、参数名），
+node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-root> --evidence-signal <环境API或签名写入点关键词> --end-signal <明确完成事件> --import-after --markdown
+# --trace-signal / --evidence-signal 只匹配 RuyiTrace 记录的环境 API / 写入点（如 Headers.set(<参数>)、参数名、JSONP callback 注册），
 # 不传目标接口 URL——trace 记录的是 API 调用，不记录请求 URL，传 URL 字面量必然未命中。
+# 不得使用裸 createElement、appendChild、querySelector、JSON.stringify、Date.now 等泛化 API 作为 writer 信号；
+# 它们只能证明页面运行过，不能证明目标参数写入请求。门禁脚本会拒绝这些信号。
 # 也不传密钥/常量名（如 appSignKey、bl、secret）——trace 记录运行时值与写入点，不记录密钥字面量，
 # 传密钥名必然未命中并误触发硬阻断；应选参数写入点/参数名（如 noncestr、x-zse-96、Headers.set(...)）。
+# --end-signal 只控制自动采集何时提前关闭；不传时仅用户关闭或 duration 到期结束。
+# evidence-signal 与 end-signal 不再混用；JSONP/验证码优先使用网络终态或 callback/参数写入的具体信号。
 # 目标接口 URL 的命中证据由 Step 1 取证承担：forensic_ruyipage.py --targets <URL> + check_evidence.js --require-network-signal <URL>。
-# --target-signal 仅为兼容旧调用，等价于 --trace-signal。
+# --target-signal 仅为兼容旧调用，同时作为 evidence-signal 和 end-signal；新流程不要使用。
 # --signal-policy advisory 可用于人工结束或信号尚未确定的采集：日志仍会导入并报告覆盖不足，不误报为“没有 trace”。
-# 自动 trace 默认采集窗口 --duration 120 秒；达到 trace-signal 时自动收尾并关闭浏览器；用户提前关闭也会记录 endReason。
+# 自动 trace 默认采集窗口 --duration 120 秒；达到 end-signal 时自动收尾并关闭浏览器；用户提前关闭也会记录 endReason。
 # 窗口结束后仍需关闭进程、等待 NDJSON 完整刷盘并导入，命令总耗时可略超过 120 秒，但浏览器不应继续留存。
 ```
 
@@ -232,7 +234,9 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 `--trace-signal` 命中的是 trace 覆盖得到的「环境 API / 签名写入点」，不是网络请求 URL；网络 URL 使用 `--require-network-signal`，两者不可混用：
 
 - 信号是环境 API（`fetch`、`XMLHttpRequest.send`、`handshake`、参数名等）未命中 → 目标路径未触发，是硬信号，进入 TRACE_RETRY，不得自行放宽。
-- 目标是纯网络接口、trace 未覆盖 URL 字面量 → 属预期，不算采集失败，不要反复重试 trace；改用参数写入点（如 `Headers.set("x-zse-96", ...)`）或参数名定位签名链，并显式声明「trace 未覆盖目标接口 URL 字面量；签名链定位依据为 <写入点/关键词>」，写入 `notes/ruyitrace-summary.md`、阶段报告（如已启用）与最终总结；未声明不得进入 IMPLEMENT。目标接口 URL 的命中证据由 Step 1 取证承担（`forensic_ruyipage.py --targets` + `check_evidence.js --require-target-signal`）。
+- 目标是纯网络接口、trace 未覆盖 URL 字面量 → 属预期，不算采集失败，不要反复重试 trace；改用参数写入点（如 `Headers.set("x-zse-96", ...)`）或参数名定位签名链，并显式声明「trace 未覆盖目标接口 URL 字面量；签名链定位依据为 <写入点/关键词>」，写入 `notes/ruyitrace-summary.md`、阶段报告（如已启用）与最终总结；未声明不得进入 IMPLEMENT。目标接口 URL 的命中证据由 Step 1 取证承担（`forensic_ruyipage.py --targets` + `check_evidence.js --require-network-signal`）。
+
+证据信号必须是具体 writer、参数名、callback 注册或带限定对象的 API。裸 `createElement`、`appendChild`、`querySelector`、`JSON.stringify`、`Date.now` 等泛化 API 不能作为目标链路覆盖证据，也不能作为自动结束条件；脚本会直接拒绝。证据信号与自动采集结束信号必须分离。
 
 ### 4.3 EXTERNAL_LOOKUP
 
@@ -303,6 +307,8 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 
 识别结果必须引用落盘资源、NDJSON 或网络包具体字段，不以站点名称直接定类。
 
+验证码/JSONP 链路的最低证据要求：`callback 注册 → script.src/请求参数构造 → script 插入或等价网络写入 → load/verify 请求 → callback 执行 → 结果回调`。仅命中 `createElement`、`appendChild` 或页面初始化 API 不算 writer 覆盖；若 trace 只覆盖环境读取，必须在阶段报告和最终总结中明确未证明请求写入。
+
 ## 8. TRACE_ANALYZE
 
 **先 trace、后读源码（硬约束）**：进入本节后先跑 `import_ruyitrace_log` 生成摘要，再用 `search_trace --url <target-signal>` 直接定位请求链和 `stack.file:line:col`，最后才按行号/字符偏移切源码片段。禁止在拿到 trace 前先读 8MB 大 bundle 手工猜 webpack module id 或写 probe1~N 静态解析——那会耗尽上下文且命中率低。定位大文件 JS 关键词必须用 `search_js.js`；禁止 grep 单行超 64KB 的压缩 JS、禁止现场手搓 `node -e`（PowerShell 转义翻车）。**响应体非明文（`code` 非 0、`data` 二进制/乱码）时同理**：先查 trace 的 xhrNative 响应记录确认响应形态，再按响应方向四层（response→reader→decoder→parser，见 `references/crypto/crypto-entry.md`）追响应处理链；禁止先搜源码里的密钥串猜解密算法——密钥可能作用于别的字段。
@@ -351,6 +357,8 @@ E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定�
 - 失败请求能区分签名错误、会话过期、资源过期、频率限制、IP 风控和业务参数错误。
 
 至少保留一份脱敏验证摘要和可复现命令；不得输出完整 Authorization、Cookie、Token、密钥或验证码答案。401/403/412/429 先诊断，不得用浏览器自动化或硬编码成功样本绕过。
+
+真实验证失败时不得进入 `DELIVER`。可以交付“未完成/诊断中”的中间材料，但执行入口、最终总结和状态行必须标为 `REAL_VERIFY_FAILED`，不得使用“已完成还原”“服务端已接受”或等价成功措辞；只有 sign-only 明确豁免，且必须单独标注未做真实验证。
 
 sign-only 模式必须：标明未完成真实 API 验证；只验证本地输入输出、中间值和格式约束；不宣称签名已被服务端接受；入口提供显式 `--sign-only` 或等价模式且不默认联网。
 

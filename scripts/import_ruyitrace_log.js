@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const crypto = require('crypto');
+const { assertTraceSignals } = require('./lib/trace-signal-policy');
 
 function parseArgs(argv) {
   const args = {
@@ -40,6 +41,7 @@ function parseArgs(argv) {
   if (!Number.isFinite(args.truncationThreshold) || args.truncationThreshold < 1) args.truncationThreshold = 3900;
   if (!Number.isFinite(args.maxTruncationExamples) || args.maxTruncationExamples < 1) args.maxTruncationExamples = 50;
   args.targetSignals = args.targetSignals.filter((s) => s && s.trim());
+  assertTraceSignals(args.targetSignals, 'trace-signal');
   if (!['strict', 'advisory'].includes(args.signalPolicy)) args.signalPolicy = 'strict';
   if (!args.json && !args.markdown) args.markdown = true;
   return args;

@@ -80,7 +80,7 @@ python scripts/forensic_ruyipage.py --url <目标页> --case-dir <project-root> 
 
 ```bash
 node scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <project-root> --ruyitrace-home <RuyiTrace-dir> --dry-run --markdown
-node scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <project-root> --ruyitrace-home <RuyiTrace-dir> --trace-signal handshake --import-after --markdown
+node scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <project-root> --ruyitrace-home <RuyiTrace-dir> --evidence-signal handshake --import-after --markdown
 ```
 
 执行要求：
@@ -114,7 +114,7 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 
 退出码 0（Step 2 已具备：NDJSON 存在 + 关联目标域；如要求 writer/API 信号则本次全部有效进程文件聚合后命中）才可进入 CASE_LOOKUP；退出码 1 时区分两类：无有效 NDJSON = Step 2 缺失，停在 TRACE_CAPTURE；NDJSON 存在但 writer/API 未命中 = Step 2 已具备、目标链路覆盖不足，停在 TRACE_RETRY。两类都不得进入 CASE_LOOKUP / EXTERNAL_LOOKUP，不得以边界声明或 mock 替代。FORENSIC_CAPTURE → TRACE_CAPTURE 路径同样适用：FORENSIC_CAPTURE 补采后必须通过出口门禁才进 CASE_LOOKUP。STEP2_ONLY 路径（用户已提供 NDJSON）同样需要按是否要求 trace 信号判断覆盖。
 
-本脚本同时报告 Step 2 是否真产出（`step2.evidence`）和目标链路是否覆盖（`step2.targetCoverage`）；产出后的栈/API 整体质量是否达标见下方「质量判定标准」。三件事不混淆：Step 2 未产出 = 停在 TRACE_CAPTURE；NDJSON 已产出但 writer 未命中 = 不得说“没有 trace”，停在 TRACE_RETRY；writer 命中但整体质量不足 = 仍进 TRACE_RETRY。
+本脚本同时报告 Step 2 是否真产出（`step2.evidence`）和目标链路是否覆盖（`step2.targetCoverage`）；产出后的栈/API 整体质量是否达标见下方「质量判定标准」。三件事不混淆：Step 2 未产出 = 停在 TRACE_CAPTURE；NDJSON 已产出但 writer 未命中 = 不得说“没有 trace”，停在 TRACE_RETRY；writer 命中但整体质量不足 = 仍进 TRACE_RETRY。`evidence-signal` 只影响证据门禁，`end-signal` 只影响自动采集生命周期；不传 `end-signal` 时不得因证据信号命中而提前关闭。
 
 #### 质量判定标准
 
@@ -343,6 +343,8 @@ JS 引擎 trace（补环境）
 ## 验证码场景的 RuyiTrace 覆盖
 
 如果目标是验证码 / 风控验证 / challenge / WAF 接口，RuyiTrace 自动捕获或手动捕获都必须覆盖完整链路：触发验证码、验证码组件初始化、用户交互事件、加密参数生成、verify / validate / challenge 接口发起、结果回调。
+
+验证码/JSONP 的最小可审计链路为：`callback 注册 → script.src/请求参数构造 → script 插入或等价网络写入 → load/verify 请求 → callback 执行 → 结果回调`。仅命中 `createElement`、`appendChild` 或页面初始化 API 不算覆盖；若无法记录网络 writer，必须在总结中明确“trace 只覆盖环境读取，未证明请求写入”。
 
 - 用户提供完整流程时，自动捕获脚本应按该流程执行；若流程需要人工识别、登录、验证码答案或权限交互，暂停让用户完成。
 - 流程需要登录、验证码答案、人工识别或权限确认（AI 无法替代的物理交互）时，先启动 RuyiTrace 记录，再让用户操作；只有用户回复"已经完成触发到验证流程"后，才停止记录并导入 NDJSON。
