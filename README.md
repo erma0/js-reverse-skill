@@ -30,15 +30,25 @@
 
 ```
 js-reverse-skill/
-├── SKILL.md              流程骨架 + 规则 + 索引（AI 加载的主文档；版本号见 front-matter `version`，变更见 CHANGELOG.md）
+├── SKILL.md              流程骨架 + 规则 + 索引（AI 加载的主文档；版本变更见 CHANGELOG.md）
 ├── README.md             本文件
 ├── CHANGELOG.md          版本变更记录（每次 bump 同步更新）
 ├── assets/               可复用资产（AST 反混淆 + 补环境片段 + fixture 模板）
 ├── templates/            7 类交付入口模板（Node/Python、请求客户端、vm 沙箱、WASM、验证码）
-├── references/           知识参考（11 个专题目录，按需读取；含验证码封装层与答案层资产）
+├── references/           知识参考（12 个专题目录，按需读取；含验证码封装层与答案层资产、字体映射反爬）
 ├── cases/                22 个实证案例 + `index.json` 机器索引
-└── scripts/              工具脚本（ruyipage+RuyiTrace 采集/导入/检查 + 验证码题型分类/坐标/轨迹/答案校验）
+├── tests/                路由/门禁回归基准（状态机硬规则的可执行断言，CI 双平台运行）
+└── scripts/              工具脚本（ruyipage+RuyiTrace 采集/导入/检查 + 密文特征识别/Cookie 归因 + 验证码题型分类/坐标/轨迹/答案校验 + 供应链 pin）
 ```
+
+## 安装到 AI 编程助手
+
+本 Skill 是纯目录 + `SKILL.md`，不绑定特定客户端。任选一种方式接入：
+
+- **Agent Skills 机制**（Claude Code / ZCode / TRAE 等）：把整个仓库克隆到对应 skills 目录即可被自动发现，常见位置：用户级 `~/.agents/skills/js-reverse-skill/`、`~/.claude/skills/js-reverse-skill/`，或项目级 `<project>/.claude/skills/`、`<project>/.codex/skills/`。
+- **自定义指令 / 系统提示注入**（Cursor / Copilot 等）：把 `SKILL.md` 内容作为项目规范注入（如 `.cursorrules`、copilot-instructions.md 引用），并保证 `scripts/`、`references/`、`templates/`、`cases/` 随仓库可访问——脚本按 skill 根相对路径调用。
+
+运行要求：Node.js ≥ 18（门禁/检查脚本离线可用）；Python ≥ 3.9 仅取证（`forensic_ruyipage.py`）与验证码辅助脚本需要；ruyipage/RuyiTrace 由 `install_all.js` 按需安装到用户工程 `tools/`，首次安装后建议用 `check_tool_pins.js --record` 固化哈希锁定。
 
 ## 如何使用
 

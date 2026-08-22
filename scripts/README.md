@@ -1,6 +1,6 @@
 # 脚本索引
 
-本目录包含 54 个可执行脚本（47 个 JavaScript、7 个 Python），按功能分为 9 类。以下索引以 `scripts/` 当前实际文件为准，不包含 `README.md`。
+本目录包含 59 个可执行脚本（52 个 JavaScript、7 个 Python），按功能分为 10 类。以下索引以 `scripts/` 当前实际文件为准，不包含 `README.md` 与 `lib/` 共享模块。
 
 本文中的 `<project-root>` 指项目根目录，其下包含平级的 `case/` 与 `result/` 目录。需要 case 目录的脚本使用 `<project-root>/case`，需要项目根目录的脚本直接使用 `<project-root>`。`forensic_ruyipage.py` 与 `capture_ruyitrace_log.js` 会在 `--case-dir` 下创建 `case/`，因此必须传入 `<project-root>`。`check_session_resume`/`check_fingerprint_fixture`/`check_trace_api_coverage` 已归一化，传 `<project-root>` 或 `<project-root>/case` 均可。
 
@@ -38,9 +38,16 @@
 | `capture_ruyitrace_log.js` | 自动采集或手动导入 RuyiTrace NDJSON；默认采集窗口 120 秒，`--evidence-signal` 只做证据门禁，只有明确的 `--end-signal` 才提前收尾，等待末行完整刷盘，记录 `endReason` 并校验 Firefox 进程已退出；关闭与导入会使命令总耗时略长于窗口 | `node scripts/capture_ruyitrace_log.js --url <目标URL> --case-dir <project-root> --evidence-signal handshake --ruyitrace-home <RuyiTrace目录> --import-after --markdown` |
 | `import_ruyitrace_log.js` | 导入 RuyiTrace NDJSON，生成摘要并标记截断字段；`--signal-policy advisory` 可在人工结束/信号不确定时只报告覆盖不足而不误报日志缺失；支持 `--trace-signal`，旧 `--target-signal` 兼容 | `node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-root> --trace-signal handshake --signal-policy advisory --markdown` |
 
+## 识别与归因辅助（2 个）
+
+| 脚本 | 功能 | 典型用法 |
+|------|------|---------|
+| `identify_crypto.js` | 密文/哈希特征 → 算法族假设（长度/字符集/结构/base64 magic bytes），T1 识别入口，识别≠协议复现 | `node scripts/identify_crypto.js --value <密文样本> --label <参数名> --markdown` |
+| `analyze_cookie_attribution.js` | Cookie 归因融合：capture.json Set-Cookie（服务端）× trace cookie 写入（JS，含 stack 定位），判定每个 Cookie 的生成方与下一步路径 | `node scripts/analyze_cookie_attribution.js --case-dir <project-root> --cookie <名称> --markdown` |
+
 首次终态等待默认 `--wait 120` 秒：`--targets` 应填写最终登录/业务提交等终态接口；多个目标按 OR 处理，任一非 OPTIONS 2xx 命中后另完整抓取 `--target-settle`（默认 3 秒）并关闭浏览器，未命中到点自动关闭。HTTP 2xx 仅代表目标请求已取证，不代表站点业务码成功；预计会出现失败后重试时应调大 `--target-settle`，关联材料会以最后一次已捕获的有效终态向前回溯。JSON 默认只内联 1MB 预览；超过预览阈值的普通 body 完整写入 `case/forensic/bodies/`（默认单体上限 10MB），WASM 完整写入 `case/forensic/wasm/`（默认单体上限 50MB），关联动态材料总预算默认 100MB。`target-hits.json`/`related-hits.json` 的 `*_complete`、`*_saved_to`、`*_sha256` 字段决定是否有完整证据，不能把预览当作原始 body。指定 `--targets/--targets-regex` 后，若未捕获到非 OPTIONS 2xx 终态响应，脚本退出码非 0（报告 `NO_TARGET` 或 `PARTIAL`），作为 Step 1 缺失硬信号。目标请求需要登录 / 点击 / 验证码等手动触发时，浏览器打开期间应提示用户操作（登录场景可加 `--manual-pause`）；窗口不够可调大 `--wait`。终态接口未命中时，JS 源码搜索只能作辅助假设，不能替代 Step 1 网络记录。
 
-`check_evidence.js` 退出码是硬信号：Step 1 使用 `--require-network-signal`，Step 2 使用 `--require-trace-signal`，二者分别判定。Step 2 的 NDJSON 已产出但 writer 信号未命中时，不得报告“没有 trace”，应报告“trace 已产出、目标链路未覆盖”并进入 TRACE_RETRY。旧的 `--require-target-signal` 仅为兼容，不应再用于 JSONP/script/导航 URL。仓库推送会由 `.github/workflows/skill-checks.yml` 自动运行语法、self-test 和引用一致性检查。可运行 `node scripts/check_evidence.js --self-test` 执行内置自测。
+`check_evidence.js` 退出码是硬信号：Step 1 使用 `--require-network-signal`，Step 2 使用 `--require-trace-signal`，二者分别判定。Step 2 的 NDJSON 已产出但 writer 信号未命中时，不得报告“没有 trace”，应报告“trace 已产出、目标链路未覆盖”并进入 TRACE_RETRY。旧的 `--require-target-signal` 仅为兼容，不应再用于 JSONP/script/导航 URL。仓库推送会由 `.github/workflows/skill-checks.yml` 自动运行语法、self-test、引用一致性检查与路由回归基准（Ubuntu + Windows 双平台）。可运行 `node scripts/check_evidence.js --self-test` 执行内置自测。
 
 `check_trace_gate.js` 是 TRACE_CAPTURE / FORENSIC_CAPTURE 出口门禁：复检 Step 2 是否真实产出，并单独检查目标 writer 覆盖。NDJSON 已产出但 writer 未命中时，输出“覆盖不足”而不是“没有 trace”。网络 URL 使用 `--require-network-signal`，trace writer 使用 `--require-trace-signal`。可运行 `node scripts/check_trace_gate.js --self-test` 执行内置自测。
 
@@ -80,15 +87,18 @@
 | `check_fingerprint_fixture.js` | 检查指纹 fixture 对 Canvas、WebGL、Audio、DOM 几何等的覆盖 | `node scripts/check_fingerprint_fixture.js --case-dir <project-root> --markdown` |
 | `check_dynamic_resources.js` | 检查动态资源是否仅作快照，并具备运行时刷新设计 | `node scripts/check_dynamic_resources.js --case-dir <project-root> --markdown` |
 | `check_change_memory.js` | 检查代码变更记忆中的修改原因、禁止回退与验证记录 | `node scripts/check_change_memory.js --case-dir <project-root> --markdown` |
-| `compare_fixture.js` | 对比 fixture 样本与实际输出，定位首个偏差点 | `node scripts/compare_fixture.js --fixture sample.fixture.json --actual node-output.json --field sign --markdown` |
+| `check_routing_benchmarks.js` | 状态机/门禁路由回归基准 runner：按 `tests/routing-benchmarks/cases.json` 还原证据现场、真实执行门禁脚本并断言退出码与输出；skillAnchors 与 SKILL.md 双向防漂移 | `node scripts/check_routing_benchmarks.js --markdown` |
+| `check_env_prerequisites.js` | IMPLEMENT 补环境前置门禁：校验 `case/notes/entry-chain.md`（含 stack 定位）与 `missing-env-priority.md`（含优先级与证据来源标记或黑盒声明）两文件齐备达标，拦截 Node 报错盲补 | `node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` |
+| `compare_fixture.js` | 对比 fixture 样本与实际输出，定位首个偏差点（REAL_VERIFY 前置的标准离线回归步骤，退出码 0=一致 / 2=偏差 / 1=错误） | `node scripts/compare_fixture.js --fixture sample.fixture.json --actual node-output.json --field sign --markdown` |
 
-## 安装与下载（3 个）
+## 安装与下载（4 个）
 
 | 脚本 | 功能 | 典型用法 |
 |------|------|---------|
-| `install_all.js` | 检测并安装缺失组件到项目 `tools/` | `node scripts/install_all.js --project-dir <project-root> --yes --markdown` |
+| `install_all.js` | 检测并安装缺失组件到项目 `tools/`；ruyiPage 按 `lib/tool-pins.json` 的 pythonPackages 锁定版本安装（当前 1.2.62） | `node scripts/install_all.js --project-dir <project-root> --yes --markdown` |
 | `install_ruyipage_runtime.js` | 以 dry-run / install 双阶段安装 ruyiPage runtime 到指定目录 | `node scripts/install_ruyipage_runtime.js --python python --install-dir <目录> --install --markdown` |
-| `download_ruyi_tool.js` | 下载 RuyiTrace 或 ruyipage-firefox，支持自动解压 zip | `node scripts/download_ruyi_tool.js --tool ruyitrace --dest <目录> --extract --markdown` |
+| `download_ruyi_tool.js` | 下载 RuyiTrace 或 ruyipage-firefox，支持自动解压 zip；命中 `scripts/lib/tool-pins.json` 锁定记录或显式 `--sha256` 时强制哈希校验，不匹配即删产物并失败，未锁定下载报告 sha256 供固化 | `node scripts/download_ruyi_tool.js --tool ruyitrace --dest <目录> --extract --markdown` |
+| `check_tool_pins.js` | 供应链 pin 门禁：GitHub 资产哈希锁定（records）+ PyPI 包版本锁定（pythonPackages）；`--record` 固化、`--verify-file` 校验单个下载、`--python <cmd>` 复验本机包版本漂移、`--strict` 未锁定即失败 | `node scripts/check_tool_pins.js --python python --markdown` |
 
 ## 验证码识别与求解辅助（6 个）
 
@@ -115,13 +125,14 @@
 |------|-----------:|
 | 环境与会话检测 | 7 |
 | 案例与项目管理 | 7 |
-| 网络取证与日志采集 | 4 |
+| 网络取证与日志采集 | 5 |
+| 识别与归因辅助 | 2 |
 | Trace 分析与运行时闭环 | 9 |
 | 补环境与网络语义检查 | 7 |
-| 质量检查与交付门禁 | 7 |
-| 安装与下载 | 3 |
+| 质量检查与交付门禁 | 9 |
+| 安装与下载 | 4 |
 | 验证码识别与求解辅助 | 6 |
 | 验证码验证门禁 | 3 |
-| **合计** | **53** |
+| **合计** | **59** |
 
 > 滑块缺口坐标来源判定（A 接口参数 / B 图片像素 / C 纯图像三路线）见 `references/captcha/gap-coordinate-source.md`。本目录中的验证码辅助脚本负责 C 类坐标换算、轨迹生成、答案校验与打码模板，A / B 类走封装层逆向。

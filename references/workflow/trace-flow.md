@@ -61,6 +61,10 @@ Step 2: RuyiTrace 日志采集（TRACE_CAPTURE）
 python scripts/forensic_ruyipage.py --url <目标页> --case-dir <project-root> --targets "pc_home_feed" --browser-path <定制Firefox> --markdown
 ```
 
+取证会自动保存入口页面 HTML 到 `case/forensic/document.html`（含 412/JS challenge 页内联脚本，是 acw_sc__v2 等 challenge cookie 的强制证据），无论是否指定 `--targets`。
+
+预算与落盘细则（终态等待 `--wait 120` / `--manual-pause` / `--target-settle`、60 包/100MB 关联预算、body 单体 10MB、WASM 50MB、JSON 内联预览 1MB、四类落盘位置 target-hits/related-hits/bodies/wasm/js、`*_complete=false` 与 `saved_to` 语义）见 `scripts/README.md` 网络取证与日志采集一节；本节只保留流程与硬约束。
+
 仅在复杂多步交互超出脚本参数（`--click` / `--scroll` / `--manual-pause`）能力时才手写，且必须：用 `targets=True` 抓全部包、`page.capture.wait(count=1)` 取单包、`page.capture.steps` 读全部包、`CapturePacket.to_dict()` 取响应体。详见 `references/tooling/ruyi-tooling.md` 的“逃生舱”小节。
 
 只有当 `node scripts/check_external_tools.js --markdown --project-dir <project-root>` 显示"默认解析路径是否为定制 Firefox：是"时，才可直接 `FirefoxPage()` 或 `launch(headless=False)`。否则必须显式指定已验证的定制 Firefox 路径。

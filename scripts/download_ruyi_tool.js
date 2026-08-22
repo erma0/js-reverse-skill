@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const REPOS = {
@@ -18,14 +19,15 @@ const TLS_OPTS = process.env.RUYI_INSECURE_TLS === '1'
   : {};
 
 function parseArgs(argv) {
-  const args = { tool: '', dest: '', extract: false, dryRun: false, json: false, markdown: false };
-  for (let i = 2; i < argv.length; i++) {
+  const args = { tool: '', dest: '', extract: false, dryRun: false, sha256: '', json: false, markdown: false };
+  for (let i = 2; i < argv.length; i += 1) {
     const a = argv[i];
     const nextVal = (fb) => (i + 1 < argv.length && typeof argv[i + 1] === 'string' && !argv[i + 1].startsWith('-')) ? argv[++i] : fb;
     if (a === '--tool') args.tool = nextVal('');
     else if (a === '--dest') args.dest = nextVal('');
     else if (a === '--extract') args.extract = true;
     else if (a === '--dry-run') args.dryRun = true;
+    else if (a === '--sha256') args.sha256 = nextVal('');
     else if (a === '--json') args.json = true;
     else if (a === '--markdown') args.markdown = true;
     else if (a === '--help' || a === '-h') args.help = true;
@@ -42,7 +44,34 @@ function usage() {
   node scripts/download_ruyi_tool.js --tool ruyitrace --dest <download-dir> --extract --markdown
   node scripts/download_ruyi_tool.js --tool ruyipage-firefox --dest <download-dir> --dry-run --markdown
 
-说明：仅在用户确认后下载。--extract 自动解压 zip 到 dest 目录（Windows 用 Expand-Archive）。`;
+说明：仅在用户确认后下载。--extract 自动解压 zip 到 dest 目录（Windows 用 Expand-Archive）。
+供应链锁定：scripts/lib/tool-pins.json 中命中 '<tool>/<资产名>' 记录时强制 sha256 校验，
+不匹配即删除产物并失败；--sha256 <hex> 可显式指定期望哈希（同样强制）。
+未锁定的下载会在输出中报告实际 sha256，首次安装后用
+  node scripts/check_tool_pins.js --record --file <产物> --tool <tool> --tag <release tag>
+固化记录，防止上游 release 被替换后无感知引入篡改产物。`;
+}
+
+// 下载后哈希校验：命中 pin 或显式 --sha256 必须匹配，否则删除产物并抛错
+function verifyDownloadedHash(tool, safeName, file, expectedFromArg) {
+  const h = crypto.createHash('sha256');
+  h.update(fs.readFileSync(file));
+  const actual = h.digest('hex');
+  let pinRecord = null;
+  try {
+    const pins = JSON.parse(fs.readFileSync(path.join(__dirname, 'lib', 'tool-pins.json'), 'utf8'));
+    pinRecord = (pins.records || {})[`${tool}/${safeName}`] || null;
+  } catch { /* pins 清单缺失/损坏不阻断下载，按未锁定处理 */ }
+  const expected = expectedFromArg || (pinRecord ? pinRecord.sha256 : '');
+  if (expected && actual.toLowerCase() !== String(expected).toLowerCase()) {
+    try { fs.unlinkSync(file); } catch { /* ignore */ }
+    throw new Error(`sha256 校验失败：期望 ${expected}，实际 ${actual}。产物已删除——上游资产与锁定记录/期望值不一致，核实 release 来源后再更新 scripts/lib/tool-pins.json。`);
+  }
+  return {
+    sha256: actual,
+    pinStatus: pinRecord ? 'pinned(verified)' : (expectedFromArg ? 'arg(verified)' : 'unpinned'),
+    pinTag: pinRecord ? (pinRecord.tag || '') : '',
+  };
 }
 
 // ----- URL 安全校验（SSRF / file:// / 明文 防御）-----
@@ -256,17 +285,26 @@ async function plan(args) {
   if (!args.dryRun) {
     await downloadFile(downloadUrl, file);
     result.downloaded = true;
+    const verified = verifyDownloadedHash(args.tool, safeName, file, args.sha256);
+    Object.assign(result, verified);
     if (args.extract && isZip) {
       const ex = extractZip(file, extractDir);
       result.extracted = ex.ok;
       result.extractError = ex.ok ? '' : (ex.stderr || ex.error || '解压失败');
     }
+  } else {
+    result.sha256 = '';
+    result.pinStatus = 'dry-run';
   }
   return result;
 }
 
 function renderMarkdown(result) {
   const lines = ['# Ruyi 工具下载结果', '', `- 工具：${result.tool}`, `- 仓库：${result.repo}`, `- Release：${result.releaseName || result.tagName}`, `- Release URL：${result.releaseUrl}`, `- 资产：${result.assetName}`, `- 大小：${result.assetSize}`, `- 目标文件：${result.destFile}`, `- dry-run：${result.dryRun ? '是' : '否'}`, `- 是否已下载：${result.downloaded ? '是' : '否'}`];
+  if (result.downloaded) {
+    lines.push(`- sha256：${result.sha256}`);
+    lines.push(`- pin 状态：${result.pinStatus}${result.pinTag ? `（tag ${result.pinTag}）` : ''}`);
+  }
   if (result.mirror) lines.unshift(`> GitHub 镜像：${result.mirror}`, '');
   if (result.extractDir) {
     lines.push(`- 解压目录：${result.extractDir}`);
@@ -277,6 +315,14 @@ function renderMarkdown(result) {
   if (result.dryRun) lines.push('- 当前只是下载计划；只有用户确认后再去掉 `--dry-run` 下载。');
   else if (result.extracted) lines.push('- 下载并解压完成。请重新运行检测脚本验证。');
   else lines.push('- 下载完成。请用户解压 / 安装后，提供工具目录并重新运行检测脚本。');
+  if (result.downloaded && result.pinStatus === 'unpinned') {
+    lines.push('', `## 供应链提示（未锁定）`,
+      `- 本次下载产物 sha256：\`${result.sha256}\``,
+      '- 首次安装确认可用后固化锁定记录，之后同资产下载将强制校验：',
+      '```bash',
+      `node scripts/check_tool_pins.js --record --file "${result.destFile}" --tool ${result.tool} --tag ${result.tagName || 'v?'}`,
+      '```');
+  }
   return lines.join('\n') + '\n';
 }
 

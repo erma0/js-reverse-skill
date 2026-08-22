@@ -47,11 +47,17 @@ function usage() {
 - 关键硬门禁锚点存在：GATE-0 / GATE-1 / GATE-2 / EVIDENCE_GATE / 纯协议红线 / REAL_VERIFY /
   check_evidence.js / check_final_artifact.js / 最终项目总结.md / --target-signal / TRACE_RETRY。
 - SKILL.md 中引用的 references / scripts / assets / templates / cases 路径真实存在。
-- reference-map 若被引用，其内部相对链接同样校验。`;
+- reference-map 若被引用，其内部相对链接同样校验。
+- scripts/README.md 索引同步：每个 scripts/ 顶层脚本都被索引、表格不指向不存在
+  的脚本、头部计数（总/JS/Python）与实际文件数一致（防止加脚本忘更新索引的计数漂移）。`;
 }
 
 function exists(p) {
   try { return !!p && fs.existsSync(p); } catch { return false; }
+}
+
+function isDir(p) {
+  try { return !!p && fs.statSync(p).isDirectory(); } catch { return false; }
 }
 
 function readText(p) {
@@ -91,6 +97,52 @@ function walkFiles(dir) {
     else out.push(full);
   }
   return out;
+}
+
+// scripts/README.md 索引漂移检测：脚本文件 ↔ 索引 ↔ 头部计数 三方一致。
+// 只在 scripts/ 与其 README 同时存在时生效（最小分发安装不受影响）。
+function checkScriptsIndex(root) {
+  const problems = [];
+  const scriptsDir = path.join(root, 'scripts');
+  const readmePath = path.join(scriptsDir, 'README.md');
+  if (!isDir(scriptsDir) || !exists(readmePath)) return problems;
+
+  const scriptFiles = fs.readdirSync(scriptsDir, { withFileTypes: true })
+    .filter((e) => e.isFile() && /\.(js|py)$/.test(e.name))
+    .map((e) => e.name)
+    .sort();
+  const readme = readText(readmePath);
+
+  for (const name of scriptFiles) {
+    if (!readme.includes(`\`${name}\``)) {
+      problems.push({ type: 'script-index-missing', message: `脚本未在 scripts/README.md 索引：${name}` });
+    }
+  }
+
+  // 表格行 `| \`name.js\` |` 指向的脚本必须存在（防删除脚本后索引残留）
+  const tabled = new Set();
+  for (const m of readme.matchAll(/^\|\s*`([^`]+\.(?:js|py))`/gm)) tabled.add(m[1]);
+  for (const name of tabled) {
+    if (!scriptFiles.includes(name)) {
+      problems.push({ type: 'script-index-stale', message: `scripts/README.md 索引指向不存在的脚本：${name}` });
+    }
+  }
+
+  // 头部计数（总/JS/Python）与实际一致：防止加脚本忘更新索引头
+  const countMatch = readme.match(/(\d+)\s*个可执行脚本（\s*(\d+)\s*个 JavaScript、\s*(\d+)\s*个 Python）/);
+  if (countMatch) {
+    const jsCount = scriptFiles.filter((n) => n.endsWith('.js')).length;
+    const pyCount = scriptFiles.filter((n) => n.endsWith('.py')).length;
+    const actual = [String(scriptFiles.length), String(jsCount), String(pyCount)];
+    const claimed = [countMatch[1], countMatch[2], countMatch[3]];
+    if (claimed.join('/') !== actual.join('/')) {
+      problems.push({
+        type: 'script-index-count',
+        message: `scripts/README.md 头部计数失同步：宣称 ${claimed.join('/')}（总/JS/Python），实际 ${actual.join('/')}——新增或删除脚本后必须同步索引`,
+      });
+    }
+  }
+  return problems;
 }
 
 const REQUIRED_ANCHORS = [
@@ -159,6 +211,8 @@ function checkSkill(skillPath, root) {
     }
   }
 
+  problems.push(...checkScriptsIndex(root));
+
   return { skillPath, references, problems };
 }
 
@@ -196,6 +250,20 @@ function selfTest() {
     assert.strictEqual(result.problems.length, 1);
     assert.strictEqual(result.problems[0].type, 'missing-reference');
     assert(result.problems[0].message.includes('scripts/missing.js'));
+
+    // scripts/README 索引漂移：脚本未索引 + 计数失同步必须被捕获；同步良好的索引零问题
+    const scriptsDir = path.join(dir, 'scripts');
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    fs.writeFileSync(path.join(scriptsDir, 'alpha.js'), '', 'utf8');
+    fs.writeFileSync(path.join(scriptsDir, 'beta.py'), '', 'utf8');
+    fs.writeFileSync(path.join(scriptsDir, 'README.md'), '本目录包含 5 个可执行脚本（4 个 JavaScript、1 个 Python）\n\n| `gamma.js` | 不存在 |\n', 'utf8');
+    const drift = checkScriptsIndex(dir);
+    const types = drift.map((p) => p.type);
+    assert(types.includes('script-index-missing'), '未索引脚本应报 problem');
+    assert(types.includes('script-index-stale'), '索引指向不存在脚本应报 problem');
+    assert(types.includes('script-index-count'), '计数失同步应报 problem');
+    fs.writeFileSync(path.join(scriptsDir, 'README.md'), '本目录包含 2 个可执行脚本（1 个 JavaScript、1 个 Python）\n\n| `alpha.js` | ok |\n| `beta.py` | ok |\n', 'utf8');
+    assert.strictEqual(checkScriptsIndex(dir).length, 0, '同步索引应零问题');
     return 'self-test passed';
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

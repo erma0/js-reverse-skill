@@ -10,8 +10,13 @@ permissions:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        # 主用环境是 Windows（PowerShell 命令、编码兜底），CI 必须双平台兜底
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -21,18 +26,44 @@ jobs:
         with:
           node-version: 20
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Check JavaScript syntax
         run: |
           node --check scripts/check_evidence.js
           node --check scripts/check_trace_gate.js
           node --check scripts/capture_ruyitrace_log.js
           node --check scripts/import_ruyitrace_log.js
+          node --check scripts/download_ruyi_tool.js
+          node --check scripts/identify_crypto.js
+          node --check scripts/analyze_cookie_attribution.js
+          node --check scripts/check_tool_pins.js
+          node --check scripts/check_routing_benchmarks.js
+          node --check scripts/check_env_prerequisites.js
 
-      - name: Run deterministic self-tests
+      - name: Run deterministic self-tests (Node)
         run: |
           node scripts/check_evidence.js --self-test
           node scripts/check_trace_gate.js --self-test
+          node scripts/check_routing_benchmarks.js --self-test
+          node scripts/identify_crypto.js --self-test
+          node scripts/analyze_cookie_attribution.js --self-test
+          node scripts/check_tool_pins.js --self-test
+          node scripts/check_env_prerequisites.js --self-test
+          node scripts/capture_ruyitrace_log.js --self-test
+          node scripts/check_final_artifact.js --self-test
           node scripts/check_skill_consistency.js
+
+      - name: Run deterministic self-tests (Python)
+        run: |
+          python scripts/classify_verify.py --self-test
+          python scripts/forensic_ruyipage.py --self-test
+
+      - name: Run routing/gate regression benchmarks
+        run: node scripts/check_routing_benchmarks.js --markdown
 
       - name: Check patch whitespace
         run: git diff --check

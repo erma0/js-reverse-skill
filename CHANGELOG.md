@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## 2.3.52 - 2026-08-22
+
+### 变更
+- **IMPLEMENT 补环境前置门禁落地（文本规则→脚本兜底，2.3.22 原则）**：新增 `scripts/check_env_prerequisites.js`——SKILL.md 4.4「entry-chain.md + missing-env-priority.md 两文件缺一不得开始补环境」此前是纯文本规则，现校验两文件齐备且内容达标（entry-chain 含 stack.file:line:col 定位与入口表述；missing-env-priority 含优先级标记与「RuyiTrace 证据 / Node trace 补充 / 推断」来源标记或「黑盒执行，不逐项精确复现」声明），退出码非 0 不得开始补环境；SKILL.md 4.4 挂入门禁命令，自测 5 项断言。
+- **路由基准扩容 16→25**：新增 IMPLEMENT 前置门禁（RB-017/018）、多进程 NDJSON 信号聚合语义（RB-019，锁住 2.3.48 修复的「不同进程文件各命中一个 writer 信号按聚合判定」行为）、验证码门禁链（RB-020 classify_verify 自测、RB-021/022 check_captcha_answer FAIL 拦截与 CLEAN 放行）、identify_crypto 形态矩阵（RB-023 JWT / RB-024 WASM magic / RB-025 UUID）。
+- **Python 包供应链锁定**：`tool-pins.json` 新增 `pythonPackages` 段并固化 ruyiPage==1.2.62（2.3.47 验证组合）；`install_all.js` 按锁定版本精确安装（升级必须先更新锁定记录并回归）；`check_tool_pins.js` 新增 `--python <cmd>` 复验本机已装版本（pip show 只读，SKEW 即失败），自测 6→10 项。本机实测 ruyiPage 1.2.62 与锁定一致。
+- **CI 自测覆盖补齐**：接入此前有 `--self-test` 却未进 CI 的脚本——`capture_ruyitrace_log.js`、`check_final_artifact.js`（Node）与 `classify_verify.py`、`forensic_ruyipage.py`（Python，新增 setup-python 步骤，两脚本自测均为离线确定性）。
+- **SKILL.md §4.2 瘦身（压缩约 34 行细则）**：网络取证的预算/落盘/等待参数长注释压缩为 4 行核心语义 + 指针（细则已在 scripts/README 与 trace-flow.md，document.html 自动保存事实下沉 trace-flow.md「首选通用脚本」节）；终态语义长段压缩约半（保留 PARTIAL/NO_TARGET 退出码、2xx≠业务成功、`saved_to`/`*_complete` 等硬规则与全部基准锚点）；出口门禁复检段与状态机后段落的逐字重复压缩。锚点完整性由 25 条路由基准与 check_skill_consistency 双向校验兜底。
+
+### 修复
+- README 目录树声称「版本号见 front-matter `version`」但 SKILL.md frontmatter 并无该字段（skill 标准也不建议放版本号）——改为「版本变更见 CHANGELOG.md」。
+
+## 2.3.51 - 2026-08-22
+
+### 变更（吸纳热门同类 skill 项目的工程化能力）
+- **路由/门禁回归基准**：新增 `scripts/check_routing_benchmarks.js` + `tests/routing-benchmarks/cases.json`（14 用例）。每条用例在独立临时目录还原证据现场（capture/NDJSON/用户材料），真实执行门禁脚本并断言退出码与输出关键词；`skillAnchors` 同步断言 SKILL.md 规则文本存在，实现「改门禁语义不改文档」「改文档不改基准」双向防漂移。覆盖 GATE-2 硬阻断、JS 辅助材料不计 Step 1、OPTIONS 非命中、TRACE_CAPTURE 出口门禁（放行/阻断/覆盖不足/泛化信号拒绝）、STEP2_ONLY、cURL 材料计入 Step 1、MATERIALS_FALLBACK/IMPLEMENT Step 2 前置/T1 信号表文本锚点。CI 全量运行。
+- **Cookie 归因融合分析**：新增 `scripts/analyze_cookie_attribution.js`——capture.json 的 Set-Cookie（服务端下发）× RuyiTrace NDJSON 的 document.cookie/CookieStore 写入（含 stack.file:line:col）双源融合，逐 Cookie 判定 server/js/both/unknown 并给出下一步路径（server→复现请求链禁止硬编码；js→按写入点还原挑战/签名算法）。数据源取自现有 Step 1 + Step 2 取证产物，无新增采集动作。
+- **密文特征识别（T1 入口脚本化）**：新增 `scripts/identify_crypto.js`——按长度/字符集/香农熵/结构（JWT/UUID/JSON/URL 编码）/base64 解码 magic bytes（WASM/ZIP/gzip 等）输出算法族假设排序，把 `references/crypto/algorithm-families.md` 的 T1 识别指纹落成可执行入口；输出明示「识别≠协议复现，同长度族不可仅凭密文区分」。
+- **字体反爬知识库（CSS/渲染层分类）**：新增 `references/rendering/font-anti-crawl.md`（新 rendering 专题目录）。按内容渲染层反爬定位（非验证码题型）：T1 识别信号（@font-face/FontFace、woff/woff2 动态 URL、PUA 码点）、静态/动态映射二分、还原路径（取证判形态→fontTools 解 cmap→明文比对/字形相似度→映射表外置交付）、映射参与签名/字体 URL 需签名的叠加场景与常见坑（woff2 需 brotli、同会话取样）。SKILL.md 第 7 节 T1 信号表新增字体反爬行，reference-map 同步路由。
+- **供应链 pin 门禁**：新增 `scripts/lib/tool-pins.json` 锁定清单 + `scripts/check_tool_pins.js`（记录/复验/`--strict` 拒绝未锁定）；`download_ruyi_tool.js` 新增 `--sha256` 并在命中锁定记录时强制哈希校验（不匹配即删产物并失败），未锁定下载在输出中报告 sha256 与固化命令。SKILL.md「新增依赖写入依赖契约」规则获得机器强制层。
+- **CI 双平台矩阵**：`skill-checks.yml` 从仅 ubuntu-latest 扩为 Ubuntu + Windows 矩阵（主用环境是 Windows，PowerShell 命令与编码兜底此前无 CI 覆盖）；语法检查、确定性自测扩到全部新脚本，新增路由回归基准步骤。
+- **离线回归标准化（吸纳上游 verify_signer_offline 思路）**：SKILL.md 第 10 节 REAL_VERIFY 前置「fixture 离线回归」硬步骤——取证真实样本固化为 `case/fixtures/*.fixture.json`，本地入口同输入生成实际输出过 `compare_fixture.js` 逐字段比对，退出码 0 才进真实 API 验证，退出码 2 回 IMPLEMENT；路由基准新增 RB-015/016（一致放行 / 偏差拦截退出码 2）。
+- **scripts/README 索引漂移检测（吸纳上游 INDEX 自动生成思路）**：`check_skill_consistency.js` 新增 `checkScriptsIndex`——scripts/ 顶层脚本必须被索引、索引表格不得指向不存在脚本、头部计数（总/JS/Python）与实际文件数三方一致；自测扩 drift 场景（未索引/残留/计数失同步三类 problem）。
+- **多客户端安装说明**：README 新增「安装到 AI 编程助手」——Agent Skills 目录（`~/.agents/skills`、`~/.claude/skills`、项目级 `.claude/skills`/`.codex/skills`）与系统提示注入两种接入方式、Node/Python 运行要求与首次安装后固化 pin 的提示。
+
+### 修复
+- **scripts/README 计数失同步**：头部宣称 54 个脚本（47 JS）但数量核对表合计 53 且网络取证类少计 1（2.3.47 加 check_trace_gate 后未同步表）；按实际文件重数并随本次 4 个新脚本对齐为 58（51 JS + 7 Py），新增「识别与归因辅助」分类。
+- SKILL.md 第 7 节 IDENTIFY 补特征驱动识别入口（identify_crypto / analyze_cookie_attribution）与使用边界说明，IDENTIFY 阶段不再只依赖人工对照 T1 表。
+
 ## 2.3.50 - 2026-08-22
 
 ### 变更

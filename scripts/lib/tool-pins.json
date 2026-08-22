@@ -1,0 +1,12 @@
+{
+  "$comment": "供应链锁定清单（供应方：GitHub release 自动下载 + PyPI 包）。records 键为 '<tool>/<assetName>'：下载脚本会在命中记录时强制 sha256 校验，不匹配即删除文件并失败；未命中记录的下载会在输出中报告 sha256 并提示用 check_tool_pins.js --record 固化。pythonPackages 键为 PyPI 包名：install_all.js 按锁定版本安装（ruyiPage==<version>），check_tool_pins.js --python <cmd> 复验本机已装版本与锁定版本一致。首次安装/验证后应立即记录，防止上游发布被替换或破坏性升级后无感知引入。",
+  "records": {},
+  "pythonPackages": {
+    "ruyiPage": {
+      "version": "1.2.62",
+      "source": "pypi",
+      "verifiedAt": "2026-08-21",
+      "note": "2.3.47 验证组合：≥1.2.62 原生内置 Firefox 155+ privileged-scope 兼容；升级前必须更新本记录并按 CHANGELOG 2.3.47 的兼容项回归验证"
+    }
+  }
+}

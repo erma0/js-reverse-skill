@@ -185,23 +185,15 @@ URL 不是证据。脚本确认文件真实存在并可归类，才允许跳过�
 网络取证：
 
 ```powershell
-# 已知目标接口时必须加 --targets；它表示本次流程的终态接口（如最终登录/业务提交接口），
-# 任一目标 URL 的非 OPTIONS 2xx 响应命中后进入短暂收尾窗口并结束取证。
-# 抓包从页面打开前覆盖到终态：capture.json 保存全量请求元数据；终态之前最近的 API/JSON、
-# 验证码/风控资源与 WASM 等动态材料会受 60 包/100MB 默认预算限制自动关联；普通 body 默认单体完整保存上限 10MB，WASM 默认 50MB。
-# JSON 只内联/预览 1MB；超过该预览阈值的完整 body 写入 case/forensic/bodies/，WASM 写入 case/forensic/wasm/，不会把不可解析的半包当作完整证据。
-# 因此不要求用户预先知道或列全验证码 load/verify 等中间接口。
-# 注意：capture.json 是纯请求元数据（不存响应体），响应体按用途落盘到四类位置：
-#   ① target-hits.json / related-hits.json（元数据、小 body 或预览）
-#   ② case/forensic/bodies/（大 body 完整文件）③ case/forensic/wasm/（完整 WASM）④ case/js/original/（JS 资源）。
-# 自动筛选不等于保存所有响应体：大页面不会逐包拉 body；图片/字体/视频等非动态静态资源仍不自动保存。
-# 首次终态等待默认 --wait 120，登录场景可加 --manual-pause 暂停等待（AI 后台运行遇非交互 stdin 时自动退化为等待 --wait，不阻塞）；窗口不够可调大 --wait。终态命中后另完整执行 --target-settle，不占用 --wait 余额。
+# --targets = 本次流程的终态接口（如最终登录/业务提交接口）；任一目标 URL 的非 OPTIONS 2xx 响应命中后进入短暂收尾窗口并结束取证，
+# 抓包从页面打开前覆盖到终态，不要求用户预先列全验证码 load/verify 等中间接口。
+# 自动保存入口页面 HTML 到 case/forensic/document.html（含 412/JS challenge 页内联脚本，是 acw_sc__v2 等 challenge cookie 的强制证据）。
+# 预算与落盘细则（--wait/--manual-pause/--target-settle、60包/100MB 关联预算、bodies/wasm 落盘、预览阈值与 saved_to/_complete 语义）
+# 见 scripts/README.md 与 references/workflow/trace-flow.md，此处不重复。
 python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root> --targets <最终业务接口关键词> --markdown
 ```
 
-取证会自动保存入口页面 HTML 到 `case/forensic/document.html`（含 412/JS challenge 页内联脚本，是 acw_sc__v2 等 challenge cookie 的强制证据），无论是否指定 `--targets`。
-
-终态目标请求未命中 = Step 1 缺失，禁止转源码搜索继续。指定 `--targets/--targets-regex` 时只按 URL 匹配；多个目标表示替代终态，任一目标捕获到非 OPTIONS 2xx 响应即 `PASS` 并退出码 0。命中后默认继续抓取 3 秒，随后保存全量元数据、终态 body、关联动态 body 与 JS。这里的 HTTP 2xx 只表示目标请求已取证，不表示响应体中的业务结果成功；通用脚本无法猜测各站点业务码。若一次登录可能因验证码或业务校验失败而重新提交，应调大 `--target-settle`，保证额外重试仍在同一会话内被捕获；关联材料以最后一次已捕获的有效终态向前回溯。body 若超过 JSON 内联预览阈值，必须读取对应 `saved_to` 完整文件；若报告 `*_complete=false`，说明受单体上限或总预算影响，不能拿预览替代原始证据。只出现 OPTIONS/非 2xx 报告 `PARTIAL`，完全未命中报告 `NO_TARGET`，两者均退出码非 0。验证码是最终业务接口的前置链路时，用户只提供最终接口；分析阶段从同一会话的 `related-hits.json`、`capture.json` 与完整 body/WASM 文件、RuyiTrace 向前回溯 load → verify，不把验证码中间接口当成额外终态门禁。若需用户交互，提示用户在窗口完成操作，或请其提供 cURL/HAR/原始请求文本；终态命中并落盘后再回 EVIDENCE_GATE。JS 源码关键词定位只能作辅助假设。
+终态目标请求未命中 = Step 1 缺失，禁止转源码搜索继续：`PARTIAL`（仅 OPTIONS/非 2xx）与 `NO_TARGET`（完全未命中）均退出码非 0；任一非 OPTIONS 2xx 命中即 `PASS` 退出码 0。HTTP 2xx 只表示目标请求已取证，不表示业务成功（通用脚本不猜业务码）。登录可能因验证码/校验失败重试时调大 `--target-settle`，保证重试仍在同一会话内；关联材料以最后一次有效终态向前回溯，验证码中间接口不是额外终态门禁（load → verify 由分析阶段从同一会话回溯）。body 超过 JSON 内联预览阈值时必须读取对应 `saved_to` 完整文件，`*_complete=false` 不能拿预览替代原始证据。需要用户交互时提示其在窗口完成操作，或提供 cURL/HAR/原始请求文本；终态命中并落盘后再回 EVIDENCE_GATE。JS 源码关键词定位只能作辅助假设。
 
 Windows 下若 Python 脚本输出仍现编码异常，用 `PYTHONUTF8=1` 前缀兜底（PowerShell：`$env:PYTHONUTF8="1"`）；仓库脚本已内置 UTF-8 强制与 emoji 安全化，正常无需手动加。
 
@@ -236,7 +228,7 @@ node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-roo
 node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --require-trace-signal <环境API/写入点> --markdown
 ```
 
-退出码 0（Step 2 已具备且目标 writer 覆盖满足）才可进入 CASE_LOOKUP；NDJSON 已产出但 writer 信号未命中时，状态是“Step 2 已具备、目标链路覆盖不足”，进入 TRACE_RETRY，不得写成“没有 trace”。声明「已采集 trace」不等于 Step 2 已产出——AI 可能声明跑 RuyiTrace 但实际转去做静态分析 / EXTERNAL_LOOKUP，出口门禁用脚本退出码硬卡，防止「声明不执行」绕过 Step 2 直接拼凑交付。FORENSIC_CAPTURE → TRACE_CAPTURE 路径同样适用：FORENSIC_CAPTURE 补采后必须通过出口门禁才进 CASE_LOOKUP。STEP2_ONLY 路径（用户已提供 NDJSON）Step 2 本就具备，出口门禁直接通过。
+退出码 0（Step 2 已具备且目标 writer 覆盖满足）才可进入 CASE_LOOKUP；NDJSON 已产出但 writer 信号未命中时，状态是“Step 2 已具备、目标链路覆盖不足”，进入 TRACE_RETRY，不得写成“没有 trace”。声明「已采集 trace」不等于 Step 2 已产出——出口门禁用脚本退出码硬卡「声明不执行」绕过 Step 2 直接拼凑交付。FORENSIC_CAPTURE 补采后同样必须通过本门禁才进 CASE_LOOKUP；STEP2_ONLY（用户已提供 NDJSON）Step 2 本就具备，直接通过。
 
 `--trace-signal` 命中的是 trace 覆盖得到的「环境 API / 签名写入点」，不是网络请求 URL；网络 URL 使用 `--require-network-signal`，两者不可混用：
 
@@ -276,7 +268,13 @@ node scripts/write_stage_report.js --case-dir <project-root> --stage <阶段> --
 **进入补环境前的证据前置（硬约束）**：走路径 B/C/D（最小 JS 沙箱、WASM、环境伪装）且需要提供或补齐浏览器对象时，必须先基于 RuyiTrace NDJSON 产出以下两份文件，禁止先根据 Node.js 报错盲补——盲补会导致十几轮「加载→崩→猜→再加载」的空转循环：
 - `notes/entry-chain.md`：入口函数 → 请求链 → 关键 `stack.file:line:col`；其中 TRACE_ANALYZE 已定位的 builder/writer 即 IMPLEMENT 第一实现目标。
 - `notes/missing-env-priority.md`：用 `scripts/analyze_trace.js --summary` 从 NDJSON 抽取的 SDK 实际读取环境清单（含 `api`、`stack.file`、`line`、`col`、环境模块、补齐优先级和「RuyiTrace 证据 / Node trace 补充 / 推断」标记）。黑盒执行无法逐项精确复现时，该文件至少列出已观测的环境读取/挂载点，并标注「黑盒执行，不逐项精确复现」；不得以黑盒为由跳过。
-两文件缺一不得开始补环境；详见 `references/env/env-debug-loop.md` 的「RuyiTrace 优先诊断门禁」。
+两文件缺一不得开始补环境；产出后必须过门禁脚本复核，退出码非 0 同样不得开始补环境：
+
+```powershell
+node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown
+```
+
+详见 `references/env/env-debug-loop.md` 的「RuyiTrace 优先诊断门禁」。
 
 **上下文防耗尽检查点（硬约束）**：TRACE_ANALYZE / IMPLEMENT / REAL_VERIFY 任一阶段消耗大量步骤（20+ 步未推进）或上下文接近耗尽时，先回看上条两份文件是否已覆盖当前崩溃点：未覆盖先补全再继续；已覆盖仍打转时落阶段报告。判定标准：trace 已定位到关键资源/入口，或当前节点已消耗 20+ 步仍未推进（TRACE_ANALYZE 未进 IMPLEMENT、IMPLEMENT 黑盒调试打转、REAL_VERIFY 反复排查未定位根因）。
 
@@ -313,8 +311,20 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 | webmssdk、byted_acrawler、bdms、a_bogus、X-Bogus、_signature | trace 定位环境读取和签名写入；注意 `byted_acrawler.sign` 多返回老版 `_signature`，`a_bogus`/`X-Bogus` 由 `bdms` 生成，两者不可混淆 |
 | geetest、smcp、dx-captcha、TCaptcha、NECaptcha、AWSC | 按封装层、答案层、verify 链分别处理 |
 | h5st、js_security_v3、JA3/JA4 | 先确认会话绑定和 TLS 指纹，再实现请求链 |
+| @font-face/FontFace、woff/woff2 动态字体、PUA 码点（U+E000–U+F8FF） | CSS/渲染层字体映射反爬（非验证码题型）：先取证字体资源判静态/动态映射，再提取 cmap 映射；映射可能参与签名（见 references/rendering/font-anti-crawl.md） |
 
 识别结果必须引用落盘资源、NDJSON 或网络包具体字段，不以站点名称直接定类。
+
+特征驱动的两个识别入口（输出均为 T1 假设，不构成协议复现依据）：
+
+```powershell
+# 密文/哈希特征 → 算法族假设（长度/字符集/结构/magic bytes）
+node scripts/identify_crypto.js --value <密文样本> --label <参数名> --markdown
+# Cookie 归因：capture.json Set-Cookie（服务端）× trace cookie 写入（JS）融合，判定每个 Cookie 生成方
+node scripts/analyze_cookie_attribution.js --case-dir <project-root> [--cookie <名称>] --markdown
+```
+
+`identify_crypto.js` 只做族级指纹（同长度的 SHA-256/SM3 无法仅凭密文区分），实现仍以 trace 定位的 builder/writer 为准。`analyze_cookie_attribution.js` 回答"这个 Cookie 是谁写的"：server → 复现请求链、禁止硬编码；js → 按写入点 stack 还原挑战/签名算法；both → 按请求顺序拆分串联链。
 
 验证码/JSONP 链路的最低证据要求：`callback 注册 → script.src/请求参数构造 → script 插入或等价网络写入 → load/verify 请求 → callback 执行 → 结果回调`。仅命中 `createElement`、`appendChild` 或页面初始化 API 不算 writer 覆盖；若 trace 只覆盖环境读取，必须在阶段报告和最终总结中明确未证明请求写入。
 
@@ -357,6 +367,14 @@ E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定�
 ## 10. REAL_VERIFY
 
 默认验证是交付必要条件，不是可选演示。除非用户明确 sign-only，否则必须用最终纯协议入口向真实 API 发请求。只读/验签请求默认真实执行；有业务副作用的写请求执行前先宣布目标 URL、方法、次数和预期影响，随后继续。
+
+进入真实请求前先完成离线回归：把取证阶段抓到的真实样本（同输入参数 + 浏览器侧期望输出）固化为 `case/fixtures/*.fixture.json`，用本地入口以同样输入生成实际输出，逐字段过门禁比对；任一字段不一致先回 IMPLEMENT 排查，不得带着已知偏差发起真实请求：
+
+```powershell
+node scripts/compare_fixture.js --fixture case/fixtures/<样本>.fixture.json --actual case/tmp/<实际输出>.json --field <目标参数> --markdown
+```
+
+退出码 0（字段一致）才进入真实 API 验证；退出码 2 表示首个偏差点已定位，回 IMPLEMENT 修复后复跑。fixtures 属于可复核证据，脱敏后随交付保留。
 
 范围纪律：黑盒输出与取证样本结构一致后，直接用真实目标 URL 进入 REAL_VERIFY；内部参数映射等旁支问题记录到 `经验沉淀-<站点>.md`，不阻塞主交付、不横向展开。
 

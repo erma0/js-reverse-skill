@@ -156,9 +156,24 @@ function detectState(pythonSpec) {
   return result;
 }
 
+// 供应链锁定：tool-pins.json 的 pythonPackages.ruyiPage.version 存在时按精确版本安装，
+// 升级必须先更新锁定记录并回归验证（CHANGELOG 2.3.47 的兼容项），防止破坏性升级无感知引入
+function pinnedRuyipageVersion() {
+  try {
+    const pins = JSON.parse(fs.readFileSync(path.join(__dirname, 'lib', 'tool-pins.json'), 'utf8'));
+    const v = pins.pythonPackages && pins.pythonPackages.ruyiPage && pins.pythonPackages.ruyiPage.version;
+    return typeof v === 'string' && /^\d+[A-Za-z0-9._-]*$/.test(v) ? v : '';
+  } catch { return ''; }
+}
+
 function installRuyipagePackage(pythonSpec) {
-  const ret = run(pythonSpec.cmd, pythonSpec.args.concat(['-m', 'pip', 'install', 'ruyiPage', 'requests', '--upgrade']), 180000);
-  return { ok: ret.ok, output: (ret.stdout || ret.stderr || ret.error || '').slice(0, 2000) };
+  const pin = pinnedRuyipageVersion();
+  const pkgSpec = pin ? `ruyiPage==${pin}` : 'ruyiPage';
+  const ret = run(pythonSpec.cmd, pythonSpec.args.concat(['-m', 'pip', 'install', pkgSpec, 'requests', '--upgrade']), 180000);
+  const supplyNote = pin
+    ? `[供应链] 已按 tool-pins.json 锁定安装 ruyiPage==${pin}；升级前先更新锁定记录并按验证项回归`
+    : '[供应链] ruyiPage 未锁定版本，本次安装最新版；验证通过后用 check_tool_pins.js 更新 pythonPackages 锁定';
+  return { ok: ret.ok, output: `${(ret.stdout || ret.stderr || ret.error || '').slice(0, 2000)}\n${supplyNote}` };
 }
 
 function installRuyipageRuntime(pythonSpec, mirror) {
