@@ -1,0 +1,38 @@
+name: Skill checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check scripts/check_evidence.js
+          node --check scripts/check_trace_gate.js
+          node --check scripts/capture_ruyitrace_log.js
+          node --check scripts/import_ruyitrace_log.js
+
+      - name: Run deterministic self-tests
+        run: |
+          node scripts/check_evidence.js --self-test
+          node scripts/check_trace_gate.js --self-test
+          node scripts/check_skill_consistency.js
+
+      - name: Check patch whitespace
+        run: git diff --check

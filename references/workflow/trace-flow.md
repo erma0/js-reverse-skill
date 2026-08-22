@@ -80,7 +80,7 @@ python scripts/forensic_ruyipage.py --url <目标页> --case-dir <project-root> 
 
 ```bash
 node scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <project-root> --ruyitrace-home <RuyiTrace-dir> --dry-run --markdown
-node scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <project-root> --ruyitrace-home <RuyiTrace-dir> --target-signal handshake --import-after --markdown
+node scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <project-root> --ruyitrace-home <RuyiTrace-dir> --trace-signal handshake --import-after --markdown
 ```
 
 执行要求：
@@ -109,12 +109,12 @@ node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-
 进入 CASE_LOOKUP 前必须复跑出口门禁脚本，确认 Step 2（RuyiTrace NDJSON）真实产出。这是状态机内复检，防止 AI 声明「已采集 trace」但实际跳过 RuyiTrace 直接转静态分析 / EXTERNAL_LOOKUP 拼凑方案：
 
 ```powershell
-node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --require-target-signal <目标接口URL或环境API/写入点> --markdown
+node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --require-trace-signal <环境API/写入点> --markdown
 ```
 
-退出码 0（Step 2 已具备：NDJSON 存在 + 关联目标域 + 命中目标信号）才可进入 CASE_LOOKUP；退出码 1（Step 2 缺失）停在 TRACE_CAPTURE / TRACE_RETRY，不得进入 CASE_LOOKUP / EXTERNAL_LOOKUP，不得以边界声明或 mock 替代。FORENSIC_CAPTURE → TRACE_CAPTURE 路径同样适用：FORENSIC_CAPTURE 补采后必须通过出口门禁才进 CASE_LOOKUP。STEP2_ONLY 路径（用户已提供 NDJSON）Step 2 本就具备，出口门禁直接通过。
+退出码 0（Step 2 已具备：NDJSON 存在 + 关联目标域；如要求 writer/API 信号则本次全部有效进程文件聚合后命中）才可进入 CASE_LOOKUP；退出码 1 时区分两类：无有效 NDJSON = Step 2 缺失，停在 TRACE_CAPTURE；NDJSON 存在但 writer/API 未命中 = Step 2 已具备、目标链路覆盖不足，停在 TRACE_RETRY。两类都不得进入 CASE_LOOKUP / EXTERNAL_LOOKUP，不得以边界声明或 mock 替代。FORENSIC_CAPTURE → TRACE_CAPTURE 路径同样适用：FORENSIC_CAPTURE 补采后必须通过出口门禁才进 CASE_LOOKUP。STEP2_ONLY 路径（用户已提供 NDJSON）同样需要按是否要求 trace 信号判断覆盖。
 
-本脚本只卡 Step 2 是否真产出（`check_evidence.js` 的 `step2.evidence`）；产出后的质量是否达标见下方「质量判定标准」。两件事不混淆：Step 2 未产出 = 出口门禁退出码 1 = 停在 TRACE_CAPTURE；Step 2 已产出但质量不足 = 进 TRACE_RETRY。
+本脚本同时报告 Step 2 是否真产出（`step2.evidence`）和目标链路是否覆盖（`step2.targetCoverage`）；产出后的栈/API 整体质量是否达标见下方「质量判定标准」。三件事不混淆：Step 2 未产出 = 停在 TRACE_CAPTURE；NDJSON 已产出但 writer 未命中 = 不得说“没有 trace”，停在 TRACE_RETRY；writer 命中但整体质量不足 = 仍进 TRACE_RETRY。
 
 #### 质量判定标准
 
@@ -125,7 +125,7 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 
 阈值用建议值，AI 可按目标站点复杂度自主判断上调或下调，但「无 stack.file」是硬性重度不足信号，不得自行放宽。
 
-> **多进程 trace 合并**：RuyiTrace 一次采集会按进程写多个 `domtrace/trace_process_<pid>.ndjson`——`process_type` 为 `tab`/`content` 的内容进程才是业务 JS，`parent` 是浏览器父进程/内核活动（`resource://gre/modules/*`、`builtin-addons/*` 等，不含页面 JS，参与 target-signal 必然误报）。`capture_ruyitrace_log.js` 会把所有非 parent 的 domtrace 文件合并导入，`ruyitrace-summary.md` 反映合并全量；手动导入多文件用 `import_ruyitrace_log.js --input a --input b ...` 合并统计。只取单个进程文件（尤其 mtime 最新的那个）会漏掉真正的业务 JS 调用，把有效 trace 误判为空。
+> **多进程与跨域 trace 合并**：RuyiTrace 一次采集会按进程写多个 `domtrace/trace_process_<pid>.ndjson`——`process_type` 为 `tab`/`content` 的内容进程才是业务 JS，`parent` 是浏览器父进程/内核活动（`resource://gre/modules/*`、`builtin-addons/*` 等，不含页面 JS，参与 trace-signal 必然误报）。`capture_ruyitrace_log.js` 会把所有非 parent 的 domtrace 文件合并导入，`ruyitrace-summary.md` 反映合并全量；手动导入多文件用 `import_ruyitrace_log.js --input a --input b ...` 合并统计。只取单个进程文件（尤其 mtime 最新的那个）会漏掉真正的业务 JS 调用，把有效 trace 误判为空。验证码/支付 SDK 常运行在第三方 iframe：日志未出现业务站点 hostname，但明确的 writer/API 信号在有效内容进程中全部命中时，仍可确认 Step 2；没有明确信号时不得用任意跨域日志替代目标证据。
 
 #### TRACE_RETRY 处理顺序（按序降级，不回退）
 

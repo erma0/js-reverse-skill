@@ -15,6 +15,7 @@ function parseArgs(argv) {
     truncationThreshold: 3900,
     maxTruncationExamples: 50,
     targetSignals: [],
+    signalPolicy: 'strict',
     noSummaryWrite: false,
     json: false,
     markdown: false,
@@ -28,7 +29,8 @@ function parseArgs(argv) {
     else if (a === '--max-examples') args.maxExamples = Number(nextVal('10'));
     else if (a === '--truncation-threshold') args.truncationThreshold = Number(nextVal('3900'));
     else if (a === '--max-truncation-examples') args.maxTruncationExamples = Number(nextVal('50'));
-    else if (a === '--target-signal') args.targetSignals.push(nextVal(''));
+    else if (a === '--target-signal' || a === '--trace-signal') args.targetSignals.push(nextVal(''));
+    else if (a === '--signal-policy') args.signalPolicy = nextVal('strict');
     else if (a === '--no-summary-write') args.noSummaryWrite = true;
     else if (a === '--json') args.json = true;
     else if (a === '--markdown') args.markdown = true;
@@ -38,6 +40,7 @@ function parseArgs(argv) {
   if (!Number.isFinite(args.truncationThreshold) || args.truncationThreshold < 1) args.truncationThreshold = 3900;
   if (!Number.isFinite(args.maxTruncationExamples) || args.maxTruncationExamples < 1) args.maxTruncationExamples = 50;
   args.targetSignals = args.targetSignals.filter((s) => s && s.trim());
+  if (!['strict', 'advisory'].includes(args.signalPolicy)) args.signalPolicy = 'strict';
   if (!args.json && !args.markdown) args.markdown = true;
   return args;
 }
@@ -50,7 +53,9 @@ function usage() {
 
 说明：--case-dir 指项目根目录（其下应有 case/ 和 result/ 两个平级子目录），默认当前目录。复制 RuyiTrace NDJSON 日志到 <case-dir>/case/ruyi-trace/logs/，生成 <case-dir>/case/notes/ruyitrace-summary.md，并标记接近 4000 / 4096 字符的字段为“疑似被 RuyiTrace 截断”。
 --input <文件>（可多次）：指定要导入的 NDJSON；传入多个文件时合并统计（用于 domtrace 多进程文件、或主 DOM trace + 分类日志合并）。多文件合并后目标信号与质量判定均在合并全量上判定。
---target-signal <信号>（可多次）：扫描日志是否命中目标接口 URL / 关键词，未命中时退出码非 0，作为“目标路径未覆盖”的硬信号，不得当作采集完成。
+--trace-signal <信号>（可多次）：扫描日志中的环境 API / writer / 参数写入点。
+--target-signal <信号>（兼容旧调用）：等价于 --trace-signal。
+--signal-policy strict|advisory：strict 未命中退出非 0；advisory 只报告未命中，不把有效 NDJSON 误报为“采集失败”。
 --no-summary-write：不覆盖写入 notes/ruyitrace-summary.md。capture_ruyitrace_log.js 对 cookie/storage/event 等分类日志导入时使用，避免分类日志覆盖主 DOM trace 摘要。`;
 }
 
@@ -290,6 +295,7 @@ function renderMarkdown(result) {
     lines.push(`- 复制后日志：${copied[0]}`);
   }
   lines.push(`- 行数：${result.summary.lines}`, `- 成功解析：${result.summary.parsed}`, `- 解析失败：${result.summary.invalid}`);
+  lines.push(`- 目标信号策略：${result.signalPolicy || 'strict'}`);
   lines.push('', '## 质量判定');
   const q = result.summary.quality || {};
   if (!q.hasPageJs) {
@@ -364,18 +370,24 @@ async function main() {
   fs.mkdirSync(notesDir, { recursive: true });
   const copiedTo = inputs.map((input) => {
     const base = inputs.length === 1 && args.name ? args.name : path.basename(input);
-    const dstName = safeName(base || `trace-${Date.now()}.ndjson`);
+    let dstName = safeName(base || `trace-${Date.now()}.ndjson`);
+    // 多进程/多目录日志经常同名；加入来源路径摘要，避免复制时静默覆盖前一个文件。
+    if (inputs.length > 1) {
+      const digest = crypto.createHash('sha1').update(path.resolve(input)).digest('hex').slice(0, 10);
+      const stem = dstName.replace(/\.ndjson$/i, '');
+      dstName = `${stem}.${digest}.ndjson`;
+    }
     const dst = path.join(logDir, dstName.endsWith('.ndjson') ? dstName : `${dstName}.ndjson`);
     fs.copyFileSync(input, dst);
     return dst;
   });
   const summary = await summarizeNdjson(copiedTo, args);
-  const result = { inputs, copiedTo, summary };
+  const result = { inputs, copiedTo, summary, signalPolicy: args.signalPolicy };
   const md = renderMarkdown(result);
   if (!args.noSummaryWrite) fs.writeFileSync(path.join(notesDir, 'ruyitrace-summary.md'), md, 'utf8');
   if (args.json) console.log(JSON.stringify(result, null, 2));
   if (args.markdown) process.stdout.write(md);
-  if (args.targetSignals.length && !summary.targetSignal.allHit) {
+  if (args.targetSignals.length && !summary.targetSignal.allHit && args.signalPolicy === 'strict') {
     console.error('[警告] 目标信号未命中：日志未触发目标接口，不得当作“采集完成”，按 TRACE_RETRY 处理');
     process.exitCode = 1;
   }

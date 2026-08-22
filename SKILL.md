@@ -1,6 +1,6 @@
 ---
 name: js-reverse-skill
-version: 2.3.46
+version: 2.3.48
 description: >
   网页端 JavaScript 加密参数逆向与纯协议还原。逆向还原浏览器请求中加密参数、签名、token、
   cookie、设备指纹的生成逻辑；适用于各类动态参数的生成逻辑分析，覆盖标准算法、自定义混淆、
@@ -35,8 +35,9 @@ GATE-1 ENV（resume 可跳过完整自检）
 
 GATE-2 EVIDENCE（硬阻断）
   node scripts/check_evidence.js --case-dir <project-root> --url <target-url> --inputs <材料路径> --markdown
-  目标接口 URL/关键词已知时必须加: --require-target-signal <目标接口URL或关键词>
-  （同时约束 Step 1 capture/用户 HAR/cURL 与 Step 2 NDJSON，未命中任一侧均按缺失证据处理）
+  Step 1 接口已知时加: --require-network-signal <目标接口URL或关键词>
+  Step 2 writer/API 已知时加: --require-trace-signal <环境 API / writer / 参数写入点>
+  （两类信号分开约束；不要把 JSONP/script/导航 URL 作为 trace 信号）
   退出码 0 且无「缺失证据」→ 进入状态机。
   否则停在 EVIDENCE_GATE，按 4.2 补齐证据后回本节复检。
 ```
@@ -131,10 +132,10 @@ DELIVER / SIGN_ONLY_DELIVER → CLEANUP → DONE
 **TRACE_CAPTURE / TRACE_RETRY 出口门禁（不可跳过）**：进入 CASE_LOOKUP 前必须复跑出口门禁脚本，确认 Step 2（RuyiTrace NDJSON）真实产出：
 
 ```powershell
-node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --require-target-signal <目标接口URL或环境API/写入点> --markdown
+node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --require-trace-signal <环境API/写入点> --markdown
 ```
 
-退出码 0（Step 2 已具备）才可进入 CASE_LOOKUP；退出码 1（Step 2 缺失）停在 TRACE_CAPTURE / TRACE_RETRY。声明「已采集 trace」不等于 Step 2 已产出，以脚本退出码为准——防止「声明不执行」直接跳到 EXTERNAL_LOOKUP 拼凑方案。详见 4.2 节「TRACE_CAPTURE 出口门禁复检」。
+退出码 0（Step 2 已具备且目标 writer 覆盖满足）才可进入 CASE_LOOKUP；NDJSON 已产出但 writer 信号未命中时，状态是“Step 2 已具备、目标链路覆盖不足”，进入 TRACE_RETRY，不得写成“没有 trace”。详见 4.2 节「TRACE_CAPTURE 出口门禁复检」。
 
 激活后立即建立以下 11 项 TODO 并随状态推进勾选：
 
@@ -172,7 +173,7 @@ node scripts/check_evidence.js --case-dir <project-root> --url <target-url> --in
 
 URL 不是证据。脚本确认文件真实存在并可归类，才允许跳过对应步骤。退出码非 0 或输出含「缺失证据」「不可跳过」时，停在 EVIDENCE_GATE 补证并复检，禁止进入 IDENTIFY/TRACE_ANALYZE/IMPLEMENT。
 
-- Step 1：有效 `capture.json` 网络记录，或通过内容校验的 HAR、cURL、原始 HTTP 请求文本；目标接口已知时用 `--require-target-signal <目标接口URL或关键词>` 同时卡住 capture/用户材料与 NDJSON 的目标信号。
+- Step 1：有效 `capture.json` 网络记录，或通过内容校验的 HAR、cURL、原始 HTTP 请求文本；目标接口已知时用 `--require-network-signal <目标接口URL或关键词>` 约束 capture/用户材料。
 - Step 2：内容可解析、记录非空且关联目标域的 RuyiTrace NDJSON/JSONL；`ruyitrace-summary.md` 不能替代 NDJSON。Step2-only 时先导入并生成摘要，再结合日志定位，不重复采集 trace，也不因缺少 Step 1 强制网络取证。
 - 单独 JS、截图或指纹基线只作辅助材料，不计为 Step 1。
 
@@ -202,17 +203,19 @@ Windows 下若 Python 脚本输出仍现编码异常，用 `PYTHONUTF8=1` 前缀
 日志采集：
 
 ```powershell
-node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-root> --target-signal <环境API或签名写入点关键词> --import-after --markdown
-# --target-signal 匹配 RuyiTrace 记录的环境 API / 写入点（如 fetch、XMLHttpRequest.send、handshake、参数名），
+node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-root> --trace-signal <环境API或签名写入点关键词> --import-after --markdown
+# --trace-signal 匹配 RuyiTrace 记录的环境 API / 写入点（如 fetch、XMLHttpRequest.send、handshake、参数名），
 # 不传目标接口 URL——trace 记录的是 API 调用，不记录请求 URL，传 URL 字面量必然未命中。
 # 也不传密钥/常量名（如 appSignKey、bl、secret）——trace 记录运行时值与写入点，不记录密钥字面量，
 # 传密钥名必然未命中并误触发硬阻断；应选参数写入点/参数名（如 noncestr、x-zse-96、Headers.set(...)）。
-# 目标接口 URL 的命中证据由 Step 1 取证承担：forensic_ruyipage.py --targets <URL> + check_evidence.js --require-target-signal <URL>。
-# --target-signal 可多次传入；导入后未命中则退出码非 0 = 硬阻断。
-# 自动 trace 默认 --duration 120 秒；交互场景可调大，或转手动 trace。
+# 目标接口 URL 的命中证据由 Step 1 取证承担：forensic_ruyipage.py --targets <URL> + check_evidence.js --require-network-signal <URL>。
+# --target-signal 仅为兼容旧调用，等价于 --trace-signal。
+# --signal-policy advisory 可用于人工结束或信号尚未确定的采集：日志仍会导入并报告覆盖不足，不误报为“没有 trace”。
+# 自动 trace 默认采集窗口 --duration 120 秒；达到 trace-signal 时自动收尾并关闭浏览器；用户提前关闭也会记录 endReason。
+# 窗口结束后仍需关闭进程、等待 NDJSON 完整刷盘并导入，命令总耗时可略超过 120 秒，但浏览器不应继续留存。
 ```
 
-用户已提供 NDJSON 时用 `--input <ndjson>` 导入并生成摘要，不重复采集。取证结果只进入 `case/`，原始 JS 放入 `case/js/original/`，临时材料放入 `case/tmp/`。
+用户已提供 NDJSON 时用 `--input <ndjson>` 导入并生成摘要，不重复采集；多个进程日志用 `import_ruyitrace_log.js --input a --input b`，复制到 case 时会按来源摘要命名，避免同名文件覆盖。取证结果只进入 `case/`，原始 JS 放入 `case/js/original/`，临时材料放入 `case/tmp/`。
 
 目标请求需手动触发时，必须提示用户在 trace 浏览器中完成操作；用户确认“已触发”前不得结束采集。不得把“没触发目标路径”当成“采集完成”。
 
@@ -221,12 +224,12 @@ node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-roo
 **TRACE_CAPTURE 出口门禁复检（不可跳过）**：采集声明完成、进入 CASE_LOOKUP 前必须复跑出口门禁脚本，确认 Step 2（RuyiTrace NDJSON）真实产出。这是状态机内复检，不是 GATE-2 入口门禁的重复——GATE-2 判定初始证据路由到 TRACE_CAPTURE，出口门禁确认 TRACE_CAPTURE 是否真把 Step 2 补上了：
 
 ```powershell
-node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --require-target-signal <目标接口URL或环境API/写入点> --markdown
+node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --require-trace-signal <环境API/写入点> --markdown
 ```
 
-退出码 0（Step 2 已具备：NDJSON 存在 + 关联目标域 + 命中目标信号）才可进入 CASE_LOOKUP；退出码 1（Step 2 缺失）停在 TRACE_CAPTURE / TRACE_RETRY。声明「已采集 trace」不等于 Step 2 已产出——AI 可能声明跑 RuyiTrace 但实际转去做静态分析 / EXTERNAL_LOOKUP，出口门禁用脚本退出码硬卡，防止「声明不执行」绕过 Step 2 直接拼凑交付。FORENSIC_CAPTURE → TRACE_CAPTURE 路径同样适用：FORENSIC_CAPTURE 补采后必须通过出口门禁才进 CASE_LOOKUP。STEP2_ONLY 路径（用户已提供 NDJSON）Step 2 本就具备，出口门禁直接通过。
+退出码 0（Step 2 已具备且目标 writer 覆盖满足）才可进入 CASE_LOOKUP；NDJSON 已产出但 writer 信号未命中时，状态是“Step 2 已具备、目标链路覆盖不足”，进入 TRACE_RETRY，不得写成“没有 trace”。声明「已采集 trace」不等于 Step 2 已产出——AI 可能声明跑 RuyiTrace 但实际转去做静态分析 / EXTERNAL_LOOKUP，出口门禁用脚本退出码硬卡，防止「声明不执行」绕过 Step 2 直接拼凑交付。FORENSIC_CAPTURE → TRACE_CAPTURE 路径同样适用：FORENSIC_CAPTURE 补采后必须通过出口门禁才进 CASE_LOOKUP。STEP2_ONLY 路径（用户已提供 NDJSON）Step 2 本就具备，出口门禁直接通过。
 
-`--target-signal` 命中的是 trace 覆盖得到的「环境 API / 签名写入点」，不是网络请求 URL，判定分两类：
+`--trace-signal` 命中的是 trace 覆盖得到的「环境 API / 签名写入点」，不是网络请求 URL；网络 URL 使用 `--require-network-signal`，两者不可混用：
 
 - 信号是环境 API（`fetch`、`XMLHttpRequest.send`、`handshake`、参数名等）未命中 → 目标路径未触发，是硬信号，进入 TRACE_RETRY，不得自行放宽。
 - 目标是纯网络接口、trace 未覆盖 URL 字面量 → 属预期，不算采集失败，不要反复重试 trace；改用参数写入点（如 `Headers.set("x-zse-96", ...)`）或参数名定位签名链，并显式声明「trace 未覆盖目标接口 URL 字面量；签名链定位依据为 <写入点/关键词>」，写入 `notes/ruyitrace-summary.md`、阶段报告（如已启用）与最终总结；未声明不得进入 IMPLEMENT。目标接口 URL 的命中证据由 Step 1 取证承担（`forensic_ruyipage.py --targets` + `check_evidence.js --require-target-signal`）。

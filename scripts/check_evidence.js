@@ -14,6 +14,8 @@ function parseArgs(argv) {
     inputs: '',
     url: '',
     requireTargetSignal: [],
+    requireNetworkSignal: [],
+    requireTraceSignal: [],
     json: false,
     markdown: false,
     help: false,
@@ -32,6 +34,8 @@ function parseArgs(argv) {
     else if (a === '--inputs' || a === '-i') args.inputs = nextVal();
     else if (a === '--url' || a === '-u') args.url = nextVal();
     else if (a === '--require-target-signal') args.requireTargetSignal.push(nextVal());
+    else if (a === '--require-network-signal') args.requireNetworkSignal.push(nextVal());
+    else if (a === '--require-trace-signal') args.requireTraceSignal.push(nextVal());
     else if (a === '--json') args.json = true;
     else if (a === '--markdown') args.markdown = true;
     else if (a === '--self-test') args.selfTest = true;
@@ -40,14 +44,28 @@ function parseArgs(argv) {
   }
   if (!args.json && !args.markdown) args.markdown = true;
   args.requireTargetSignal = args.requireTargetSignal.filter((s) => s && s.trim());
+  args.requireNetworkSignal = args.requireNetworkSignal.filter((s) => s && s.trim());
+  args.requireTraceSignal = args.requireTraceSignal.filter((s) => s && s.trim());
   return args;
+}
+
+function signalSets(args) {
+  // Legacy --require-target-signal historically constrained both materials.
+  // New callers should state the evidence channel explicitly; this prevents a
+  // JSONP/navigation URL from being incorrectly required in DOM trace.
+  const legacy = Array.isArray(args.requireTargetSignal) ? args.requireTargetSignal : [];
+  const network = Array.isArray(args.requireNetworkSignal) && args.requireNetworkSignal.length
+    ? args.requireNetworkSignal : legacy;
+  const trace = Array.isArray(args.requireTraceSignal) && args.requireTraceSignal.length
+    ? args.requireTraceSignal : legacy;
+  return { network, trace, legacy };
 }
 
 function usage() {
   return `用法：
   node scripts/check_evidence.js --case-dir . --markdown
   node scripts/check_evidence.js --case-dir . --url <目标URL> --inputs <材料1,材料2> --markdown
-  node scripts/check_evidence.js --case-dir . --url <目标URL> --require-target-signal handshake --require-target-signal /api/verify --markdown
+  node scripts/check_evidence.js --case-dir . --url <目标URL> --require-network-signal /api/verify --require-trace-signal Headers.set --markdown
   node scripts/check_evidence.js --case-dir . --json
   node scripts/check_evidence.js --self-test
 
@@ -60,9 +78,10 @@ function usage() {
 - Step 1 只接受有效 capture 网络记录或用户 HAR / cURL / 原始 HTTP 请求文本；JS、截图和指纹只能作为辅助材料。
 - Step 2 只接受内容可解析、记录非空且关联目标域的 NDJSON；摘要不能替代 NDJSON。
 - JS 落盘质量门禁：capture 记录到 JS 资源但全部落盘为空（0B）时按 Step 1 缺失处理（退出码 1），防止"带病 PASS"。
-- --require-target-signal <信号>（可多次）：Step 1 capture 里必须命中该目标接口 URL / 关键词的
-  非 OPTIONS 2xx 响应，Step 2 NDJSON 里必须出现该目标接口 URL / 关键词；未命中则对应步骤
-  判定为缺失（退出码 1）——防止“同域无关请求”或“页面加载日志”冒充“目标路径已触发”。
+- --require-network-signal <信号>（可多次）：只约束 Step 1 capture 的目标接口 URL / 关键词。
+- --require-trace-signal <信号>（可多次）：只约束 Step 2 NDJSON 的环境 API / writer / 参数写入点。
+- --require-target-signal <信号>（兼容旧调用）：同时约束两步；新流程不要使用它，因为网络 URL
+  常常不会出现在 RuyiTrace（JSONP、script、导航请求尤其如此）。
 - URL 不是证据：--url 只记录目标地址，绝不作为跳过任何取证的依据；仅提供 URL → 两步全做。
 - --inputs：逗号分隔的用户声称提供材料路径（NDJSON/HAR/cURL/请求文本/JS/截图等）。
   文件必须真实存在且通过内容校验才会被计入对应步骤；失败原因会以警告列出。
@@ -365,13 +384,22 @@ function inspectNdjson(p, target, signals) {
   const signalEnabled = sigHits.length > 0;
   const allHit = !signalEnabled || sigHits.every((sig) => sig.hits > 0);
   const missed = sigHits.filter((sig) => sig.hits === 0).map((sig) => sig.signal);
-  let reason = !targetMatched ? `未发现与目标域 ${target.hostname} 关联的记录` : '';
-  if (!reason && !allHit) reason = `目标信号未命中：${missed.join('、')}（日志未触发目标接口，不能当作采集完成）`;
+  // 验证码/支付等跨域 iframe 的业务 JS 可能只出现供应商域名；当调用方明确提供
+  // writer/API 信号且当前文件至少命中一个信号时，日志来源仍可由“信号 + 真实 NDJSON”确认。
+  // 信号是否全部覆盖交给 check() 在合并所有进程文件后统一判定，避免单文件误阻断。
+  const crossOriginAccepted = !targetMatched && signalEnabled && sigHits.some((sig) => sig.hits > 0);
+  const evidenceReason = !targetMatched && !crossOriginAccepted
+    ? `未发现与目标域 ${target.hostname} 关联的记录`
+    : '';
+  let reason = evidenceReason;
+  if (!reason && !allHit) reason = `目标信号未命中（trace writer/参数链）：${missed.join('、')}（NDJSON 已产出，但不能证明目标 writer/参数生成路径已覆盖）`;
   return {
     ok: !reason,
+    evidenceOk: !evidenceReason,
     parseable: true,
     recordCount,
     targetMatched,
+    crossOriginAccepted,
     reason,
     targetSignal: { enabled: signalEnabled, allHit, signals: sigHits },
   };
@@ -467,7 +495,7 @@ function makeCheck(label, file, inspection) {
   return { label, ok: inspection.ok, file, ...inspection, detail: detailText(inspection) };
 }
 
-function classifyUserInput(p, warnings, target, signals) {
+function classifyUserInput(p, warnings, target, networkSignals, traceSignals) {
   const ext = path.extname(p).toLowerCase();
   if (!exists(p)) {
     warnings.push(`声称提供但文件不存在：${p}`);
@@ -485,7 +513,7 @@ function classifyUserInput(p, warnings, target, signals) {
   let kind;
   let step = 0;
   if (ext === '.ndjson' || ext === '.jsonl') {
-    inspection = inspectNdjson(p, target, signals);
+    inspection = inspectNdjson(p, target, traceSignals);
     kind = 'NDJSON';
     step = 2;
   } else if (ext === '.har') {
@@ -511,6 +539,7 @@ function classifyUserInput(p, warnings, target, signals) {
     inspection = { ok: false, recordCount: 0, targetMatched: false, reason: `不支持的材料类型：${ext || '无扩展名'}` };
     kind = `未知类型(${ext || '无扩展名'})`;
   }
+  const signals = step === 2 ? traceSignals : networkSignals;
   if (step === 1 && inspection.ok && signals && signals.length) {
     let raw = '';
     try { raw = readText(p).toLowerCase(); } catch {}
@@ -525,7 +554,7 @@ function classifyUserInput(p, warnings, target, signals) {
       inspection.targetSignal = { enabled: true, allHit: false, signals: sigHits };
     }
   }
-  const accepted = step > 0 && inspection.ok;
+  const accepted = step === 2 ? !!inspection.evidenceOk : step > 0 && inspection.ok;
   if (!accepted && inspection.reason) warnings.push(`材料未通过内容校验：${p}（${inspection.reason}）`);
   return {
     path: p,
@@ -544,11 +573,12 @@ function check(args) {
   const warnings = [];
   const missing = [];
   const target = getTarget(args.url || '');
+  const signals = signalSets(args);
   const step1 = { checks: [], evidence: false };
   const step2 = { checks: [], evidence: false };
 
   const capJson = path.join(caseSubdir, 'forensic', 'capture.json');
-  const capInspection = exists(capJson) ? inspectCapture(capJson, target, args.requireTargetSignal) : { ok: false, parseable: false, recordCount: 0, targetMatched: false, reason: '文件不存在' };
+  const capInspection = exists(capJson) ? inspectCapture(capJson, target, signals.network) : { ok: false, parseable: false, recordCount: 0, targetMatched: false, reason: '文件不存在' };
   step1.checks.push(makeCheck('case/forensic/capture.json（网络包元数据）', capJson, capInspection));
 
   const jsOriginalDir = path.join(caseSubdir, 'js', 'original');
@@ -574,15 +604,34 @@ function check(args) {
 
   const ndjsonDir = path.join(caseSubdir, 'ruyi-trace', 'logs');
   const ndjsonFiles = listNdjsonFiles(ndjsonDir);
-  const ndjsonInspections = ndjsonFiles.map((file) => inspectNdjson(file, target, args.requireTargetSignal));
-  const validNdjson = ndjsonInspections.filter((item) => item.ok);
+  const ndjsonInspections = ndjsonFiles.map((file) => inspectNdjson(file, target, signals.trace));
+  const validNdjson = ndjsonInspections.filter((item) => item.evidenceOk);
+  const traceSignalHits = signals.trace.map((signal) => {
+    let hits = 0;
+    let sampleLine = 0;
+    for (const item of validNdjson) {
+      const match = item.targetSignal && item.targetSignal.signals.find((sig) => sig.signal === signal);
+      if (!match) continue;
+      hits += match.hits || 0;
+      if (!sampleLine && match.sampleLine) sampleLine = match.sampleLine;
+    }
+    return { signal, hits, sampleLine };
+  });
+  const traceCoverageEnabled = traceSignalHits.length > 0;
+  const traceCoverageAllHit = !traceCoverageEnabled || traceSignalHits.every((sig) => sig.hits > 0);
   const ndjsonInspection = {
-    ok: validNdjson.length > 0,
+    ok: validNdjson.length > 0 && traceCoverageAllHit,
+    evidenceOk: validNdjson.length > 0,
     parseable: ndjsonFiles.length > 0 && ndjsonInspections.every((item) => item.parseable),
     recordCount: validNdjson.reduce((sum, item) => sum + item.recordCount, 0),
     fileCount: ndjsonFiles.length,
     targetMatched: validNdjson.some((item) => item.targetMatched),
-    reason: validNdjson.length ? '' : ndjsonFiles.length ? ndjsonInspections.map((item) => item.reason).filter(Boolean).join('；') : '未找到 NDJSON 日志',
+    reason: !validNdjson.length
+      ? (ndjsonFiles.length ? ndjsonInspections.map((item) => item.reason).filter(Boolean).join('；') : '未找到 NDJSON 日志')
+      : !traceCoverageAllHit
+        ? `目标信号未命中（trace writer/参数链）：${traceSignalHits.filter((sig) => sig.hits === 0).map((sig) => sig.signal).join('、')}（NDJSON 已产出，但目标 writer/参数生成路径覆盖不足）`
+        : '',
+    targetSignal: { enabled: traceCoverageEnabled, allHit: traceCoverageAllHit, signals: traceSignalHits },
   };
   step2.checks.push(makeCheck(`case/ruyi-trace/logs/（NDJSON 日志，${ndjsonFiles.length} 个，通过 ${validNdjson.length} 个）`, ndjsonDir, ndjsonInspection));
 
@@ -605,19 +654,41 @@ function check(args) {
   const userInputs = [];
   if (args.inputs) {
     for (const p of args.inputs.split(',').map((s) => s.trim()).filter(Boolean)) {
-      const input = classifyUserInput(path.resolve(p), warnings, target, args.requireTargetSignal);
+      const input = classifyUserInput(path.resolve(p), warnings, target, signals.network, signals.trace);
       userInputs.push(input);
       if (input.formatError) errors.push(`材料格式错误：${input.path}（${input.reason}）`);
     }
   }
 
   step1.evidence = step1.checks[0].ok || userInputs.some((u) => u.step1);
-  step2.evidence = step2.checks[0].ok || userInputs.some((u) => u.step2);
+  step2.evidence = !!step2.checks[0].evidenceOk || userInputs.some((u) => u.step2);
+  // 信号按“本次全部有效 NDJSON”聚合，而不是要求某一个进程文件/用户文件独自命中全部信号。
+  // RuyiTrace 的 writer 与参数读取可能分散在多个 content 进程；逐文件 allHit 会误判真实滑动未命中。
+  const allValidTraceInspections = validNdjson.concat(
+    userInputs.filter((u) => u.step2 && u.targetSignal).map((u) => u)
+  );
+  const aggregatedTraceSignalHits = signals.trace.map((signal) => {
+    let hits = 0;
+    let sampleLine = 0;
+    for (const item of allValidTraceInspections) {
+      const match = item.targetSignal && item.targetSignal.signals.find((sig) => sig.signal === signal);
+      if (!match) continue;
+      hits += match.hits || 0;
+      if (!sampleLine && match.sampleLine) sampleLine = match.sampleLine;
+    }
+    return { signal, hits, sampleLine };
+  });
+  step2.targetSignal = {
+    enabled: aggregatedTraceSignalHits.length > 0,
+    allHit: aggregatedTraceSignalHits.length === 0 || aggregatedTraceSignalHits.every((sig) => sig.hits > 0),
+    signals: aggregatedTraceSignalHits,
+  };
+  step2.targetCoverage = step2.targetSignal.allHit;
   const skipStep1 = step1.evidence;
   const skipStep2 = step2.evidence;
 
   if (!step1.evidence) {
-    const required = args.requireTargetSignal || [];
+    const required = signals.network;
     const captureMiss = capInspection.targetSignal && capInspection.targetSignal.enabled && !capInspection.targetSignal.allHit;
     const sigPart = captureMiss
       ? `；且目标信号未命中：${required.join('、')}（capture 未命中目标接口的非 OPTIONS 2xx 响应，不能当作 Step 1 证据）`
@@ -625,11 +696,13 @@ function check(args) {
     missing.push(`Step 1 网络取证证据（无有效 capture 网络记录或用户 HAR / cURL / HTTP 请求文本${sigPart}）`);
   }
   if (!step2.evidence) {
-    const required = args.requireTargetSignal || [];
+    const required = signals.trace;
     const sigPart = required.length
       ? `；且目标信号未命中：${required.join('、')}（日志未触发目标接口，不能当作采集完成）`
       : '';
     missing.push(`Step 2 RuyiTrace 日志证据（无可解析、记录非空且关联目标域的 NDJSON${sigPart}；摘要不能替代）`);
+  } else if (!step2.targetCoverage) {
+    missing.push(`Step 2 目标链路覆盖（NDJSON 已产出，但 trace 信号未命中：${signals.trace.join('、')}；应修正 writer/API 信号后 TRACE_RETRY，不得误报为“没有 trace”）`);
   }
 
   // JS 落盘质量门禁：capture 记录到 JS 资源但全部落盘为空（gzip/br 响应体未拿回 → 0B）时，
@@ -670,6 +743,7 @@ function check(args) {
     actionable: !(urlOnly && mode === 'none'),
     capturedJsCount,
     emptyJsCount,
+    signals,
   };
 }
 
@@ -813,6 +887,64 @@ function runSelfTest() {
     const sigBoth = childProcess.spawnSync(process.execPath, [__filename, '--case-dir', sigRoot, '--url', targetUrl, '--require-target-signal', targetUrl, '--markdown'], { encoding: 'utf8' });
     assert.strictEqual(sigBoth.status, 0); // 信号命中 → 通过
 
+    // 分离信号：网络 URL 只约束 Step 1，trace writer 只约束 Step 2。
+    const splitSignals = check({
+      caseDir: sigRoot,
+      inputs: '',
+      url: targetUrl,
+      requireNetworkSignal: [targetUrl],
+      requireTraceSignal: ['handshake'],
+      requireTargetSignal: [],
+    });
+    assert.strictEqual(splitSignals.step1.evidence, true);
+    assert.strictEqual(splitSignals.step2.evidence, true);
+    assert.strictEqual(splitSignals.step2.targetCoverage, false);
+    assert.match(splitSignals.missing.join('\n'), /目标链路覆盖/);
+
+    // 多文件聚合：writer 与参数信号分散在两个用户 NDJSON 时，应按本次采集整体判定为覆盖。
+    const multiA = path.join(root, 'multi-a.ndjson');
+    const multiB = path.join(root, 'multi-b.ndjson');
+    fs.writeFileSync(multiA, `${JSON.stringify({ api: 'Headers.set', url: targetUrl, stack: [{ file: 'https://static.example.com/a.js' }] })}\n`, 'utf8');
+    fs.writeFileSync(multiB, `${JSON.stringify({ api: 'lot_number', url: targetUrl, stack: [{ file: 'https://static.example.com/b.js' }] })}\n`, 'utf8');
+    const multiSignals = check({
+      caseDir: path.join(root, 'multi-input'),
+      inputs: `${multiA},${multiB}`,
+      url: targetUrl,
+      requireTraceSignal: ['Headers.set', 'lot_number'],
+      requireTargetSignal: [],
+    });
+    assert.strictEqual(multiSignals.step2.evidence, true);
+    assert.strictEqual(multiSignals.step2.targetCoverage, true);
+    assert.strictEqual(multiSignals.step2.targetSignal.allHit, true);
+
+    // 跨域 iframe/验证码 SDK：目标站点域名不在 trace 中，但明确 writer 信号全部命中时应保留 Step 2。
+    const crossOrigin = path.join(root, 'cross-origin.ndjson');
+    fs.writeFileSync(crossOrigin, `${JSON.stringify({ api: 'Headers.set', url: 'https://static.geetest.com/verify', stack: [{ file: 'https://static.geetest.com/sdk.js' }] })}\n`, 'utf8');
+    const crossOriginResult = check({
+      caseDir: path.join(root, 'cross-origin-input'),
+      inputs: crossOrigin,
+      url: targetUrl,
+      requireTraceSignal: ['Headers.set'],
+      requireTargetSignal: [],
+    });
+    assert.strictEqual(crossOriginResult.step2.evidence, true);
+    assert.strictEqual(crossOriginResult.userInputs[0].step2, true);
+    assert.strictEqual(crossOriginResult.userInputs[0].crossOriginAccepted, true);
+
+    const crossOriginA = path.join(root, 'cross-origin-a.ndjson');
+    const crossOriginB = path.join(root, 'cross-origin-b.ndjson');
+    fs.writeFileSync(crossOriginA, `${JSON.stringify({ api: 'Headers.set', url: 'https://static.geetest.com/verify', stack: [{ file: 'https://static.geetest.com/a.js' }] })}\n`, 'utf8');
+    fs.writeFileSync(crossOriginB, `${JSON.stringify({ api: 'lot_number', url: 'https://static.geetest.com/verify', stack: [{ file: 'https://static.geetest.com/b.js' }] })}\n`, 'utf8');
+    const crossOriginSplit = check({
+      caseDir: path.join(root, 'cross-origin-split-input'),
+      inputs: `${crossOriginA},${crossOriginB}`,
+      url: targetUrl,
+      requireTraceSignal: ['Headers.set', 'lot_number'],
+      requireTargetSignal: [],
+    });
+    assert.strictEqual(crossOriginSplit.step2.evidence, true);
+    assert.strictEqual(crossOriginSplit.step2.targetCoverage, true);
+
     // 目标信号同时约束 Step 1 capture：同域无关请求不得冒充目标接口已捕获
     const capSigRoot = path.join(root, 'capture-signal');
     const capSigForensic = path.join(capSigRoot, 'case', 'forensic');
@@ -914,7 +1046,7 @@ function runSelfTest() {
     assert.strictEqual(subCheck.step2.evidence, true, '仅子目录 NDJSON 也应通过 Step 2 证据判定');
     assert.ok(subCheck.step2.checks[0].recordCount >= 1000, 'recordCount 应计入 domtrace 主日志记录数，而非只计顶层副本');
 
-    return { clean: true, tests: 40 };
+    return { clean: true, tests: 52 };
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

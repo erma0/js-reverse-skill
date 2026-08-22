@@ -5,8 +5,8 @@
 // 防止 AI"声明已采集 trace"但实际跳过 RuyiTrace，直接进入 CASE_LOOKUP / EXTERNAL_LOOKUP 拼凑。
 // 内部复用 check_evidence.js 的 check()，判定标准为 result.step2.evidence。
 // 退出码：0 = Step 2 已具备（可进 CASE_LOOKUP）；1 = Step 2 缺失（停在 TRACE_CAPTURE / TRACE_RETRY）。
-// --require-target-signal 透传：同时要求 NDJSON 命中目标信号（环境 API / 写入点 / 目标接口 URL），
-//   未命中则 step2.evidence=false，退出码 1。
+// --require-trace-signal 要求 NDJSON 命中环境 API / 写入点；网络 URL 不属于 trace 信号。
+// --require-target-signal 仅保留兼容旧调用。
 // 本脚本只卡 Step 2；Step 1 是否齐全由 GATE-2 入口门禁（check_evidence.js）负责，不重复判定。
 
 const childProcess = require('child_process');
@@ -17,7 +17,7 @@ const path = require('path');
 const { check: checkEvidence } = require('./check_evidence');
 
 function parseArgs(argv) {
-  const args = { caseDir: '.', inputs: '', url: '', requireTargetSignal: [], json: false, markdown: false, help: false, selfTest: false };
+  const args = { caseDir: '.', inputs: '', url: '', requireTargetSignal: [], requireTraceSignal: [], json: false, markdown: false, help: false, selfTest: false };
   for (let i = 2; i < argv.length; i += 1) {
     const a = argv[i];
     const nextVal = () => {
@@ -31,6 +31,7 @@ function parseArgs(argv) {
     else if (a === '--inputs' || a === '-i') args.inputs = nextVal();
     else if (a === '--url' || a === '-u') args.url = nextVal();
     else if (a === '--require-target-signal') args.requireTargetSignal.push(nextVal());
+    else if (a === '--require-trace-signal') args.requireTraceSignal.push(nextVal());
     else if (a === '--json') args.json = true;
     else if (a === '--markdown') args.markdown = true;
     else if (a === '--self-test') args.selfTest = true;
@@ -39,13 +40,14 @@ function parseArgs(argv) {
   }
   if (!args.json && !args.markdown) args.markdown = true;
   args.requireTargetSignal = args.requireTargetSignal.filter((s) => s && s.trim());
+  args.requireTraceSignal = args.requireTraceSignal.filter((s) => s && s.trim());
   return args;
 }
 
 function usage() {
   return `用法：
   node scripts/check_trace_gate.js --case-dir <project-root> --url <目标URL> --markdown
-  node scripts/check_trace_gate.js --case-dir <project-root> --url <目标URL> --require-target-signal <环境API/写入点/目标接口URL> --markdown
+  node scripts/check_trace_gate.js --case-dir <project-root> --url <目标URL> --require-trace-signal <环境API/写入点> --markdown
   node scripts/check_trace_gate.js --self-test
 
 说明：
@@ -54,8 +56,8 @@ function usage() {
 - 退出码是硬信号：Step 2 已具备（NDJSON 存在 + 关联目标域 + 命中目标信号）退出 0，可进入 CASE_LOOKUP；
   Step 2 缺失退出 1，停在 TRACE_CAPTURE / TRACE_RETRY，不得进入 CASE_LOOKUP / EXTERNAL_LOOKUP。
 - 声明"已采集 trace"不等于 Step 2 已产出：以本脚本退出码为准，防止"声明不执行"直接跳到 EXTERNAL_LOOKUP 拼凑。
-- --require-target-signal（可多次）：透传给 check_evidence.js，要求 NDJSON 命中目标信号（环境 API / 写入点 /
-  目标接口 URL / 关键词）。target-signal 命中的是 trace 记录的环境 API/写入点，不是网络请求 URL（详见 SKILL.md 4.2）。
+- --require-trace-signal（可多次）：只要求 NDJSON 命中环境 API / writer / 参数写入点。
+- --require-target-signal：兼容旧调用；新流程不要传目标接口 URL，JSONP/script/导航 URL 通常不会出现在 trace。
 - 本脚本只卡 Step 2；Step 1 是否齐全由 GATE-2 入口门禁负责，本脚本不重复判定 Step 1。`;
 }
 
@@ -69,7 +71,8 @@ function renderMarkdown(result, step2Ready) {
     '',
     `case 目录：${result.caseSubdir}`,
     `目标 URL：${result.url || '未提供'}`,
-    `Step 2（RuyiTrace NDJSON）证据：${step2Ready ? '已具备' : '缺失'}`,
+    `Step 2（RuyiTrace NDJSON）证据：${result.step2 && result.step2.evidence ? '已具备' : '缺失'}`,
+    `目标 writer/参数链覆盖：${result.step2 && result.step2.targetCoverage ? '已命中或未要求' : '未命中'}`,
     '',
     '## Step 2 证据详情',
   ];
@@ -85,7 +88,9 @@ function renderMarkdown(result, step2Ready) {
     if (reasons.length) {
       for (const m of reasons) lines.push(`- ${m}`);
     } else {
-      lines.push('- Step 2 NDJSON 未产出或未通过内容校验');
+      lines.push(result.step2 && result.step2.evidence
+        ? '- NDJSON 已产出，但目标 writer/参数链信号未命中；这不是“没有 trace”，应修正信号或进入 TRACE_RETRY。'
+        : '- Step 2 NDJSON 未产出或未通过内容校验');
     }
   }
 
@@ -93,7 +98,9 @@ function renderMarkdown(result, step2Ready) {
   if (step2Ready) {
     lines.push('- [PASS] Step 2 已具备，可进入 CASE_LOOKUP。');
   } else {
-    lines.push('- [BLOCK] Step 2 缺失，停在 TRACE_CAPTURE / TRACE_RETRY。');
+    lines.push(result.step2 && result.step2.evidence
+      ? '- [BLOCK] Step 2 已具备，但目标链路覆盖不足，停在 TRACE_RETRY。'
+      : '- [BLOCK] Step 2 缺失，停在 TRACE_CAPTURE / TRACE_RETRY。');
     lines.push('- 不得进入 CASE_LOOKUP / EXTERNAL_LOOKUP；不得以 EXTERNAL_LOOKUP 方案、边界声明或 mock 替代 Step 2 证据。');
     lines.push('- 声明"已采集 trace"不等于 Step 2 已产出，以本脚本退出码为准。');
   }
@@ -101,13 +108,18 @@ function renderMarkdown(result, step2Ready) {
 }
 
 function checkStep2Gate(args) {
+  const explicitTraceSignals = Array.isArray(args.requireTraceSignal) ? args.requireTraceSignal : [];
+  const legacySignals = Array.isArray(args.requireTargetSignal) ? args.requireTargetSignal : [];
+  const traceSignals = explicitTraceSignals.length ? explicitTraceSignals : legacySignals;
   const result = checkEvidence({
     caseDir: args.caseDir,
     url: args.url,
     inputs: args.inputs,
-    requireTargetSignal: args.requireTargetSignal,
+    requireTargetSignal: [],
+    requireNetworkSignal: [],
+    requireTraceSignal: traceSignals,
   });
-  const step2Ready = !!(result.step2 && result.step2.evidence);
+  const step2Ready = !!(result.step2 && result.step2.evidence && result.step2.targetCoverage !== false);
   return { result, step2Ready };
 }
 

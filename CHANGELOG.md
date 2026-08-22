@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 2.3.48 - 2026-08-22
+
+### 修复
+- **RuyiTrace 采集生命周期闭环**：默认 `--duration 120` 明确为采集窗口；窗口到期、用户关闭浏览器或全部 trace 信号命中后都会进入统一收尾，按 trace Firefox 可执行路径与 profile 清理进程树，并复检残留进程。输出新增明确的 `endReason` 与实际命令耗时，避免把关闭/刷盘/导入时间误解为采集仍在继续。
+- **关闭浏览器后的半条日志误判**：导入前等待全部 NDJSON 的大小与修改时间稳定，并要求文件最后一个字节为换行，避免用户手动关闭或进程退出时把未写完的 JSON 当作完整 trace 导入。
+- **“真实操作了却提示未命中”误判**：网络接口 URL 与 trace writer/API 信号拆分；网络信号只约束 Step 1，trace 信号只约束 Step 2。多进程、多用户 NDJSON 的信号按本次全部有效日志聚合，不再要求单个进程文件独自命中全部信号。验证码/支付等跨域 iframe 在明确 writer/API 信号全部命中时允许以信号确认 Step 2，不再强制要求日志出现业务站点 hostname。
+- **“没有 trace”与“覆盖不足”混淆**：Step 2 拆分为 `evidence`（有效 NDJSON 已存在）与 `targetCoverage`（writer/API 链已覆盖）。NDJSON 存在但信号未命中时明确进入 TRACE_RETRY，不再误报为日志未产出；人工结束或信号尚不确定时可使用 `--signal-policy advisory` 保留有效日志并只报告覆盖不足。
+- **人工关闭后的导入策略**：检测到用户提前关闭/浏览器崩溃时，自动导入临时采用 `advisory`，保留完整 NDJSON 和摘要；`check_trace_gate.js` 仍严格检查 writer 覆盖，未命中只会停在 TRACE_RETRY，不再显示成“导入失败/没有 trace”。
+- **延迟生成日志不丢失**：刷盘等待阶段持续重新扫描 trace 目录，覆盖浏览器退出后才落盘的 content 进程文件。
+
+### 变更
+- `capture_ruyitrace_log.js` 支持 `--trace-signal`（`--target-signal` 仅兼容旧调用）、实时观察内容进程日志并在全部信号命中时自动结束采集。
+- `check_evidence.js` 新增 `--require-network-signal` / `--require-trace-signal`，`check_trace_gate.js` 按 Step 2 证据与目标覆盖双门禁判定。
+- `import_ruyitrace_log.js` 统一支持 `--trace-signal`，旧 `--target-signal` 保持兼容；多文件导入复制时加入来源摘要，避免同名 NDJSON 静默覆盖。
+- 同步更新 `SKILL.md`、`references/workflow/trace-flow.md` 与 `scripts/README.md` 的状态语义和操作说明。
+
 ## 2.3.47 - 2026-08-21
 
 ### 变更
