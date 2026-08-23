@@ -38,7 +38,7 @@ final.js（唯一执行入口）
   │     └── result/src/request/client.js（TLS 客户端，复制自 node-request/）
   ├── ② solveCaptcha()     → 下载素材 → 本地求解 → answer JSON（含 offset/points/track/challenge_binding）
   │     ├── result/src/solver.js（ddddocr 或打码平台适配器）
-  │     └── result/src/track.js（轨迹生成，slider/drag-drop/scratch/trace）
+  │     └── result/src/track.js（轨迹生成，slider(eased/staircase)/click/drag-drop/scratch/trace；阶梯参数经 track-profile.json 固化）
   ├── ③ adapter.buildVerifyRequest() → 按本 case 原始请求语义构造 verify 请求
   │     └── adapter.parseVerifyResponse() → 按本 case 响应格式解析凭据
   └── ④ adapter.consumeCredential() → 业务接口消费凭据

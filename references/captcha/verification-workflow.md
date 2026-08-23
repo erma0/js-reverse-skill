@@ -29,9 +29,10 @@
    - 用 `node scripts/check_success_baseline.js` 输出 `status`、`groups` 和 `missing`。
    - 基线不足时强提示：当前缺少真实成功流程对照，用户确认后仍可继续离线分析或受控验证。
 5. 离线执行：
-   - 用开源工具识别答案、偏移、角度、坐标、点列或 token 诊断结果。
+   - 用开源工具识别答案、偏移、角度、坐标、点列或 token 诊断结果；滑块缺口先跑 `scripts/detect_gap.py`（C 路线一条龙，来源判定见 `gap-coordinate-source.md`）。
+   - 有成功样本明文轨迹时先跑 `scripts/analyze_track.py` 统计并推导轨迹参数，再生成。
    - 用 `scripts/map_coordinates.py` 换算坐标。
-   - 用 `scripts/generate_motion_track.py` 生成轨迹 JSON。
+   - 用 `scripts/generate_motion_track.py` 生成轨迹 JSON（eased/staircase/click，参数按样本统计或 case profile）。
    - 用 `scripts/solver_request_template.py` 生成打码平台请求模板。
 6. 展示中间产物：
    - 识别结果、置信度、坐标/轨迹 JSON、缺失证据、失败原因。

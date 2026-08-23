@@ -61,6 +61,9 @@ jobs:
         run: |
           python scripts/classify_verify.py --self-test
           python scripts/forensic_ruyipage.py --self-test
+          python scripts/generate_motion_track.py --self-test
+          python scripts/analyze_track.py --self-test
+          python scripts/detect_gap.py --self-test
 
       - name: Run routing/gate regression benchmarks
         run: node scripts/check_routing_benchmarks.js --markdown

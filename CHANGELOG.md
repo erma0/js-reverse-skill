@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2.3.53 - 2026-08-23
+
+### 变更（验证码轨迹/缺口/点选三线工具化，2.3.50 T1/T2 政策落地）
+- **`generate_motion_track.py` 阶梯模型 + click 模式 + profile 参数包**：新增 `--model staircase`（移动步/微调步严格交替的离散阶梯，步长自适应公式内置，点数由时长推导，X/T 严格递增、y 恒定、末点精确落目标）与 `--mode click`（点选点击时序：坐标微抖动、首次反应延迟、点间间隔、按下-抬起停留全参数化）；`--profile <json>` 加载 case adapter 提供的 T2 实测参数包（键名与 CLI 一致，显式 CLI 旗标优先，`_` 开头键为元数据如验证日期，未知键拦截）；`--seed` 缺省改为每次随机并在输出 JSON 回显，堵住「复用固定轨迹」的默认行为；新增 `--self-test`（模型不变量 + profile 分层逻辑断言）。**脚本与模板仍不内置任何厂商预设**，易盾实证参数以 profile 示例形式固化在 `cases/yidun-jigsaw.md`（T2 带 2026-08-09 验证日期）。
+- **新增 `analyze_track.py`（成功样本轨迹统计/对比）**：「以成功样本明文为准」纪律的可执行化——输入 trace dump 的明文轨迹（支持 points 对象/三元组/扁平数组三形态），输出点数、时长、间隔分布、步长序列、单调性、y 抖动、首末点与**形态判定**（staircase 交替率检测 / eased / unknown），`--compare` 对比生成轨迹输出逐字段偏差 verdict（阈值 20%，warn 提示调参）；生成-复核闭环写入 captcha-motion-encryption.md（样本统计 → 写 profile → 生成 → compare 复核）。
+- **新增 `detect_gap.py`（C 路线缺口识别一条龙）**：封装 ddddocr `slide_match`/`slide_comparison` 与 OpenCV absdiff/模板/边缘匹配，按依赖与素材可用性自动运行全部可行方法，逐候选标注**锚点语义**（slide_comparison 返回中心点、其余左边缘，best/一致性只取左边缘方法）与可用性（依赖缺失 skip 不报错），输出方法间一致性（分歧 >8px 提示复核 A/B 判定）；CSS 换算仍走 `map_coordinates.py`。gap-coordinate-source.md C 路线一级方法更新为一条龙入口，降级链保持人工 `click_gap.py` → 打码。
+- **点选（click-select）行为层补齐**：open-source-recipes 补 ddddocr `det=True` 检测模式为文字点选定位首选；solution-playbooks click-select 方案补点击时序工具步骤；captcha-motion-encryption 新增「点选题轨迹/点击时序」节（中间格式与厂商格式展开边界）。
+- **CI Python 自测扩容**：`generate_motion_track` / `analyze_track` / `detect_gap` 三个 `--self-test` 接入双平台矩阵（detect_gap 自测在无 ddddocr/opencv 环境走降级断言路径，有依赖环境走合成图定位断言，本机已验证双路径）。
+- scripts/README 同步：验证码识别与求解辅助 6→8（合计 59→61，Python 7→9），新增 profile 参数包说明节；verification-workflow 离线执行步骤挂 detect_gap/analyze_track 入口；两套 captcha-verify 模板 README 的 track 层描述更新。
+
+### 修复
+- captcha-motion-encryption.md 关键纪律 #3 原要求人工对比轨迹字段，与「逐点统计再重建」实证纪律脱节——统一为 analyze_track.py 统计先行，模型选择由形态判定驱动。
+
 ## 2.3.52 - 2026-08-22
 
 ### 变更

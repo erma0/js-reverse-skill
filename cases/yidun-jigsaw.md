@@ -46,6 +46,35 @@
 9. 轨迹 X 末点 = jigsaw.left（252.5↔p75.625、146↔p42.1875 实测一致）
 10. 人工坐标误差实测 6-13px（点击 207 vs 真实 213、197 vs 201、155 vs 168）
 
+## 轨迹参数包（track-profile.json，T2 实证参数固化）
+
+由上述实测提炼，落在 case 的 `result/src/track-profile.json`（T2 实测参数只进 case adapter，脚本/模板不内置厂商预设——SKILL.md T1/T2 政策）：
+
+```json
+{
+  "model": "staircase",
+  "duration_ms": 2000,
+  "move_interval_ms": [50, 70],
+  "adjust_interval_ms": [17, 27],
+  "adjust_step_px": 1,
+  "first_x": 5,
+  "first_t_ms": [146, 250],
+  "_meta": {
+    "case": "yidun-jigsaw",
+    "verified": "2026-08-09",
+    "notes": "点数由时长决定（40-55 点/1.8-2.5s）；移动步长自适应公式已内置；SDK 更新后必须重跑 analyze_track.py 对新成功样本复核，禁止直接沿用"
+  }
+}
+```
+
+生成与复核（`--distance` 每次 challenge 单独传，`slider.left = jigsaw.left - 10.5`）：
+
+```bash
+python scripts/generate_motion_track.py --mode slider --model staircase \
+  --profile result/src/track-profile.json --distance <jigsaw.left> --pretty
+python scripts/analyze_track.py --input <成功样本明文.json> --compare <生成输出.json> --pretty
+```
+
 ## 相关参考
 
 | 参考文档 | 关联点 |

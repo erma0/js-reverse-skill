@@ -59,10 +59,10 @@ print(text)
 开源优先：
 
 1. 先确认图片模式：双图、单图、canvas。
-2. 双图优先用 ddddocr `slide_match` 或 OpenCV 模板/边缘匹配。
+2. 优先跑 `scripts/detect_gap.py`（一条龙汇总 ddddocr `slide_match`/`slide_comparison` 与 OpenCV absdiff/模板/边缘匹配，标注锚点与一致性）；双图优先 `slide_match`，有完整背景图优先差分。
 3. 单图用缺口边缘、局部对比、差分或 VLM 辅助。
 4. 用 `scripts/map_coordinates.py` 把图片偏移换算成 DOM/CSS 坐标。
-5. 用 `scripts/generate_motion_track.py` 生成滑块轨迹 JSON。
+5. 用 `scripts/generate_motion_track.py` 生成滑块轨迹 JSON；模型（eased/staircase）与参数按 `analyze_track.py` 对成功样本的统计选定（见 `captcha-motion-encryption.md` 的 profile 闭环）。
 
 示例思路：
 
@@ -87,9 +87,10 @@ print(res["target"][0])
 开源优先：
 
 1. OCR/VLM 解析题面，保留原始顺序词。
-2. 文字点选用 OCR + 模板/轮廓定位。
+2. 文字点选优先 ddddocr 检测模式（`DdddOcr(det=True)` 输出文字/目标 bbox，再对候选区域逐一 `classification` 匹配题面字符与顺序），其次 OCR + 模板/轮廓定位。
 3. 物体点选用 YOLO/目标检测、CLIP/VLM 或模板匹配。
-4. 输出截图坐标和元素相对坐标。
+4. 输出截图坐标和元素相对坐标（`map_coordinates.py` 换算）。
+5. 点击时序/坐标抖动用 `scripts/generate_motion_track.py --mode click` 生成中间格式，厂商采集形态由 case adapter 按成功样本展开（见 `captcha-motion-encryption.md` 点选题轨迹节）。
 
 需要多轮时，每轮单独保存题面和截图。
 

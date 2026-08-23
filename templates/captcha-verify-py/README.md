@@ -41,7 +41,7 @@ final.py（唯一执行入口）
   │     └── result/src/request/client.py（TLS 客户端，复制自 python-request/）
   ├── ② solve_captcha()    → 下载素材 → 本地求解 → answer JSON（含 offset/points/track/challenge_binding）
   │     ├── result/src/solver.py（ddddocr / OpenCV / 打码平台适配器，直接 import ddddocr）
-  │     └── result/src/track.py（轨迹生成，slider/drag-drop/scratch/trace）
+  │     └── result/src/track.py（轨迹生成，slider(eased/staircase)/click/drag-drop/scratch/trace；阶梯参数经 track-profile.json 固化）
   ├── ③ adapter.build_verify_request() → 按本 case 原始请求语义构造 verify 请求
   │     └── adapter.parse_verify_response() → 按本 case 响应格式解析凭据
   └── ④ adapter.consume_credential() → 业务接口消费凭据

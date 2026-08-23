@@ -1,6 +1,6 @@
 # 脚本索引
 
-本目录包含 59 个可执行脚本（52 个 JavaScript、7 个 Python），按功能分为 10 类。以下索引以 `scripts/` 当前实际文件为准，不包含 `README.md` 与 `lib/` 共享模块。
+本目录包含 61 个可执行脚本（52 个 JavaScript、9 个 Python），按功能分为 10 类。以下索引以 `scripts/` 当前实际文件为准，不包含 `README.md` 与 `lib/` 共享模块。
 
 本文中的 `<project-root>` 指项目根目录，其下包含平级的 `case/` 与 `result/` 目录。需要 case 目录的脚本使用 `<project-root>/case`，需要项目根目录的脚本直接使用 `<project-root>`。`forensic_ruyipage.py` 与 `capture_ruyitrace_log.js` 会在 `--case-dir` 下创建 `case/`，因此必须传入 `<project-root>`。`check_session_resume`/`check_fingerprint_fixture`/`check_trace_api_coverage` 已归一化，传 `<project-root>` 或 `<project-root>/case` 均可。
 
@@ -100,16 +100,22 @@
 | `download_ruyi_tool.js` | 下载 RuyiTrace 或 ruyipage-firefox，支持自动解压 zip；命中 `scripts/lib/tool-pins.json` 锁定记录或显式 `--sha256` 时强制哈希校验，不匹配即删产物并失败，未锁定下载报告 sha256 供固化 | `node scripts/download_ruyi_tool.js --tool ruyitrace --dest <目录> --extract --markdown` |
 | `check_tool_pins.js` | 供应链 pin 门禁：GitHub 资产哈希锁定（records）+ PyPI 包版本锁定（pythonPackages）；`--record` 固化、`--verify-file` 校验单个下载、`--python <cmd>` 复验本机包版本漂移、`--strict` 未锁定即失败 | `node scripts/check_tool_pins.js --python python --markdown` |
 
-## 验证码识别与求解辅助（6 个）
+## 验证码识别与求解辅助（8 个）
 
 | 脚本 | 功能 | 典型用法 |
 |------|------|---------|
 | `classify_verify.py` | 离线识别验证码题型与厂商，内置冒烟自检 | `python scripts/classify_verify.py --html page.html --url "https://example.test" --text "拖动滑块" --pretty` |
 | `analyze_tile_restore.py` | 离线分析切片乱序图片并辅助恢复原图 | `python scripts/analyze_tile_restore.py --image scrambled.png --rows 3 --cols 3 --pretty` |
 | `map_coordinates.py` | 将图片像素坐标换算为 CSS / 页面坐标，处理 DPR、偏移与滚动 | `python scripts/map_coordinates.py --image-size 300x150 --display-size 300x150 --point 120,75 --pretty` |
-| `generate_motion_track.py` | 生成滑块、拖放、刮刮卡或连线轨迹 JSON | `python scripts/generate_motion_track.py --mode slider --distance 128 --duration-ms 1100 --pretty` |
+| `detect_gap.py` | 滑块缺口自动识别一条龙（ddddocr slide_match/slide_comparison + OpenCV absdiff/模板，逐方法标注锚点与可用性，输出方法间一致性）；仅 C 路线使用 | `python scripts/detect_gap.py --bg bg.jpg --target front.png --full fullbg.jpg --pretty` |
+| `generate_motion_track.py` | 生成滑块（eased/staircase 双模型）、点选点击时序（click）、拖放、刮刮卡或连线轨迹 JSON；`--profile` 加载 case adapter 提供的 T2 实测参数包；seed 缺省随机并回显 | `python scripts/generate_motion_track.py --mode slider --model staircase --distance 128 --profile result/src/track-profile.json --pretty` |
+| `analyze_track.py` | 成功样本明文轨迹逐点统计（点数/间隔分布/步长序列/单调性/形态判定 staircase·eased·unknown），并可对比生成轨迹输出偏差 verdict | `python scripts/analyze_track.py --input sample-track.json --compare generated.json --pretty` |
 | `click_gap.py` | OpenCV 人工点击缺口工具，输出缺口左边缘 CSS x 坐标 | `python scripts/click_gap.py bg.jpg front.png --scale 2` |
 | `solver_request_template.py` | 生成打码平台请求占位模板 | `python scripts/solver_request_template.py --platform yundama --captcha-type slider --pretty` |
+
+### `generate_motion_track.py` profile 参数包
+
+`--profile <path.json>` 加载参数包基线（显式 CLI 旗标优先于 profile），键名与 CLI 目标名一致（`model` / `move_interval_ms` / `adjust_interval_ms` / `adjust_step_px` / `first_x` / `first_t_ms` / `pairs` / `duration_ms` / `jitter` 等）。**按 SKILL.md T1/T2 知识分级政策，厂商实测轨迹参数（T2）只能固化在 case 的 `result/src/`（带验证日期），本脚本与 `templates/` 不内置任何厂商预设**；profile 示例见 `cases/yidun-jigsaw.md`。staircase 模型参数推导流程：成功样本明文 → `analyze_track.py` 统计 → 写 profile → 生成 → `analyze_track.py --compare` 复核。
 
 ## 验证码验证门禁（3 个）
 
@@ -131,8 +137,8 @@
 | 补环境与网络语义检查 | 7 |
 | 质量检查与交付门禁 | 9 |
 | 安装与下载 | 4 |
-| 验证码识别与求解辅助 | 6 |
+| 验证码识别与求解辅助 | 8 |
 | 验证码验证门禁 | 3 |
-| **合计** | **59** |
+| **合计** | **61** |
 
 > 滑块缺口坐标来源判定（A 接口参数 / B 图片像素 / C 纯图像三路线）见 `references/captcha/gap-coordinate-source.md`。本目录中的验证码辅助脚本负责 C 类坐标换算、轨迹生成、答案校验与打码模板，A / B 类走封装层逆向。
