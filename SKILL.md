@@ -42,6 +42,8 @@ GATE-2 EVIDENCE（硬阻断）
 
 续接模式只跳过 GATE-1 环境自检，**不跳过** GATE-0 意图声明和 GATE-2 证据门禁。
 
+Windows 下后续手动运行 Python 脚本一律用环境检查选定的解释器（通常是 `py -3`）；裸 `python` 可能命中 WindowsApps stub 并以 exit 9009 静默失败。
+
 ## 1. 任务边界、授权与确认策略
 
 用户发起本技能请求即代表已在合法授权范围内操作，默认直接协助，不要求授权证明，不反复确认。
@@ -128,9 +130,16 @@ IDENTIFY → TRACE_ANALYZE → IMPLEMENT
 IMPLEMENT → REAL_VERIFY
 REAL_VERIFY
   ├─ 默认真实验证通过 → DELIVER
-  ├─ 失败 + 已有 trace → DIAGNOSE → IMPLEMENT
+  ├─ 失败 + 已有 trace → DIAGNOSE
   ├─ 失败 + 无 trace → FORENSIC_CAPTURE
   └─ sign-only → SIGN_ONLY_DELIVER
+DIAGNOSE（403/风控码失败的首选入口；双对照细则见第 10 节分层定位协议）
+  ├─ 正向对照 200 + 反向对照 403 → 签名内容层 → 环境检测对齐（探针法）→ IMPLEMENT
+  ├─ 正向对照 403 → 连接层嫌疑成立 → IMPLEMENT 路径 E（TLS/Session 对齐）
+  ├─ 会话/资源/频率/业务参数错误 → 对应修复 → IMPLEMENT
+  └─ 双对照未完成（含用过期样本、hook 未验证标记）→ 停在 DIAGNOSE，
+     不得下拦截层结论、不得转投浏览器内核方案；对照结果写入验证记录并过
+     check_risk_layer_diagnosis.js 后按结论路由
 DELIVER / SIGN_ONLY_DELIVER → CLEANUP → DONE
 ```
 
@@ -152,7 +161,7 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 6. IDENTIFY
 7. TRACE_ANALYZE
 8. IMPLEMENT
-9. REAL_VERIFY（含 DIAGNOSE）
+9. REAL_VERIFY（含 DIAGNOSE：403/风控码先分层定位双对照，见第 10 节）
 10. DELIVER / SIGN_ONLY_DELIVER
 11. CLEANUP
 
@@ -255,7 +264,7 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 - 若跳过任何必经节点（CASE_LOOKUP / EXTERNAL_LOOKUP），必须显式写出豁免依据（如「EXTERNAL_LOOKUP 豁免：Step1+Step2 齐备 + TRACE_ANALYZE 已定位链」）
 - 若 trace 未覆盖目标接口 URL 字面量，状态行需带「trace 定位依据：<写入点/关键词>」
 
-示例：`TRACE_ANALYZE(Step1+Step2 齐备，noncestr 写入点命中) → IMPLEMENT`。关键结论随节点落盘，供压缩/续接使用：
+示例：`TRACE_ANALYZE(Step1+Step2 齐备，noncestr 写入点命中) → IMPLEMENT`；`DIAGNOSE(正向对照 200 + 反向对照 403 → 签名内容层，探针法 diff 出 4 差异位) → IMPLEMENT`。关键结论随节点落盘，供压缩/续接使用：
 
 ```powershell
 node scripts/write_stage_report.js --case-dir <project-root> --stage <阶段> --input <草稿.md> --markdown
@@ -359,7 +368,7 @@ node scripts/check_trace_api_coverage.js --case-dir <project-root> --markdown
 A. 纯算法：Node `crypto`、Python `hashlib`/成熟密码库和原始序列化规则。
 B. 最小 JS 沙箱：提取算法闭包，在隔离上下文提供已证实需要的对象和函数。
 C. WASM：复现加载、内存、导入和导出调用，固定输入输出契约。
-D. 环境伪装：仅补 trace 证明必要的 Web API、对象形状、Realm、时间、随机数和指纹行为。
+D. 环境伪装：仅补 trace 证明必要的 Web API、对象形状、Realm、时间、随机数和指纹行为。服务端校验签名内嵌环境检测结果时（403 但正反对照显示连接无问题），用对齐探针法定位差异位——注入导出 SDK 检测函数，浏览器采样 ground-truth 与沙箱采样逐位 diff（见 `references/env/env-detect-bypass.md`）。
 E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定向和动态资源预热。
 
 中间值必须可单独验证；时间、随机数、UA、指纹和会话状态必须有明确来源；静态配置外置，秘密从环境变量或用户运行时输入读取。验证码拆成 `load → solve → verify`，按 `templates/captcha-verify/`（Node）或 `templates/captcha-verify-py/`（Python）骨架 + 本 case `result/src/adapter` 实现，答案层接入（`result/src/solver`）是交付组成部分；成功样本先逐字段确认明文类型、长度和绑定关系，再编写生成器，不得把一次性 challenge、ticket 或答案固定到代码。
@@ -387,6 +396,20 @@ node scripts/compare_fixture.js --fixture case/fixtures/<样本>.fixture.json --
 
 至少保留一份脱敏验证摘要和可复现命令；不得输出完整 Authorization、Cookie、Token、密钥或验证码答案。401/403/412/429 先诊断，不得用浏览器自动化或硬编码成功样本绕过。验证码交付在此之上追加两项记录：手动成功样本基线（`node scripts/check_success_baseline.js`，要求与豁免条件见 `references/captcha/verification-workflow.md`）与逐次尝试 attempts 复盘（`node scripts/check_verification_attempts.js`）；成功标准以「verify 返回通过凭据且业务接口消费凭据返回正确业务数据」为准，视觉答案正确不算通过。
 
+**403/风控码分层定位协议（硬约束：下「连接层拦截 / 纯协议不可绕过」结论前必须完成）**：用「签名来源 × 连接来源」双对照定位拦截层，完整矩阵见 `references/network/ip-risk-control.md`：
+
+1. **正向对照**：浏览器**新鲜**签名 + 纯协议客户端（curl_cffi 等）重放 → 200 ⇒ 连接层无问题，问题在自己的签名内容；403 ⇒ 连接层嫌疑才成立。内嵌 serverTime/时间戳的签名有有效期，对照必须用采集后立即重放的新鲜样本并记录采集→重放延迟；**用过期样本得到的 403 不构成任何结论**（实战误判：拼多多 40002 被误判为连接层风控）。
+2. **反向对照**：自己的签名 + 真实浏览器连接（取证阶段 ruyipage `add_preload_script` hook XHR.open 替换目标参数，hook 必须带执行标记并验证）→ 403 ⇒ 服务端校验签名内容，与连接无关。
+3. 定位为「签名内容被校验」后，用**对齐探针法**测量 SDK 实际内嵌的环境检测并逐位对齐（见 `references/env/env-detect-bypass.md`），不要先假设需要复现 canvas/行为轨迹等完整浏览器指纹。
+
+未完成上述对照，不得宣布连接层风控结论，不得转而交付浏览器内核取数方案（取证浏览器脚本放进 `case/` 也算交付违规）。双对照结果写入 `result/验证记录.json` 顶层 `riskLayerDiagnosis` 字段（`forwardControl`/`reverseControl`/`conclusion`，正向必须含 `captureToReplayMs` 采集→重放延迟，反向必须含 `hookVerified: true`），并过门禁：
+
+```powershell
+node scripts/check_risk_layer_diagnosis.js --case-dir <project-root> --markdown
+```
+
+退出码非 0 = 对照缺失 / 样本过期 / hook 未验证 / 结论与对照矛盾，停在 DIAGNOSE 补对照，不得按未验证结论推进。
+
 真实验证失败时不得进入 `DELIVER`。可以交付“未完成/诊断中”的中间材料，但执行入口、最终总结和状态行必须标为 `REAL_VERIFY_FAILED`，不得使用“已完成还原”“服务端已接受”或等价成功措辞；只有 sign-only 明确豁免，且必须单独标注未做真实验证。
 
 sign-only 模式必须：标明未完成真实 API 验证；只验证本地输入输出、中间值和格式约束；不宣称签名已被服务端接受；入口提供显式 `--sign-only` 或等价模式且不默认联网。
@@ -410,6 +433,12 @@ result/
 ```powershell
 node scripts/check_final_artifact.js --case-dir <project-root> --markdown
 node scripts/check_code_quality.js --case-dir <project-root> --markdown
+```
+
+验证记录含 401/403/412/429 失败尝试（触发过分层定位）的 case，交付前追加：
+
+```powershell
+node scripts/check_risk_layer_diagnosis.js --case-dir <project-root> --markdown
 ```
 
 `最终项目总结.md` 与 `经验沉淀-<站点>.md` 是必需交付文档；模板与写入规则见 `references/quality/final-summary.md`、`references/workflow/phase-flow.md`。仅用户明确要求不生成时才用对应 `--no-require-*` 豁免，并在输出中记录原因。

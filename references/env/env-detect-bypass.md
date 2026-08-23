@@ -383,6 +383,22 @@ function createFullBrowserEnv(options = {}) {
    → 确认需要补全的关键分支
 ```
 
+## 签名内嵌环境检测的对齐探针法（浏览器采样 + 沙箱 diff）
+
+> **触发条件**：分层定位矩阵（`references/network/ip-risk-control.md`）判定「服务端校验签名内容」，且黑盒密文无法反推哪个字段被校验时使用。实战来源：拼多多 anti_content——服务端校验 fbeZ `Wt()` 19 位环境检测 flag，对齐 4 个差异位后纯协议 8/8 通过（`cases/pdd-anti-content-fbez-blackbox.md`）。
+
+核心思想：**不要猜服务端校验什么，测量 SDK 实际内嵌什么**。签名内嵌的检测结果（而非 canvas/行为等原始指纹）才是对齐目标，通常是有限的几十个 0/1 位。
+
+步骤：
+
+1. **注入导出检测函数**：在 SDK 源码的稳定锚点后注入导出语句（如 fbeZ 的 `var de=new se;` 后注入 `window.__fbezWt=Wt;`），Node 沙箱加载同一份注入版源码。锚点选模块尾部单例创建处，保证检测函数与闭包变量均已定义。
+2. **浏览器采样 ground-truth**：取证阶段 ruyipage 打开空白页，跑与沙箱相同的加载器（伪造 `window.webpackJsonp` push + 注册 chunk + require 目标模块），调用导出的检测函数记录真实浏览器输出。空白页即可——检测结果只依赖 window/navigator/document 等浏览器级对象，与业务页面无关。
+3. **沙箱采样并逐位 diff**：同一份注入版在 Node 沙箱调用，逐位对比，得到有限差异位清单（拼多多案例 19 位中仅 4 位不同）。
+4. **翻译差异位语义**：混淆 SDK 的检测项用其字符串解码函数解出——在浏览器里注入导出解码函数（如 `window.__fbezW = W`）后调用 `W("0x..","salt")` 批量解键，比静态正则提取字符串数组可靠（静态提取易匹配到内嵌子模块的数组，索引越界产出乱码）。
+5. **按检测项修环境并复测**：差异位归零后重新生成签名做真实验证。高频差异项即 `node-leakage.md` 与本文件上方清单的内容（Node 泄露全局、plugins 空置、webdriver 自有属性、DOM 方法非 native toString 等）。
+
+注意：对齐目标以「真实浏览器实测输出」为准，不以「检测项列表理论值」为准——某些位在真实浏览器里就是 null/未设置（如 fbeZ 的 index 7），沙箱照抄实测值即可，不要"修正"它。
+
 ## 重要说明
 
 本文件提供的"最小沙箱"、"XHR stub"、"jQuery stub"等模板仅适用于**探测模式**。进入**交付模式**时，必须按 `env-object-model.md` 和 `env-native-protection.md` 的要求补齐原型链、属性描述符、访问器、native-like toString 等真实性保护，不得把普通对象作为最终交付方案。
@@ -392,3 +408,4 @@ function createFullBrowserEnv(options = {}) {
 | 案例文件 | 关联点 |
 |---------|--------|
 | `cases/jsvmp-xhr-interceptor-env-emulation.md` | 环境检测绕过（navigator.webdriver / plugins / DOM 布局） |
+| `cases/pdd-anti-content-fbez-blackbox.md` | 签名内嵌环境检测对齐探针法（Wt() flag 浏览器采样 + 沙箱 diff） |

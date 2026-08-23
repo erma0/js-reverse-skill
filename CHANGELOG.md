@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## 2.3.54 - 2026-08-23
+
+### 变更（吸纳拼多多 anti_content 实战：风控分层定位协议 + 环境检测对齐探针法）
+- **新增案例 `cases/pdd-anti-content-fbez-blackbox.md`（+index.json 登记）**：拼多多 apiv2 `anti_content` 黑盒还原——webpack4 兼容运行时加载 commons+subject 两 chunk 后 `require("fbeZ")` 调 `messagePackSync()`；服务端校验签名内嵌 `Wt()` 19 位环境检测 flag，「浏览器采样 + 沙箱逐位 diff」修 4 个差异位（`window.Buffer` 泄露 / `navigator.plugins` 空置 / `webdriver` 自有属性 / DOM 方法非 native toString）后纯 Node H1 请求 8/8 通过。含 8 条踩坑（过期签名对照、静态抠字符串数组翻车、`add_preload_script` IIFE 静默失效、WindowsApps python stub 等）与 9 条可验证事实。
+- **SKILL.md §10 REAL_VERIFY 新增「403/风控码分层定位协议」（硬约束）**：下「连接层拦截 / 纯协议不可绕过」结论前必须完成正反双对照——① 浏览器**新鲜**签名 + 纯协议客户端重放（过期样本结果一律作废）；② 自己的签名 + 真实浏览器连接（preload hook 注入，带执行标记验证）。未完成对照不得下连接层结论、不得转投浏览器内核取数方案。§9 IMPLEMENT 路径 D 挂对齐探针法指针；§0 GATE-1 补 Windows python 启动器纪律（裸 `python` 命中 WindowsApps stub exit 9009，一律用环境检查选定解释器 / `py -3`）。
+- **突破经验固化进主动工作流（状态机 + 硬门禁，2.3.52「文本规则→脚本兜底」原则）**：§4 状态机把 DIAGNOSE 从过渡节点扩为一等节点——双对照结论路由（正向 200 + 反向 403 → 签名内容层 → 探针对齐；正向 403 → 连接层 → 路径 E；对照未完成停在 DIAGNOSE 不得定论）；TODO 第 9 项与 §4.4 状态行示例同步；新增 `scripts/check_risk_layer_diagnosis.js`（自测 10 cases）——验证记录含 401/403/412/429 失败尝试时校验 `riskLayerDiagnosis` 双对照（正向 `captureToReplayMs` 新鲜度 >5min 作废、反向 `hookVerified`、结论自洽：正向 2xx 不得下 connection 结论、文档连接层宣称必须有对照支撑），挂在 §10 协议与 §11 交付前必跑（触发过的 case）；decision-tree 新增阻塞点 #7；`references/env/env-debug-loop.md` 新增「真实验证 403（离线一致但服务端拒绝）」标准三步（分层定位 → 内容层 → 探针对齐），把「离线 fixture 通过 ≠ 服务端校验通过」的认知写进补环境调试循环；reference-map 路由与 scripts/README 计数（61→62）同步。
+- **`references/network/ip-risk-control.md` 新增「签名内容层 vs 连接层定位矩阵」**：2×2 对照表 + 5 条执行纪律（新鲜度、正向/反向对照做法、结论路由到对齐探针法、留档要求）；风控信号表补拼多多 40002 行（未定位前不得判定连接层）。
+- **`references/env/env-detect-bypass.md` 新增「签名内嵌环境检测的对齐探针法」**：注入导出 SDK 检测函数（稳定锚点后 `window.__fbezWt=Wt`）→ ruyipage 空白页跑同一加载器采样 ground-truth → 沙箱逐位 diff → 用运行中 SDK 的解码函数批量解混淆键（不静态正则抠数组）→ 按检测项修环境复测；对齐目标以浏览器实测输出为准（含 null 位）。
+- **`references/workflow/common-pitfalls.md` 新增反模式 11/12**：11=用过期签名做对照实验误判「连接层风控」并转投浏览器内核交付（脚本挪进 case/ 也算交付违规）；12=未测量 SDK 内嵌检测项就断言「需完整复现浏览器环境/纯协议不可行」。均带实战操作、AI 辩护、判定测试。
+- **`references/tooling/ruyi-tooling.md` 新增 `add_preload_script` 用法节**：script 必须为函数声明字符串（IIFE 静默不执行无报错）；hook 必须带执行标记并在解读实验结果前验证。
+
+### 修复
+- **`check_final_artifact.js` 两处实战暴露的缺口**：① `验证记录.json` 是验证证据文档，行文提及取证工具名被 AUTOMATION/FINGERPRINT_RENDER 关键词扫描误判为浏览器自动化代码（实战被迫改写记录措辞过检查）——现豁免该文件的内容关键词扫描；② 把浏览器内核取数脚本挪出 result/ 放 `case/` 根层可绕过自动化扫描（实战 gate-gaming）——现扫描 case/ 直接子层代码文件（tmp-/test-/hooks 等临时名豁免），命中即失败并说明纯协议红线。自测新增 5 项断言（验证记录.json 豁免、src 源码仍扫描、case 根层识别、tmp- 前缀豁免等），真实拼多多 case 复验通过 + case 根层放置脚本的拦截路径实测生效。
+
 ## 2.3.53 - 2026-08-23
 
 ### 变更（验证码轨迹/缺口/点选三线工具化，2.3.50 T1/T2 政策落地）

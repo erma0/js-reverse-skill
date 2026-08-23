@@ -255,6 +255,28 @@ node scripts/download_ruyi_tool.js --tool ruyipage-firefox --dest <download-dir>
 
 这些约束只能降低普通自动化 / CDP / 指纹检测风险，不能保证绕过所有业务风控、登录、验证码、MFA、设备验证或服务端策略。
 
+### add_preload_script 用法（页面脚本执行前注入 hook）
+
+需要 hook 页面 JS（如拦截 `XMLHttpRequest.prototype.open` 做分层定位的反向对照、导出 SDK 内部函数）时用 `page.add_preload_script(script)`，注意两个坑：
+
+1. **`script` 必须是函数声明字符串**（如 `"() => { ... }"`），传 IIFE 字符串会**静默不执行且无报错**。
+2. **hook 必须带执行标记并验证**：函数体内设置 `window.__hookInstalled = true` / 递增 `window.__hookCount`，页面加载后先读标记确认 hook 生效，再解读实验结果——否则会把页面自身行为误当成注入效果（实战：反向对照实验曾因 IIFE 静默失效得出无效结论）。
+
+```python
+hook = """() => {
+  window.__hookInstalled = true;
+  const origOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url) {
+    if (typeof url === 'string' && url.includes('<目标接口关键词>')) {
+      window.__hookCount = (window.__hookCount || 0) + 1;
+      // ... 改写 url / 记录参数
+    }
+    return origOpen.apply(this, arguments);
+  };
+}"""
+page.add_preload_script(hook)   # 必须在 page.get(...) 之前
+```
+
 ## ruyiPage / RuyiTrace 指纹基线固定
 
 - ruyiPage 第一次成功取证后，把 `smart_fingerprint` 输出、profile / userdir、UA、Client Hints、locale、timezone、viewport、screen、WebGL 等写入 `case/notes/fingerprint-baseline.json`。

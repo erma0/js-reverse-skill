@@ -25,6 +25,7 @@
 | 4. 需要登录态 | 抓包遇到登录/验证码/MFA 交互 | 暂停要求用户手动登录或补充请求包，不绕过登录验证 |
 | 5. 工具不可用 | ruyipage/RuyiTrace 未安装 | 默认按 GATE-1 自动安装（`install_all.js --yes`，执行前先宣布安装目标与规模）；自动安装失败时暂停让用户安装 / 提供路径；若用户已提供 JS/cURL/HAR（白名单③），转「用户手动取证」模式继续，不暂停 |
 | 6. 最终方案违反红线 | 滑向浏览器自动化作为最终交付 | 回到实现梯度逐级尝试，最终交付必须保持纯协议入口 |
+| 7. 403/风控码归因未定位 | REAL_VERIFY 失败但未完成分层定位双对照（正向：浏览器**新鲜**签名 + 纯协议客户端；反向：自己签名 + 浏览器 hook 连接）就下「连接层 / 纯协议不可绕过」结论，或转投浏览器内核取数 | 按 SKILL.md 第 10 节分层定位协议完成双对照，结果写入验证记录 `riskLayerDiagnosis` 并过 `node scripts/check_risk_layer_diagnosis.js --case-dir <project-root>`；过期样本与未验证 hook 的实验一律作废 |
 
 > **阻塞点 #5 例外（合规降级，即 SKILL.md 状态机的 MATERIALS_FALLBACK 节点）**：取证工具链（ruyipage/RuyiTrace）整体不可用且 `install_all.js` 自动安装失败时，**不强制暂停**——只要用户手动提供了**真实存在的** JS 文件 / cURL / HAR（白名单③合法来源，先经 `node scripts/check_evidence.js --case-dir <project-root> --url <目标URL> --inputs <材料路径> --markdown` 验证，仅 URL 不算材料、不触发降级），即可走 MATERIALS_FALLBACK → CASE_LOOKUP → IDENTIFY，并以「Node 直连真实接口、服务端 `code:0` 反证」作为正确性证据（坑#8）。此路径合规，但**必须在 `result/经验沉淀-<站点>.md` 与最终总结写明取证偏差**（未走 ruyipage/RuyiTrace、证据来源为手动材料 + 黑盒反证），且 REAL_VERIFY 不可豁免。注意：该降级路径的前提是目标接口无登录态要求，可直接用真实响应校验还原结果；且用户仅提供 URL 时不允许降级，仍须先安装工具链走完整两步取证。
 

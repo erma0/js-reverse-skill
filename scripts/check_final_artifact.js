@@ -315,6 +315,26 @@ function isSourceCodeFile(p) {
   return ['.js', '.mjs', '.cjs', '.py'].includes(ext(p));
 }
 
+// 内容关键词扫描目标（浏览器自动化 / 指纹渲染）：验证记录.json 是验证证据文档，
+// 行文提及取证工具名不构成代码依赖，扫描会造成误报（实战：某 case 被迫改写记录措辞来过检查）
+function isAutomationScanTarget(p) {
+  return isCodeLikeFile(p) && path.basename(p) !== '验证记录.json';
+}
+
+// case/ 根层代码文件：标准结构下 case/ 只有子目录，根层 .js/.py 几乎必是
+// 「把浏览器内核取数脚本挪出 result/ 规避检查」或未清理的调试残留。
+// 临时文件判定只看文件名：直接子文件无子目录结构，且全路径判定会把
+// 位于系统 Temp 目录下的 case 误判为临时目录。
+function collectCaseRootCodeFiles(caseSubdir) {
+  if (!exists(caseSubdir)) return [];
+  let entries = [];
+  try { entries = fs.readdirSync(caseSubdir, { withFileTypes: true }); } catch { return []; }
+  return entries
+    .filter(d => d.isFile() && ['.js', '.mjs', '.cjs', '.py'].includes(ext(d.name)))
+    .map(d => path.join(caseSubdir, d.name))
+    .filter(p => !isTempOrTestFile(path.basename(p)));
+}
+
 function isTempOrTestFile(p) {
   const n = path.basename(p).toLowerCase();
   const normalized = String(p).replace(/\\/g, '/').toLowerCase();
@@ -898,7 +918,7 @@ function check(args) {
   }
 
   const automationHits = [];
-  for (const f of codeFiles) {
+  for (const f of codeFiles.filter(isAutomationScanTarget)) {
     const hits = findMatches(stripComments(readText(f)), AUTOMATION_PATTERNS);
     if (hits.length) automationHits.push({ file: rel(caseDir, f), hits });
   }
@@ -906,8 +926,18 @@ function check(args) {
     problems.push(`最终项目源码疑似包含浏览器自动化 / 取证代码：${automationHits.map(x => `${x.file}(${x.hits.join('、')})`).join('；')}`);
   }
 
+  // 防绕过：把浏览器内核取数脚本挪出 result/（如 case/ 根层）不改变其交付性质
+  const caseRootAutomationHits = [];
+  for (const f of collectCaseRootCodeFiles(caseSubdir)) {
+    const hits = findMatches(stripComments(readText(f)), AUTOMATION_PATTERNS);
+    if (hits.length) caseRootAutomationHits.push({ file: rel(caseDir, f), hits });
+  }
+  if (caseRootAutomationHits.length) {
+    problems.push(`case/ 根层存在疑似浏览器自动化/取证脚本：${caseRootAutomationHits.map(x => `${x.file}(${x.hits.join('、')})`).join('；')}。取证 hook 属 case/hooks/（用完即删）；浏览器内核取数脚本放在 case/ 仍是交付依赖，违反纯协议红线。`);
+  }
+
   const fingerprintRenderHits = [];
-  for (const f of codeFiles) {
+  for (const f of codeFiles.filter(isAutomationScanTarget)) {
     const hits = findMatches(readText(f), FINGERPRINT_RENDER_PATTERNS);
     if (hits.length) fingerprintRenderHits.push({ file: rel(caseDir, f), hits });
   }
@@ -1102,6 +1132,29 @@ function runSelfTest() {
     fs.writeFileSync(commentOnly, "// 本算法由 RuyiTrace / ruyipage 取证实证，交付物不依赖浏览器自动化\nconst a = 1;\n", 'utf8');
     if (findMatches(stripComments(readText(commentOnly)), AUTOMATION_PATTERNS).length) {
       throw new Error('注释中的 RuyiTrace 说明文字不应被误判为浏览器自动化');
+    }
+    if (isAutomationScanTarget(path.join(resultDir, '验证记录.json'))) {
+      throw new Error('验证记录.json 是验证证据文档，不应参与自动化关键词扫描');
+    }
+    if (!isAutomationScanTarget(path.join(resultDir, 'src', 'gen.js'))) {
+      throw new Error('result/src 源码应参与自动化关键词扫描');
+    }
+    const recordDoc = path.join(resultDir, '验证记录.json');
+    fs.writeFileSync(recordDoc, JSON.stringify({ mode: 'online', note: '取证由 ruyipage 定制 Firefox 完成' }), 'utf8');
+    if (findMatches(readText(recordDoc), AUTOMATION_PATTERNS).length === 0) {
+      throw new Error('自测前置失败：记录文本应包含自动化关键词（豁免逻辑在文件集过滤层）');
+    }
+    const deliverRoot = path.join(root, 'deliver');
+    const deliverCase = path.join(deliverRoot, 'case');
+    fs.mkdirSync(deliverCase, { recursive: true });
+    fs.writeFileSync(path.join(deliverCase, '方案-浏览器内核-fetch.py'), 'import ruyipage\n', 'utf8');
+    const deliverFiles = collectCaseRootCodeFiles(deliverCase);
+    if (deliverFiles.length !== 1 || !findMatches(stripComments(readText(deliverFiles[0])), AUTOMATION_PATTERNS).length) {
+      throw new Error('case/ 根层浏览器内核取数脚本应被识别');
+    }
+    fs.writeFileSync(path.join(deliverCase, 'tmp-probe.py'), 'import ruyipage\n', 'utf8');
+    if (collectCaseRootCodeFiles(deliverCase).length !== 1) {
+      throw new Error('tmp- 前缀调试文件不应计入 case 根层交付扫描');
     }
     const naturalSession = "const agent = new https.Agent({ keepAlive: true });\nhttps.request({ agent, host: 'x' });\nagent.destroy();\n";
     const dynNatural = dynamicSessionHits(naturalSession);

@@ -178,6 +178,14 @@
       "strategy": "A 纯算还原：webpack 模块链定位 sign(88086)+密钥(4070)，SHA1(过滤空值+appSignKey 后字典序 k=v&拼接)",
       "file": "sha1-sort-params-appsignkey-dxy.md",
       "verifiedAt": "2026-08-16"
+    },
+    {
+      "title": "拼多多 anti_content 黑盒 fbeZ + 环境检测 flag 逐位对齐",
+      "domains": ["pinduoduo.com", "apiv2.pinduoduo.com"],
+      "signals": ["anti_content", "fbeZ", "messagePackSync", "_nano_fp", "/api/server/_stm", "40002", "XpmJnqTy", "Wt()"],
+      "strategy": "D 环境伪装：webpack4 兼容运行时黑盒执行 fbeZ SDK；服务端校验签名内嵌 Wt() 19 位环境检测，浏览器采样+沙箱逐位 diff 修 4 个差异位（Buffer 泄露/plugins/webdriver 原型/native toString）后纯 Node H1 请求 8/8 通过",
+      "file": "pdd-anti-content-fbez-blackbox.md",
+      "verifiedAt": "2026-08-23"
     }
   ]
 }

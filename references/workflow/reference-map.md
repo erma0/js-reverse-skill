@@ -16,7 +16,8 @@
 | WASM | `references/env/env-wasm.md`，遇到 import、memory、streaming 或整包 Emscripten/webpack bundle 黑盒执行再读 `env-wasm-advanced.md`，harness 用 `templates/wasm-loader/emscripten-bundle-blackbox.js` |
 | TLS、Cookie、Session、动态资源、协议分析、WebSocket | `references/network/tls-validation.md`、`session-chain.md`、`cookie-generation.md`、`dynamic-resource.md`、`protocol-analysis.md`、`websocket-signing.md` |
 | XHR/fetch 语义或会话桥接 | `references/network/xhr-fetch-semantics-audit.md`、`xhr-fetch-session-bridge.md` |
-| IP 风控与静默失败诊断 | `references/network/ip-risk-control.md`、`node-leakage.md` |
+| IP 风控与静默失败诊断 | `references/network/ip-risk-control.md`（含签名内容层/连接层分层定位矩阵）、`node-leakage.md` |
+| 真实验证 403 / 签名内嵌环境检测对齐 | `references/env/env-debug-loop.md`「真实验证 403」节、`env-detect-bypass.md`「对齐探针法」；门禁 `node scripts/check_risk_layer_diagnosis.js` |
 | 指纹一致性和信任判断 | `references/fingerprint/fingerprint-baseline-consistency.md`、`trust-matrix.md`、`fingerprint-value-replay.md` |
 | 高强度检测排查与 trace 一致性 | `references/quality/high-strength-detection.md`、`trace-api-coverage.md`、`trace-runtime-conformance.md` |
 | 反调试对抗与 Hook 模板 | `references/hooks/anti-debug.md`、`hook-templates.md` |

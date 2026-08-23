@@ -282,6 +282,20 @@ Cannot read properties of undefined (reading 'userAgent')
 
 如果 NDJSON 中没有覆盖目标参数生成时间段，明确标记"RuyiTrace 未覆盖"，再使用 Node trace / Hook / 断点补充。
 
+### 真实验证 403（离线一致但服务端拒绝）
+
+**现象**：本地 fixture 对比全一致（签名结构、长度、前缀都对），真实请求却返回 403/412/429 或 JSON 风控码。
+
+**关键认知**：离线 fixture 只能证明「输出与浏览器样本同构」，证明不了「服务端校验的内嵌字段正确」。签名内嵌的环境检测结果（0/1 flag、指纹摘要）在离线对比中不可见——服务端可能解包校验这些位。此时**不要**先猜 TLS/IP/换客户端，也不要假设要复现 canvas/行为等完整指纹。
+
+**标准动作（按序，缺一不可）**：
+
+1. **分层定位双对照**（`references/network/ip-risk-control.md` 定位矩阵）：正向=浏览器新鲜签名 + 纯协议客户端重放（记录采集→重放延迟，过期样本作废）；反向=自己签名 + ruyipage hook 注入浏览器连接（`add_preload_script` 函数声明字符串 + 执行标记验证）。结果写入验证记录 `riskLayerDiagnosis` 并过 `node scripts/check_risk_layer_diagnosis.js`。
+2. **正向 403 才继续查连接层**（TLS/Session，路径 E）；**反向 403 = 签名内容层**，进入第 3 步。
+3. **环境检测对齐探针法**（`env-detect-bypass.md`）：注入导出 SDK 检测函数 → 浏览器空白页采样 ground-truth → 沙箱采样 → 逐位 diff → 用运行中 SDK 的解码函数解差异位语义 → 修环境（高频项：Node 泄露全局、plugins 空置、webdriver 自有属性、DOM 方法非 native toString）→ diff 归零后重新真实验证。
+
+实战参照：拼多多 anti_content（`cases/pdd-anti-content-fbez-blackbox.md`）——19 位检测 flag 中 4 位不一致导致 40002，对齐后纯 Node H1 8/8 通过；期间两次误判（过期签名→连接层；未测量就断言需完整指纹）均已固化为 `common-pitfalls.md` 反模式 11/12。
+
 ### 静默吞错：运行成功但无输出
 
 **现象**：vm.runInContext 运行成功（无错误抛出），但目标输出（cookie / 全局变量 / 返回值）未生成。
