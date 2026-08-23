@@ -329,6 +329,7 @@ new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, clientX: 3, clien
 
 - JD `pc_home_feed` 类接口：至少捕获到 URL 包含 `pc_home_feed` 的 2xx 响应，并能看到请求 URL 中的加密 / 风控参数，例如 `h5st`。
 - 美团外卖 `shopList` 类跨域接口：必须区分 `OPTIONS` preflight 与真实业务请求；只有捕获到非 `OPTIONS` 的 2xx `shopList` 响应，才算取证成功。若返回登录 / Yoda / 401 风控信息，应按“需要登录 / 风控验证”流程暂停，不要宣称已绕过。
+- 用户完成登录 / 点击 / 验证码等操作后，可直接关闭 ruyiPage 浏览器窗口表示“抓包结束”。脚本检测到浏览器关闭或 WebSocket 断连后会立即进入收尾，保存已捕获请求并报告 `endReason=browser-closed`；此时不要 kill Python 进程，应等待 `FORENSIC DONE` 或最终 JSON / Markdown 输出。该结束原因不是失败，但也不等于验收通过：指定 `--targets/--targets-regex` 时仍以是否捕获非 `OPTIONS` 2xx 终态为准，未命中仍返回 `NO_TARGET` / `PARTIAL`。等待期间脚本会增量写 `case/forensic/partial-steps.jsonl`；正常收尾后自动删除，若硬杀后残留则仅可作为 URL / 方法 / 状态 / 请求头元数据兜底，不能替代 `capture.json`、目标命中记录或完整 body。
 
 ## RuyiTrace 日志采集流程
 

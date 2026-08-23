@@ -202,7 +202,7 @@ URL 不是证据。脚本确认文件真实存在并可归类，才允许跳过�
 python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root> --targets <最终业务接口关键词> --markdown
 ```
 
-终态目标请求未命中 = Step 1 缺失，禁止转源码搜索继续：`PARTIAL`（仅 OPTIONS/非 2xx）与 `NO_TARGET`（完全未命中）均退出码非 0；任一非 OPTIONS 2xx 命中即 `PASS` 退出码 0。HTTP 2xx 只表示目标请求已取证，不表示业务成功（通用脚本不猜业务码）。登录可能因验证码/校验失败重试时调大 `--target-settle`，保证重试仍在同一会话内；关联材料以最后一次有效终态向前回溯，验证码中间接口不是额外终态门禁（load → verify 由分析阶段从同一会话回溯）。body 超过 JSON 内联预览阈值时必须读取对应 `saved_to` 完整文件，`*_complete=false` 不能拿预览替代原始证据。需要用户交互时提示其在窗口完成操作，或提供 cURL/HAR/原始请求文本；终态命中并落盘后再回 EVIDENCE_GATE。JS 源码关键词定位只能作辅助假设。
+终态目标请求未命中 = Step 1 缺失，禁止转源码搜索继续：`PARTIAL`（仅 OPTIONS/非 2xx）与 `NO_TARGET`（完全未命中）均退出码非 0；任一非 OPTIONS 2xx 命中即 `PASS` 退出码 0。HTTP 2xx 只表示目标请求已取证，不表示业务成功（通用脚本不猜业务码）。登录可能因验证码/校验失败重试时调大 `--target-settle`，保证重试仍在同一会话内；关联材料以最后一次有效终态向前回溯，验证码中间接口不是额外终态门禁（load → verify 由分析阶段从同一会话回溯）。body 超过 JSON 内联预览阈值时必须读取对应 `saved_to` 完整文件，`*_complete=false` 不能拿预览替代原始证据。需要用户交互时提示其在窗口完成操作——**操作完成后用户直接关闭浏览器窗口即视为手动结束抓包，脚本会立即收尾落盘（报告 endReason=browser-closed），不是失败**；浏览器已关/日志出现 WebSocket 断连时脚本仍在收尾分类，禁止 kill 进程，等 `FORENSIC DONE` 或 JSON 输出；万一进程被强杀，`case/forensic/partial-steps.jsonl` 保留了全部包元数据兜底（该文件残留即说明未正常收尾）。用户也可提供 cURL/HAR/原始请求文本；终态命中并落盘后再回 EVIDENCE_GATE。JS 源码关键词定位只能作辅助假设。
 
 Windows 下若 Python 脚本输出仍现编码异常，用 `PYTHONUTF8=1` 前缀兜底（PowerShell：`$env:PYTHONUTF8="1"`）；仓库脚本已内置 UTF-8 强制与 emoji 安全化，正常无需手动加。
 

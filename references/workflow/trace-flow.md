@@ -73,6 +73,7 @@ python scripts/forensic_ruyipage.py --url <目标页> --case-dir <project-root> 
 
 - JD `pc_home_feed` 类接口：至少捕获到 URL 包含 `pc_home_feed` 的 2xx 响应，并能看到请求 URL 中的加密 / 风控参数，例如 `h5st`。
 - 美团外卖 `shopList` 类跨域接口：必须区分 `OPTIONS` preflight 与真实业务请求；只有捕获到非 `OPTIONS` 的 2xx `shopList` 响应，才算取证成功。若返回登录 / Yoda / 401 风控信息，应按"需要登录 / 风控验证"流程暂停，不要宣称已绕过。
+- 用户完成操作后直接关闭 ruyiPage 浏览器窗口，视为明确的手动结束抓包信号：脚本检测到浏览器断连后应立即收尾、分类并落盘已捕获数据，报告 `endReason=browser-closed`，不能把 WebSocket 断连本身判为取证失败，也不要强杀仍在收尾的脚本进程；等待 `FORENSIC DONE` 或最终 JSON / Markdown 输出。浏览器关闭只决定采集生命周期，不放宽上述接口验收：指定终态仍未捕获到非 `OPTIONS` 2xx 时，结果仍为 `NO_TARGET` / `PARTIAL`，Step 1 仍缺失。若进程被不可捕获的硬杀且只残留 `case/forensic/partial-steps.jsonl`，该文件仅是已抓包元数据兜底，说明正常收尾未完成，不能替代 `capture.json` 与完整 body 证据。
 
 ## RuyiTrace 日志采集流程
 

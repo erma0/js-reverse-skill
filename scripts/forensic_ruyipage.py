@@ -41,8 +41,10 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
+import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -898,11 +900,14 @@ def _js_quality(js_records) -> str:
 
 def _build_result(args, browser_path, baseline_id, fingerprint, cookies,
                   records_meta, js_records, target_hits, related_hits, related_stats,
-                  accepted, only_options, webdriver_flag, wd_err, has_filter, document=None):
+                  accepted, only_options, webdriver_flag, wd_err, has_filter, document=None,
+                  end_reason="unknown"):
     """汇总取证结果为报告字典。has_filter 表示是否指定了 --targets/--targets-regex。"""
     acceptance = "PASS" if (not has_filter) or accepted else ("PARTIAL" if target_hits else "NO_TARGET")
     return {
         "url": args.url,
+        "endReason": end_reason,
+        "endedAt": _now(),
         "browserPath": browser_path,
         "profileDir": args.profile_dir,
         "fpDir": args.fp_dir,
@@ -952,6 +957,14 @@ def _write_outputs(args, browser_path, records_meta, target_hits, related_hits, 
 
     notes_dir = os.path.join(args.case_subdir, "notes")
     os.makedirs(notes_dir, exist_ok=True)
+    # 正常收尾成功：等待期间写的 partial 快照使命完成，删除避免与分析产物混淆
+    # （若此文件残留，说明进程未正常收尾——被强杀/中断，metadata 仍可分析）。
+    try:
+        partial_path = os.path.join(args.out_dir, "partial-steps.jsonl")
+        if os.path.exists(partial_path):
+            os.remove(partial_path)
+    except Exception:
+        pass
     fp_path = None
     if fingerprint is not None:
         fp_path = os.path.join(notes_dir, "fingerprint-baseline.json")
@@ -1019,6 +1032,27 @@ def _kill_process_tree(pid: int) -> bool:
         return False
 
 
+def _pid_alive(pid: int) -> bool:
+    """查询进程是否仍存活。查询失败时保守返回 True（继续走兜底结束路径）。"""
+    if not pid or pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            ret = subprocess.run(
+                ["tasklist", "/FI", "PID eq %d" % pid],
+                capture_output=True, timeout=10,
+            )
+            out = (ret.stdout or b"").decode("gbk", "ignore")
+            return ret.returncode == 0 and str(pid) in out
+        except Exception:
+            return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def _close_browser(page) -> str:
     """主动关闭取证浏览器。
 
@@ -1049,11 +1083,118 @@ def _close_browser(page) -> str:
     if pid is None:
         logger.warning("无法解析浏览器进程 PID，无法兜底结束，浏览器可能残留")
         return "failed"
+    if not _pid_alive(pid):
+        # 用户手动关闭浏览器 / 浏览器自行退出：进程已不在，无需兜底，也不是失败
+        logger.info("浏览器进程（PID %s）已退出（多为用户手动关闭），无需兜底结束", pid)
+        return "closed"
     if _kill_process_tree(pid):
         logger.info("已强制结束浏览器进程树（PID %s）", pid)
         return "force-killed"
     logger.warning("进程树兜底结束失败（PID %s）", pid)
     return "failed"
+
+
+# 抓包等待期间的中断状态（信号 handler 置位，等待循环逐轮检查后立即收尾）
+_INTERRUPTED = {"reason": None}
+
+
+def _request_interrupt(signum, _frame):
+    if _INTERRUPTED["reason"] is None:
+        _INTERRUPTED["reason"] = "signal-%s" % signum
+    logger.warning("收到中断信号（%s）：不再等待，立即收尾落盘已捕获数据...", signum)
+
+
+def _install_signal_watch():
+    """监听 SIGINT/SIGTERM（Windows 另加 SIGBREAK），收到后置中断标志而非直接退出。
+
+    直接默认退出（KeyboardInterrupt / 进程终止）不会走收尾落盘，已抓的包全部丢失——
+    这正是「用户关完浏览器、脚本还在空转、被 kill 后目录全空」的数据丢失路径之一。
+    注意：Windows 的 TerminateProcess 硬杀无法捕获，那条路径由 partial 快照兜底。
+    """
+    watched = [signal.SIGINT, signal.SIGTERM]
+    if hasattr(signal, "SIGBREAK"):
+        watched.append(signal.SIGBREAK)
+    for sig in watched:
+        try:
+            signal.signal(sig, _request_interrupt)
+        except (ValueError, OSError):
+            pass  # 非主线程或平台不支持时静默跳过
+
+
+def _browser_gone(page, hb_state: Dict[str, Any]) -> bool:
+    """检测取证浏览器连接是否已断开（用户手动关闭浏览器 / 浏览器崩溃）。
+
+    首选零 RPC 的内部状态探测：ruyipage BrowserBiDiDriver 的接收线程在 WebSocket
+    断开时会置 _is_running=False（websocket-client 连接对象另有 connected 属性）。
+    注意 page.capture.wait()/steps 是纯本地队列操作，断连**永远不会**通过它们报错——
+    必须主动探测，否则等待循环会空转到 --wait 死线。
+
+    introspection 失败（ruyipage 版本差异拿不到内部对象）时，降级为每 10s 一次的
+    轻量心跳 RPC（run_js），PageDisconnectedError 类错误视为断开。
+    """
+    if page is None:
+        return True
+    driver = None
+    try:
+        driver = getattr(getattr(page, "_driver", None), "_browser_driver", None)
+        if driver is None:
+            driver = getattr(getattr(page, "browser", None), "_driver", None)
+    except Exception:
+        driver = None
+    if driver is not None:
+        try:
+            if getattr(driver, "_is_running", True) is False:
+                return True
+            ws = getattr(driver, "_ws", None)
+            if ws is not None and getattr(ws, "connected", None) is False:
+                return True
+            return False
+        except Exception:
+            pass
+    # 兜底心跳（仅在拿不到内部驱动对象时走到这里）
+    now = time.time()
+    if now - hb_state.get("last_beat", 0.0) >= 10:
+        hb_state["last_beat"] = now
+        try:
+            page.run_js("return 1", timeout=5)
+        except Exception as e:
+            text = "%s:%s" % (type(e).__name__, e)
+            if any(k in text.lower() for k in ("disconnect", "发送失败", "断开", "未连接")):
+                return True
+            logger.debug("心跳 RPC 异常（不视为断连）：%s", e)
+    return False
+
+
+def _flush_partial(args, steps) -> Optional[str]:
+    """把已捕获包的元数据快照增量落盘（JSONL，每行一包，零 RPC）。
+
+    收尾（分类 + 拉 body + 写 capture.json）只在最后执行；期间进程被硬杀
+    （kill -9 / TerminateProcess，信号都收不到）时 capture.json 不会写出。
+    partial 快照保证此时仍保留全部包的 URL/方法/状态/请求头元数据供初步分析。
+    正常收尾成功后由 _write_outputs 删除。写失败只 debug 告警，绝不影响抓包。
+    """
+    try:
+        os.makedirs(args.out_dir, exist_ok=True)
+        path = os.path.join(args.out_dir, "partial-steps.jsonl")
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "_partial": True,
+                "flushedAt": _now(),
+                "packetCount": len(steps),
+                "note": "抓包期间的增量元数据快照；正常收尾后会被删除。若此文件残留，说明进程未正常收尾（被强杀/中断），metadata 仍可用于分析，body 未拉取。",
+            }, ensure_ascii=False) + "\n")
+            for p in steps:
+                try:
+                    d = p.to_dict(include_bodies=False)
+                except Exception:
+                    continue
+                f.write(json.dumps(d, ensure_ascii=False) + "\n")
+        os.replace(tmp, path)
+        return path
+    except Exception as e:
+        logger.debug("partial 快照写盘失败（不影响抓包）：%s", e)
+        return None
 
 
 def _apply_ruyipage_anti_hang_patch():
@@ -1201,14 +1342,54 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
             try:
                 input("在浏览器中完成登录 / 业务操作后按回车继续取证...")
             except EOFError:
-                logger.warning("--manual-pause 遇非交互 stdin（EOF），跳过暂停；请在浏览器窗口完成操作，脚本将在 --wait 时间内等待目标命中")
+                logger.warning("--manual-pause 遇非交互 stdin（EOF），跳过暂停；请在浏览器窗口完成操作，脚本将在 --wait 时间内等待目标命中；操作完成后直接关闭浏览器窗口也会立即收尾落盘")
 
         _trigger_actions(page, args, args.human_algorithm)
+
+        # 等待阶段公共状态与检查。
+        # 关键背景：page.capture.wait()/steps 是纯本地队列操作，浏览器断连（用户手动
+        # 关闭窗口 / 崩溃）**永远不会**让它们抛错——不主动探测的话等待循环会一路空转
+        # 到 --wait 死线（几分钟），期间进程一旦被 kill，收尾落盘一次都不执行，
+        # forensic 目录全空。断连探测 + partial 快照 + 信号中断三件套就是为了堵这条路。
+        hb_state: Dict[str, Any] = {}
+        partial_state: Dict[str, Any] = {"last_flush": 0.0, "count": -1}
+        zero_warn_state: Dict[str, Any] = {"started": time.time(), "warned": False}
+        end_reason = "wait-timeout"
+
+        def _pre_wait_checks(steps_now) -> Optional[str]:
+            """等待循环每轮公共检查：返回应立即收尾的终态原因（endReason），否则 None。"""
+            count = len(steps_now)
+            # 用户手动关闭浏览器 / 连接断开 = 合法的抓包结束信号（等价于"我抓完了"），
+            # 立即收尾落盘，而不是傻等 --wait 超时
+            if _browser_gone(page, hb_state):
+                logger.warning(
+                    "检测到浏览器已关闭/连接断开，视为手动结束抓包：已捕获 %s 个包，立即收尾落盘（不等待 --wait 超时）",
+                    count,
+                )
+                return "browser-closed"
+            if _INTERRUPTED["reason"]:
+                logger.warning("收到中断信号：已捕获 %s 个包，立即收尾落盘", count)
+                return _INTERRUPTED["reason"]
+            if count == 0 and not zero_warn_state["warned"] \
+                    and time.time() - zero_warn_state["started"] >= 30:
+                zero_warn_state["warned"] = True
+                logger.warning(
+                    "[警告] 抓包启动 %ss 仍 0 个包：页面可能未加载成功、用户尚未开始操作，"
+                    "或网络事件订阅失败（Firefox/ruyipage 版本兼容问题）。请确认浏览器窗口状态",
+                    int(time.time() - zero_warn_state["started"]),
+                )
+            if count and count != partial_state["count"] \
+                    and time.time() - partial_state["last_flush"] >= 5:
+                partial_state["last_flush"] = time.time()
+                partial_state["count"] = count
+                _flush_partial(args, steps_now)
+            return None
+
+        _install_signal_watch()
 
         if substrings or regexes:
             # 用户给出的目标接口是本次流程的终态（如最终登录/提交接口）。命中后只短暂收尾，
             # 由后续分类从同一会话中回溯验证码等前置链路，不能要求预先列全中间接口。
-            import time
             deadline = time.time() + args.wait
             target_done = False
             wait_fail = 0
@@ -1217,8 +1398,13 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
                     steps_now = page.capture.steps
                 except Exception:
                     steps_now = []
+                stop = _pre_wait_checks(steps_now)
+                if stop:
+                    end_reason = stop
+                    break
                 if _target_reached(steps_now, substrings, regexes):
                     target_done = True
+                    end_reason = "target-hit"
                     logger.info("终态目标接口已命中，开始 %ss 收尾窗口", args.target_settle)
                     break
                 try:
@@ -1229,14 +1415,19 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
                     logger.warning("capture.wait 异常（连续第 %s 次）：%s", wait_fail, e)
                     if wait_fail >= 5:
                         logger.warning("capture.wait 连续 %s 次异常，放弃等待", wait_fail)
+                        end_reason = "wait-error"
                         break
-            if not target_done:
-                logger.warning("[超时] 未在 %ss 内命中目标接口，按 --wait 收尾。若用户尚未在浏览器完成操作（登录/滑动验证码等），请调大 --wait 或重采；已捕获的包仍会落盘供分析", args.wait)
-            elif args.target_settle > 0:
+            if not target_done and end_reason == "wait-timeout":
+                logger.warning("[超时] 未在 %ss 内命中目标接口，按 --wait 收尾。若用户尚未在浏览器完成操作（登录/滑动验证码等），请调大 --wait 或重采；已捕获的包仍会落盘供分析。用户在浏览器内完成操作后直接关闭浏览器窗口也会立即收尾", args.wait)
+            elif target_done and args.target_settle > 0:
                 # --wait 只限制首次终态的等待时间；命中后应完整执行收尾窗口，
                 # 避免目标在 deadline 附近出现时后置回调只抓到不足 target-settle 秒。
                 settle_deadline = time.time() + args.target_settle
                 while time.time() < settle_deadline:
+                    # 命中终态后浏览器被关闭/收到中断：目标已到手，没必要等完窗口
+                    if _browser_gone(page, hb_state) or _INTERRUPTED["reason"]:
+                        logger.info("收尾窗口内浏览器关闭/收到中断，提前结束收尾")
+                        break
                     try:
                         page.capture.wait(timeout=min(2, max(1, int(settle_deadline - time.time()))), count=1)
                         wait_fail = 0
@@ -1249,7 +1440,6 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
         else:
             # 未指定目标：网络静默即停——包数不再增长且连续 settle 秒无新包视为抓包完成。
             # 比"首个包+固定 sleep"更早结束（早完成早停），避免页面加载完仍在空等。
-            import time
             deadline = time.time() + args.wait
             prev_count = 0
             last_seen = time.time()
@@ -1260,6 +1450,10 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
                     steps_now = page.capture.steps
                 except Exception:
                     steps_now = []
+                stop = _pre_wait_checks(steps_now)
+                if stop:
+                    end_reason = stop
+                    break
                 count = len(steps_now)
                 if count > prev_count:
                     prev_count = count
@@ -1267,6 +1461,7 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
                 elif count > 0 and time.time() - last_seen >= args.settle:
                     logger.info("包数保持 %s 个且连续 %ss 无新包，抓包完成", count, args.settle)
                     done = True
+                    end_reason = "quiet-settle"
                     break
                 try:
                     pkt = page.capture.wait(timeout=2, count=1)
@@ -1276,8 +1471,9 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
                     logger.warning("capture.wait 异常（连续第 %s 次）：%s", wait_fail, e)
                     if wait_fail >= 5:
                         logger.warning("capture.wait 连续 %s 次异常，放弃等待", wait_fail)
+                        end_reason = "wait-error"
                         break
-            if not done:
+            if not done and end_reason == "wait-timeout":
                 logger.info("未在 %ss 内达到静默，按 --wait 超时收尾（已捕获 %s 个包）", args.wait, prev_count)
 
         # 收尾：不调用 capture.stop()——它对每个包做 2 次 BiDi get_data RPC（共 2N 次），
@@ -1318,14 +1514,42 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
             args, browser_path, baseline_id, fingerprint, cookies,
             records_meta, js_records, target_hits, related_hits, related_stats,
             accepted, only_options, webdriver_flag, wd_err, has_filter, document,
+            end_reason=end_reason,
         )
         result["getTimedOut"] = get_timed_out
         result["outputs"] = _write_outputs(
             args, browser_path, records_meta, target_hits, related_hits, fingerprint, baseline_id, js_dir
         )
-        logger.info("=== FORENSIC DONE === 抓包 %s 个，目标命中 %s，关联材料 %s，已写入 capture.json",
-                    len(records_meta), len(target_hits), len(related_hits))
+        logger.info("=== FORENSIC DONE === 结束原因 %s，抓包 %s 个，目标命中 %s，关联材料 %s，已写入 capture.json",
+                    end_reason, len(records_meta), len(target_hits), len(related_hits))
         return result
+    except BaseException as e:
+        # 兜底纪律：任何异常（含 KeyboardInterrupt）都不允许丢掉已抓的包——
+        # 已捕获的 metadata 必须尽力落盘后再抛出。body 拉取可失败，元数据不能丢。
+        logger.error("取证流程异常（%s），保底落盘已捕获数据后退出", e)
+        try:
+            steps_snap = []
+            if page is not None:
+                try:
+                    steps_snap = page.capture.steps
+                except Exception:
+                    steps_snap = []
+            if steps_snap:
+                os.makedirs(args.out_dir, exist_ok=True)
+                cap_path = os.path.join(args.out_dir, "capture.json")
+                if not os.path.exists(cap_path):
+                    records = []
+                    for p in steps_snap:
+                        try:
+                            records.append(p.to_dict(include_bodies=False))
+                        except Exception:
+                            pass
+                    with open(cap_path, "w", encoding="utf-8") as f:
+                        json.dump(records, f, ensure_ascii=False, indent=2)
+                    logger.error("已保底写入 %s 个包的元数据到 capture.json（body 未拉取）", len(records))
+        except Exception as e2:
+            logger.error("保底落盘失败：%s", e2)
+        raise
     finally:
         # 取证结束（成功或异常）一律主动关闭浏览器，避免残留进程 / profile 锁
         closed = _close_browser(page)
@@ -1590,7 +1814,59 @@ def run_self_test() -> int:
         no_target = _classify_packets([_SelfTestPacket(r) for r in records], args, [], [])
         assert len(no_target[2]) == 0, "未指定 targets 时不应把所有包当成目标包"
 
-    print("forensic_ruyipage.py 自测通过：终态 OR、URL 匹配、多次终态回溯、完整 body/WASM 落盘、预算拒绝半包、分类落盘")
+        # ---- 断连探测 / partial 快照 / 信号中断 / 结束原因（收尾加固回归）----
+        # 1) _browser_gone：驱动内部状态 introspection（零 RPC）
+        dead_driver = SimpleNamespace(_is_running=False, _ws=SimpleNamespace(connected=False))
+        dead_page = SimpleNamespace(_driver=SimpleNamespace(_browser_driver=dead_driver))
+        assert _browser_gone(dead_page, {}) is True, "驱动 _is_running=False 应判定断连"
+        live_driver = SimpleNamespace(_is_running=True, _ws=SimpleNamespace(connected=True))
+        live_page = SimpleNamespace(_driver=SimpleNamespace(_browser_driver=live_driver))
+        assert _browser_gone(live_page, {}) is False, "存活驱动不应误判断连"
+        ws_dead_page = SimpleNamespace(_driver=SimpleNamespace(_browser_driver=SimpleNamespace(_is_running=True, _ws=SimpleNamespace(connected=False))))
+        assert _browser_gone(ws_dead_page, {}) is True, "ws.connected=False 应判定断连"
+        assert _browser_gone(None, {}) is True, "page 为 None 视为断连"
+
+        # 2) _browser_gone：introspection 不可用时的心跳兜底（空 hb_state 首轮即探测）
+        class _ProbePage:
+            def __init__(self, exc=None):
+                self._driver = SimpleNamespace()  # 无 _browser_driver
+                self.browser = SimpleNamespace()  # 无 _driver
+                self._exc = exc
+
+            def run_js(self, *_a, **_k):
+                if self._exc:
+                    raise self._exc
+                return 1
+        assert _browser_gone(_ProbePage(Exception("PageDisconnectedError: 命令发送失败")), {}) is True, "心跳断连类异常应判定断连"
+        assert _browser_gone(_ProbePage(Exception("invalid session id")), {}) is False, "非断连异常不应误判"
+        assert _browser_gone(_ProbePage(), {}) is False, "心跳正常不应判定断连"
+
+        # 3) partial 快照：抓包期间增量写出元数据，正常收尾后删除
+        pkts = [_SelfTestPacket(r) for r in records[:3]]
+        partial_path = _flush_partial(args, pkts)
+        assert partial_path and os.path.exists(partial_path), "partial 快照应写入 out_dir"
+        with open(partial_path, encoding="utf-8") as f:
+            lines = [json.loads(l) for l in f if l.strip()]
+        assert lines[0].get("_partial") is True and lines[0].get("packetCount") == 3, "partial 快照头行元数据错误"
+        assert len(lines) == 4 and lines[1].get("url"), "partial 快照应包含全部包元数据"
+        _write_outputs(args, "browser", records, [], [], None, "baseline-selftest", None)
+        assert os.path.exists(os.path.join(args.out_dir, "capture.json")), "capture.json 应写出"
+        assert not os.path.exists(partial_path), "正常收尾后应删除 partial 快照"
+
+        # 4) _pid_alive：零值 PID 不存活、当前进程存活
+        assert _pid_alive(0) is False, "PID=0 应判不存活"
+        assert _pid_alive(os.getpid()) is True, "当前进程应判存活"
+
+        # 5) 信号中断标志置位与复位
+        _request_interrupt(15, None)
+        assert _INTERRUPTED["reason"] == "signal-15", "信号中断标志未置位"
+        _INTERRUPTED["reason"] = None
+
+        # 6) 报告渲染结束原因（browser-closed 给出人类可读解释）
+        md = render_markdown({"endReason": "browser-closed", "jsFileCount": 0})
+        assert "结束原因：browser-closed" in md and "手动关闭" in md, "结束原因渲染缺失"
+
+    print("forensic_ruyipage.py 自测通过：终态 OR、URL 匹配、多次终态回溯、完整 body/WASM 落盘、预算拒绝半包、分类落盘、断连探测、partial 快照、信号中断、结束原因渲染")
     return 0
 
 
@@ -1683,6 +1959,16 @@ def render_markdown(r: Dict[str, Any]) -> str:
     L.append(f"- ruyipage 版本：{r.get('ruyipageVersion')}")
     L.append(f"- 浏览器：{r.get('browserPath')}")
     L.append(f"- 浏览器关闭状态：{r.get('browserClosed', 'unknown')}")
+    end_reason_map = {
+        "target-hit": "终态目标接口命中",
+        "quiet-settle": "网络静默自动结束（未指定 --targets 的正常结束）",
+        "wait-timeout": "--wait 超时收尾",
+        "browser-closed": "浏览器被手动关闭/连接断开，已按手动结束立即收尾，数据已落盘",
+        "wait-error": "capture.wait 连续异常，提前收尾",
+    }
+    er = r.get("endReason") or "unknown"
+    extra = end_reason_map.get(er)
+    L.append(f"- 结束原因：{er}" + (f"（{extra}）" if extra else ""))
     L.append(f"- baselineId：{r.get('baselineId')}")
     L.append(f"- 抓包总数：{r.get('packetCount')}")
     L.append(f"- JS 文件数：{r.get('jsFileCount')}")
