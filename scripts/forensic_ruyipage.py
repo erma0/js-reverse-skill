@@ -632,6 +632,35 @@ def _trigger_actions(page, args: argparse.Namespace, human: str) -> None:
             logger.warning("click %s 失败：%s", args.click, e)
 
 
+def _inject_preset_cookies(page, args: argparse.Namespace) -> int:
+    """把 --cookie 指定的预置 Cookie 注入页面。
+
+    支持两种形态（由 ruyipage set_cookies 透传）：'name=value'（或分号分隔
+    'a=1; b=2'）字符串，或 dict/list 的 JSON。用于绕过需登录态/预置会话的页面，
+    必须在 page.get 导航前调用（导航后才设置对首次请求不生效）。返回注入条数。
+    """
+    items = [c for c in (args.cookie or []) if c.strip()]
+    if not items:
+        return 0
+    # ruyipage set_cookies 的字符串形态无 domain 时使用 --cookie-domain 或缺省 host
+    domain = args.cookie_domain or _host_of(args.url or "")
+    try:
+        page.set_cookies(items[0] if len(items) == 1 else items, domain=domain or None)
+        logger.info("已注入预置 Cookie %s 条（domain=%s）", len(items), domain or "<缺省>")
+        return len(items)
+    except Exception as e:
+        logger.warning("预置 Cookie 注入失败（页面可能已启动导航）：%s", e)
+        return 0
+
+
+def _host_of(url: str) -> str:
+    try:
+        from urllib.parse import urlparse
+        return urlparse(url).netloc
+    except Exception:
+        return ""
+
+
 # ============================================================
 # 主流程
 # ============================================================
@@ -1524,6 +1553,8 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
         page.capture.start(targets=True, collect_bodies=True)
         logger.info("capture 已启动（targets=True 抓全部包）")
 
+        _inject_preset_cookies(page, args)
+
         get_timed_out = False
         try:
             # wait="interactive"（DOMContentLoaded 即返回）：京东等首页 load 事件因长轮询
@@ -1807,6 +1838,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     p.add_argument("--click", default="", help="导航后拟人点击的 CSS 选择器")
     p.add_argument("--scroll", type=int, default=0, help="导航后滚动像素数")
     p.add_argument("--manual-pause", action="store_true", help="导航后暂停，等待手动完成登录/业务再继续；AI 后台运行遇非交互 stdin（EOF）时自动退化为等待 --wait，不阻塞")
+    p.add_argument("--cookie", action="append", default=[], metavar="NAME=VALUE", help="预置 Cookie，可多次传；支持 'name=value' 或 'a=1; b=2' 分号分隔（注入到页面所在域名）。用于绕过需登录态/预置会话的页面，缺省域名取 --url 的主机，可用 --cookie-domain 显式指定")
+    p.add_argument("--cookie-domain", default="", help="--cookie 注入的目标域名（如 .example.com）；缺省从 --url 解析主机")
     p.add_argument("--baseline-id", default="", help="指定 baselineId（复用已有指纹基线）")
     p.add_argument("--dry-run", action="store_true", help="只检测环境并打印计划，不启动浏览器")
     p.add_argument("--json", action="store_true", help="输出 JSON")
@@ -2168,6 +2201,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         "maxTargetTotalBytes": args.max_target_total_bytes,
         "maxRelatedPackets": args.max_related_packets,
         "maxRelatedTotalBytes": args.max_related_total_bytes,
+        "presetCookies": {
+            "count": len([c for c in (args.cookie or []) if c.strip()]),
+            "domain": args.cookie_domain,
+        },
         "dryRun": args.dry_run,
     }
 

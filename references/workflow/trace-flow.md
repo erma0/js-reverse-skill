@@ -59,6 +59,8 @@ Step 2: RuyiTrace 日志采集（TRACE_CAPTURE）
 
 ```bash
 python scripts/forensic_ruyipage.py --url <目标页> --case-dir <project-root> --targets "pc_home_feed" --browser-path <定制Firefox> --markdown
+# 取证入口在登录后 / 页面试业务前需预置会话：加 --cookie "a=1; b=2"（分号分隔，可多条，
+#   缺省 domain 取 --url 主机，可用 --cookie-domain 显式指定）。注入发生在导航前，页面与抓包均携带该会话。
 ```
 
 取证会自动保存入口页面 HTML 到 `case/forensic/document.html`（含 412/JS challenge 页内联脚本，是 acw_sc__v2 等 challenge cookie 的强制证据），无论是否指定 `--targets`。
