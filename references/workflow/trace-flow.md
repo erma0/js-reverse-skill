@@ -89,6 +89,9 @@ python scripts/forensic_ruyipage.py --url <目标页> --case-dir <project-root> 
 ```bash
 node scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <project-root> --ruyitrace-home <RuyiTrace-dir> --dry-run --markdown
 node scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <project-root> --ruyitrace-home <RuyiTrace-dir> --evidence-signal handshake --import-after --markdown
+# 需预置登录态/会话时追加 --cookie "sessionid=abc; token=xyz"（可多次或分号分隔）与 --cookie-domain ".example.com"：
+#   启动前向 trace profile 的 cookies.sqlite 预写（firefox 未启动时注入），页面与 trace 均携带该会话。
+#   仅自动 trace 生效；--input 手动导入已有日志时忽略 --cookie。
 ```
 
 执行要求：

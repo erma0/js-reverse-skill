@@ -7,6 +7,11 @@
 - ruyiPage CookieInfo 统一转为脱敏纯字典，`--json` 不再因第三方 Cookie 对象不可序列化而在落盘完成后报错，完整 Cookie value 不写入报告。
 - Windows managed runtime 扫描跟随 junction/symlink；`install_all.js` 不再用空项目安装目录遮蔽全局已验证 runtime；下载器遇系统证书链错误时自动用 `--use-system-ca` 重试一次。
 
+### 取证工具能力
+- `forensic_ruyipage.py` 新增 `--cookie`/`--cookie-domain`：导航前经 ruyiPage `set_cookies` 注入预置登录态/会话，用于取证入口在登录后或需先注入 Cookie 的页面；dry-run 计划仅显示条数与域名不暴露 value。
+- `capture_ruyitrace_log.js` 新增 `--cookie`/`--cookie-domain`：自动 trace 启动前把预置 Cookie 写入 trace profile 的 `cookies.sqlite`（firefox 未启动时经 `node:sqlite` 注入，Firefox 116+ moz_cookies schema，幂等按唯一约束覆盖）；需预置会话的 trace 场景不用再靠手动登录。`--input` 手动导入忽略 cookie；`node:sqlite` 不可用（Node<22.5）时优雅降级为告警并继续，可手动登录兜底。
+- 自定义执行 JS 触发目标请求（如自动点击滑动）未落地：RuyiTrace 走 spawn 无页面驱动，自动合成事件（isTrusted=false）可能被风控识别并污染"非自动请求"取证真实性，维持用户手动交互以保全证据。
+
 ## 2.3.54 - 2026-08-23
 
 ### 变更（吸纳拼多多 anti_content 实战：风控分层定位协议 + 环境检测对齐探针法）

@@ -18,6 +18,8 @@ function parseArgs(argv) {
     ruyitraceHome: '',
     ruyitraceExe: '',
     projectDir: '',
+    cookies: [],
+    cookieDomain: '',
     duration: 120,
     limit: 200000,
     ptype: '',
@@ -44,6 +46,8 @@ function parseArgs(argv) {
     else if (a === '--ruyitrace-home') args.ruyitraceHome = nextVal('');
     else if (a === '--ruyitrace-exe') args.ruyitraceExe = nextVal('');
     else if (a === '--project-dir') args.projectDir = nextVal('');
+    else if (a === '--cookie') args.cookies.push(nextVal(''));
+    else if (a === '--cookie-domain') args.cookieDomain = nextVal('');
     else if (a === '--duration') args.duration = Number(nextVal('120'));
     else if (a === '--limit') args.limit = Number(nextVal('200000'));
     else if (a === '--ptype') args.ptype = nextVal('');
@@ -100,7 +104,10 @@ function usage() {
 --end-signal <信号>（可多次）：仅用于自动采集提前结束；不传时只在用户关闭或 duration 到期时结束。
 --target-signal <信号>（兼容旧参数）：同时作为 evidence-signal 和 end-signal；新流程不要使用。
 --signal-policy strict|advisory：strict 未命中退出非 0；advisory 只记录覆盖不足，适合用户手动结束或信号尚未确定的采集。
---ptype <list>：启用 trace 的进程类型（逗号分隔，透传 MOZ_DOM_TRACE_PTYPE），不传则全部进程类型；大页面可只留主/content 进程减少无关日志。`;
+--ptype <list>：启用 trace 的进程类型（逗号分隔，透传 MOZ_DOM_TRACE_PTYPE），不传则全部进程类型；大页面可只留主/content 进程减少无关日志。
+--cookie "name=value"（可多次，或 "a=1; b=2" 分号分隔）：启动前向 trace profile 的 cookies.sqlite 预写 Cookie，用于需预置登录态/会话的页面取 Business 完整链路。
+--cookie-domain <domain>：--cookie 写入的目标域名（如 .bilibili.com），缺省取 --url 主机（含点前缀）。
+`;
 }
 
 function exists(p) {
@@ -168,6 +175,10 @@ function buildPlan(args, trace) {
     traceFile,
     firefoxExe: trace.firefoxExe,
     firefoxArgs,
+    presetCookies: {
+      count: parseCookieArgs(args.cookies).length,
+      domain: args.cookieDomain,
+    },
     env: {
       MOZ_DOM_TRACE: '1',
       MOZ_DOM_TRACE_FILE: traceFile,
@@ -455,9 +466,113 @@ function importLog(caseDir, files, markdown, targetSignals, writeSummary, signal
   return { ok: ret.status === 0, status: ret.status, stdout: ret.stdout || '', stderr: ret.stderr || '' };
 }
 
+// 解析 cookies 输入：合并多次 --cookie，支持 "a=1; b=2" 分号分隔，以及单元素内含分号的字符串。
+// 与 ruyipage --cookie 语义一致：值是纯字符串集合（由 set/get 层透传给目标浏览器），
+// 这里解析为 [name, value] 列表以便写入 cookies.sqlite。
+function parseCookieArgs(rawList) {
+  const out = [];
+  for (const item of (rawList || [])) {
+    if (typeof item !== 'string' || !item.trim()) continue;
+    for (const seg of item.split(';')) {
+      const s = seg.trim();
+      if (!s) continue;
+      const eq = s.indexOf('=');
+      if (eq <= 0) continue;
+      out.push({ name: s.slice(0, eq).trim(), value: s.slice(eq + 1).trim() });
+    }
+  }
+  return out;
+}
+
+function defaultCookieHost(url) {
+  try {
+    const host = new URL(url).hostname; // 'match.x.com'；Firefox 要求 host 以点前缀 .x.com 才跨子域
+    return host.startsWith('.') ? host : `.${host}`;
+  } catch { return ''; }
+}
+
+// 启动前把预置 Cookie 写入 trace profile 的 cookies.sqlite（Firefox 116+ schema）。
+// 必须在 Firefox 未运行时调用（spawn 之前），否则文件被锁/WAL 冲突。
+// 返回写入条数；失败返回 0 并告警（不阻断后续启动，可继续手动登录兜底）。
+function writePresetCookies(args, profileDir, url) {
+  if (!(args.cookies && args.cookies.length)) return 0;
+  const pairs = parseCookieArgs(args.cookies);
+  if (!pairs.length) return 0;
+  const dbPath = path.join(profileDir, 'cookies.sqlite');
+  ensureDir(profileDir);
+  // 旧 cookie 文件残留（如上次 session 生成）会带已有记录与不同 schema；这里不删除，
+  // 仅做 INSERT OR REPLACE 按 (name, host, path, originAttributes) 唯一约束覆盖。
+  let db;
+  try {
+    const { DatabaseSync } = require('node:sqlite');
+    db = new DatabaseSync(dbPath);
+  } catch (e) {
+    console.error(`[警告] 预置 Cookie 写入跳过（无法打开 SQLite）：${e.message}`);
+    return 0;
+  }
+  try {
+    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='moz_cookies'").get()) {
+      // 首次无 cookies.sqlite 时按 Firefox schema 建表（表版本与 Firefox 116+ 一致，
+      // zstd/JSON 等扩展列缺省；仅常规 host cookie，无 partitionKey 场景）
+      db.exec(`CREATE TABLE IF NOT EXISTS moz_cookies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        originAttributes TEXT NOT NULL DEFAULT '',
+        name TEXT, value TEXT, host TEXT, path TEXT,
+        expiry INTEGER, lastAccessed INTEGER, creationTime INTEGER,
+        isSecure INTEGER, isHttpOnly INTEGER, inBrowserElement INTEGER DEFAULT 0,
+        sameSite INTEGER DEFAULT 0, schemeMap INTEGER DEFAULT 0,
+        isPartitionedAttributeSet INTEGER DEFAULT 0, updateTime INTEGER,
+        CONSTRAINT moz_uniqueid UNIQUE (name, host, path, originAttributes))`);
+    }
+    db.prepare('CREATE INDEX IF NOT EXISTS moz_cookies_host_idx ON moz_cookies(host)');
+    const ins = db.prepare(`INSERT INTO moz_cookies
+      (originAttributes, name, value, host, path, expiry, lastAccessed, creationTime, isSecure, isHttpOnly, inBrowserElement, sameSite, schemeMap, isPartitionedAttributeSet, updateTime)
+      VALUES (@originAttributes, @name, @value, @host, @path, @expiry, @lastAccessed, @creationTime, @isSecure, @isHttpOnly, @inBrowserElement, @sameSite, @schemeMap, @isPartitionedAttributeSet, @updateTime)
+      ON CONFLICT(name, host, path, originAttributes) DO UPDATE SET value=@value, expiry=@expiry`);
+    const now = Date.now();
+    const host = args.cookieDomain || defaultCookieHost(url);
+    db.exec('BEGIN');
+    try {
+      for (const c of pairs) {
+        ins.run({
+          originAttributes: '',
+          name: c.name,
+          value: c.value,
+          host,
+          path: '/',
+          // Firefox expiry 用毫秒时间戳（PRTime/微秒的 ms 兼容），这里给未来一年
+          expiry: now + 365 * 24 * 3600 * 1000,
+          lastAccessed: now * 1000,
+          creationTime: now * 1000,
+          isSecure: 1, // 预置登录态 cookie 通常需 Secure；跨子域用 https
+          isHttpOnly: 0,
+          inBrowserElement: 0,
+          sameSite: 256, // LAX
+          schemeMap: 2,  // https
+          isPartitionedAttributeSet: 0,
+          updateTime: now * 1000,
+        });
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+    console.log(`已向 trace profile 预写 ${pairs.length} 条 Cookie（host=${host || '<缺省>'}）`);
+    return pairs.length;
+  } catch (e) {
+    console.error(`[警告] 预置 Cookie 写入失败（继续启动，可手动登录兜底）：${e.message}`);
+    try { db.close(); } catch {}
+    return 0;
+  } finally {
+    try { db.close(); } catch {}
+  }
+}
+
 async function capture(args, plan) {
   ensureDir(plan.outDir);
   ensureDir(plan.profileDir);
+  writePresetCookies(args, plan.profileDir, args.url);
   const startedAt = Date.now();
   const child = spawn(plan.firefoxExe, plan.firefoxArgs, {
     env: { ...process.env, ...plan.env },
@@ -603,6 +718,9 @@ function renderMarkdown(obj) {
   if (args.evidenceSignals.length) lines.push(`- evidence-signal：${args.evidenceSignals.join('、')}（策略 ${args.signalPolicy}）`);
   if (args.endSignals.length) lines.push(`- end-signal：${args.endSignals.join('、')}`);
   lines.push(`- DOM trace 行数上限：${args.limit}`);
+  if (plan.presetCookies && plan.presetCookies.count) {
+    lines.push(`- 预置 Cookie：${plan.presetCookies.count} 条（domain=${plan.presetCookies.domain || '<缺省取url主机>'}）`);
+  }
   lines.push(`- 启动参数：${[plan.firefoxExe].concat(plan.firefoxArgs).join(' ')}`);
   lines.push(`- 环境变量：MOZ_DOM_TRACE=1，MOZ_DOM_TRACE_FILE=<case trace file>，MOZ_DOM_TRACE_LIMIT=${args.limit}${args.ptype ? `，MOZ_DOM_TRACE_PTYPE=${args.ptype}` : ''}，MOZ_DISABLE_LAUNCHER_PROCESS=1`);
   if (args.dryRun) {

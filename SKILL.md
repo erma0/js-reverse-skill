@@ -227,6 +227,9 @@ node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-roo
 # --signal-policy advisory 可用于人工结束或信号尚未确定的采集：日志仍会导入并报告覆盖不足，不误报为“没有 trace”。
 # 自动 trace 默认采集窗口 --duration 120 秒；达到 end-signal 时自动收尾并关闭浏览器；用户提前关闭也会记录 endReason。
 # 窗口结束后仍需关闭进程、等待 NDJSON 完整刷盘并导入，命令总耗时可略超过 120 秒，但浏览器不应继续留存。
+# 需预置登录态/会话时加 --cookie "sessionid=abc"（可多次或分号分隔）与 --cookie-domain ".example.com"：
+#   启动前写入 trace profile 的 cookies.sqlite（firefox 未启动时注入），页面与 trace 均携带该会话。
+#   仅自动 trace 生效；--input 手动 trace 导入已有日志时忽略 --cookie。
 ```
 
 用户已提供 NDJSON 时用 `--input <ndjson>` 导入并生成摘要，不重复采集；多个进程日志用 `import_ruyitrace_log.js --input a --input b`，复制到 case 时会按来源摘要命名，避免同名文件覆盖。取证结果只进入 `case/`，原始 JS 放入 `case/js/original/`，临时材料放入 `case/tmp/`。
