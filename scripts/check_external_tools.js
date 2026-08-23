@@ -228,8 +228,10 @@ function scanInstallDir(installDir) {
     let entries = [];
     try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { entries = []; }
     for (const ent of entries) {
-      if (!ent.isDirectory()) continue;
       const sub = path.join(root, ent.name);
+      // Windows 上 ruyipage 默认 runtime 目录可能是 junction/symlink；Dirent.isDirectory()
+      // 对该类条目返回 false，但 fs.statSync 会跟随链接并确认真实目录。
+      if (!ent.isDirectory() && !isDir(sub)) continue;
       for (const exe of findExecutablesFromInstallRoot(sub)) candidates.push(exe);
     }
   }

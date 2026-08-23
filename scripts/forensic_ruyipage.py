@@ -415,6 +415,72 @@ def _safe_body(body: Any) -> bytes:
     return json.dumps(body, ensure_ascii=False).encode("utf-8", "replace")
 
 
+def _json_default(value: Any) -> Any:
+    """第三方对象的 JSON 最终兜底，避免取证已落盘却在 CLI 输出阶段报错。"""
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        try:
+            return to_dict()
+        except Exception:
+            pass
+    if isinstance(value, bytes):
+        return base64.b64encode(value).decode("ascii")
+    data = getattr(value, "__dict__", None)
+    if isinstance(data, dict):
+        return {str(k): v for k, v in data.items() if not str(k).startswith("_")}
+    return str(value)
+
+
+def _sanitize_cookies(cookies: Any) -> List[Dict[str, Any]]:
+    """把 ruyipage CookieInfo 转为脱敏纯字典。
+
+    Cookie 只用于说明会话轮廓，完整 value 属秘密材料，不能写入报告或 JSON 输出。
+    不同 ruyipage 版本可能返回 dict、CookieInfo 或其它对象，因此只抽取稳定字段。
+    """
+    out: List[Dict[str, Any]] = []
+    if not isinstance(cookies, (list, tuple)):
+        cookies = [] if cookies is None else [cookies]
+    fields = (
+        "name", "domain", "path", "expires", "expiry", "secure", "httpOnly",
+        "http_only", "sameSite", "same_site", "partitionKey", "partition_key",
+    )
+    for item in cookies:
+        raw: Dict[str, Any] = {}
+        if isinstance(item, dict):
+            raw = dict(item)
+        else:
+            to_dict = getattr(item, "to_dict", None)
+            if callable(to_dict):
+                try:
+                    converted = to_dict()
+                    if isinstance(converted, dict):
+                        raw = converted
+                except Exception:
+                    raw = {}
+            if not raw:
+                for field in fields + ("value",):
+                    try:
+                        value = getattr(item, field)
+                    except Exception:
+                        continue
+                    if value is not None:
+                        raw[field] = value
+        clean: Dict[str, Any] = {}
+        for field in fields:
+            if field in raw and raw[field] is not None:
+                clean[field] = raw[field]
+        secret = raw.get("value")
+        if secret is not None:
+            clean["valuePresent"] = True
+            clean["valueLength"] = len(str(secret))
+            clean["value"] = "<redacted>"
+        else:
+            clean["valuePresent"] = False
+        if clean.get("name") or clean.get("domain"):
+            out.append(clean)
+    return out
+
+
 def _header_value(headers: Optional[dict], name: str) -> str:
     wanted = name.lower()
     for key, value in (headers or {}).items():
@@ -725,7 +791,132 @@ def _body_storage_stats(records: List[Dict[str, Any]]) -> Dict[str, int]:
     return stats
 
 
-def _classify_packets(steps, args, substrings, regexes):
+def _packet_body_bytes(packet: Dict[str, Any]) -> int:
+    return len(_safe_body(packet.get("request_body"))) + len(_safe_body(packet.get("response_body")))
+
+
+def _new_live_body_state() -> Dict[str, Any]:
+    return {
+        "packets": {},
+        "checked": set(),
+        "failures": {},
+        "reasons": {},
+        "relatedOrder": [],
+        "relatedBytes": 0,
+        "hydratedBytes": 0,
+    }
+
+
+def _hydrate_live_evidence(steps, args, substrings, regexes, state: Dict[str, Any]) -> None:
+    """浏览器仍在线时增量拉取高价值正文，供断连后的收尾阶段复用。
+
+    过去只在结束时拉 body：用户关闭窗口或 WebSocket 意外断开后，metadata 仍在本地队列，
+    但 JS/API 正文已无法通过 BiDi RPC 获取。这里每轮只处理新出现的 JS、终态、入口 HTML
+    和动态关联包；关联包维持最近 N 个与总预算，避免对所有静态资源做昂贵 RPC。
+    """
+    packets = state["packets"]
+    checked = state["checked"]
+    failures = state["failures"]
+    for index, packet in enumerate(steps):
+        if index in checked or failures.get(index, 0) >= 3:
+            continue
+        try:
+            meta = packet.to_dict(include_bodies=False)
+        except Exception:
+            failures[index] = failures.get(index, 0) + 1
+            continue
+
+        is_target = bool(substrings or regexes) and match_targets(meta, substrings, regexes)
+        is_js = is_js_packet(meta)
+        is_doc = _is_entry_document(meta, args.url)
+        is_related = not args.no_related_bodies and _is_related_packet(meta)
+        reasons = []
+        if is_target:
+            reasons.append("target")
+        if is_js:
+            reasons.append("javascript")
+        if is_doc:
+            reasons.append("entry-document")
+        if is_related:
+            reasons.append("related")
+        if not reasons:
+            checked.add(index)
+            continue
+
+        # 请求刚出现但响应尚未完成时留到下一轮重试，避免把暂时空 body 永久缓存。
+        if not meta.get("response_status") and not meta.get("is_failed"):
+            continue
+        try:
+            hydrated = packet.to_dict(include_bodies=True)
+        except Exception as e:
+            failures[index] = failures.get(index, 0) + 1
+            logger.debug("采集中预取 body 失败（第 %s 次，%s）：%s", failures[index], meta.get("url"), e)
+            continue
+
+        size = _packet_body_bytes(hydrated)
+        # 单包明显超过最终保留上限时不常驻内存；收尾仍会按正式预算再尝试一次。
+        per_limit = args.max_wasm_bytes if _is_wasm_body(str(meta.get("url") or ""), meta.get("response_headers")) else args.max_body_bytes
+        if size > max(per_limit * 2, per_limit + args.body_inline_bytes):
+            checked.add(index)
+            continue
+        packets[index] = hydrated
+        checked.add(index)
+        state["reasons"][index] = reasons
+        state["hydratedBytes"] += size
+
+        # 只有 related（不同时属于 target/js/document）的包按最近 N 个 + 总预算滚动保留。
+        if reasons == ["related"]:
+            state["relatedOrder"].append(index)
+            state["relatedBytes"] += size
+            while state["relatedOrder"] and (
+                len(state["relatedOrder"]) > args.max_related_packets
+                or state["relatedBytes"] > args.max_related_total_bytes
+            ):
+                old = state["relatedOrder"].pop(0)
+                old_packet = packets.pop(old, None)
+                state["reasons"].pop(old, None)
+                old_size = _packet_body_bytes(old_packet) if old_packet else 0
+                state["relatedBytes"] = max(0, state["relatedBytes"] - old_size)
+                state["hydratedBytes"] = max(0, state["hydratedBytes"] - old_size)
+
+
+def _live_body_summary(state: Dict[str, Any]) -> Dict[str, Any]:
+    counts: Dict[str, int] = {}
+    for reasons in state.get("reasons", {}).values():
+        for reason in reasons:
+            counts[reason] = counts.get(reason, 0) + 1
+    return {
+        "packetCount": len(state.get("packets", {})),
+        "bytes": int(state.get("hydratedBytes", 0)),
+        "failedPacketCount": sum(1 for n in state.get("failures", {}).values() if n > 0),
+        "byReason": counts,
+    }
+
+
+def _observed_dynamic_candidates(records_meta: List[Dict[str, Any]], limit: int = 12) -> List[Dict[str, Any]]:
+    """目标写错/站点改版时，列出本次实际观察到的动态 2xx 接口供重采选择。"""
+    grouped: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for record in records_meta:
+        method = str(record.get("method") or "GET").upper()
+        status = int(record.get("response_status") or 0)
+        if method == "OPTIONS" or status // 100 != 2 or not _is_related_packet(record):
+            continue
+        sample_url = str(record.get("url") or "")
+        base_url = sample_url.split("?", 1)[0].split("#", 1)[0]
+        key = (method, base_url)
+        item = grouped.setdefault(key, {
+            "method": method,
+            "status": status,
+            "url": base_url,
+            "sampleUrl": sample_url,
+            "contentType": _response_content_type(record),
+            "count": 0,
+        })
+        item["count"] += 1
+    return sorted(grouped.values(), key=lambda x: (-x["count"], x["url"]))[:limit]
+
+
+def _classify_packets(steps, args, substrings, regexes, body_cache=None):
     """遍历抓包 steps，分离目标、JS 和终态之前的关联动态请求。
 
     - records_meta：每包 to_dict(include_bodies=False)，纯 metadata、零 BiDi RPC，用于 capture.json
@@ -737,6 +928,7 @@ def _classify_packets(steps, args, substrings, regexes):
     只有 JS / 目标 / 受限的关联候选才 to_dict(include_bodies=True) 按需拉 body——
     避免对所有包逐包拉 body（每个都是 BiDi get_data RPC，京东几百包会拖到数百秒）。
     """
+    body_cache = body_cache or {}
     js_records = []
     target_hits = []
     related_hits = []
@@ -761,17 +953,25 @@ def _classify_packets(steps, args, substrings, regexes):
     related_saved_bytes = 0
     target_saved_bytes = 0
 
+    def get_body_packet(index, packet, meta):
+        cached = body_cache.get(index)
+        if cached is not None:
+            return cached
+        try:
+            hydrated = packet.to_dict(include_bodies=True)
+            body_cache[index] = hydrated
+            return hydrated
+        except Exception as e:
+            logger.warning("读取包 body 失败（%s）：%s", meta.get("url"), e)
+            return meta
+
     # 容量预算从终态向前消费，确保接近最终业务提交的 verify/load 请求优先保留。
     related_by_index = {}
     for i in sorted(related_indices, reverse=True):
         if related_saved_bytes >= args.max_related_total_bytes:
             break
         p, meta = packets[i]
-        try:
-            body_packet = p.to_dict(include_bodies=True)
-        except Exception as e:
-            logger.warning("读取关联包 body 失败（%s）：%s", meta.get("url"), e)
-            body_packet = meta
+        body_packet = get_body_packet(i, p, meta)
         remaining = args.max_related_total_bytes - related_saved_bytes
         serialized, saved = _serialize_packet_bodies(
             body_packet,
@@ -794,10 +994,7 @@ def _classify_packets(steps, args, substrings, regexes):
         is_target = has_target_filter and match_targets(d, substrings, regexes)
         is_doc = document is None and _is_entry_document(d, args.url)
         if is_js or is_target or is_doc:
-            try:
-                d = p.to_dict(include_bodies=True)
-            except Exception as e:
-                logger.warning("读取包 body 失败（%s）：%s", d.get("url"), e)
+            d = get_body_packet(i, p, meta)
         if is_js:
             body = _maybe_decompress(_safe_body(d.get("response_body")), d.get("response_headers"))
             fname = sanitize_filename(d.get("url", ""))
@@ -1043,7 +1240,11 @@ def _pid_alive(pid: int) -> bool:
                 capture_output=True, timeout=10,
             )
             out = (ret.stdout or b"").decode("gbk", "ignore")
-            return ret.returncode == 0 and str(pid) in out
+            if ret.returncode != 0:
+                # 受限桌面/管理员策略下 tasklist 可能返回 Access denied；查询失败时
+                # 保守认为仍存活，避免误判后跳过浏览器清理。
+                return True
+            return str(pid) in out
         except Exception:
             return True
     try:
@@ -1386,6 +1587,7 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
             return None
 
         _install_signal_watch()
+        live_body_state = _new_live_body_state()
 
         if substrings or regexes:
             # 用户给出的目标接口是本次流程的终态（如最终登录/提交接口）。命中后只短暂收尾，
@@ -1402,6 +1604,7 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
                 if stop:
                     end_reason = stop
                     break
+                _hydrate_live_evidence(steps_now, args, substrings, regexes, live_body_state)
                 if _target_reached(steps_now, substrings, regexes):
                     target_done = True
                     end_reason = "target-hit"
@@ -1454,6 +1657,7 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
                 if stop:
                     end_reason = stop
                     break
+                _hydrate_live_evidence(steps_now, args, substrings, regexes, live_body_state)
                 count = len(steps_now)
                 if count > prev_count:
                     prev_count = count
@@ -1485,14 +1689,16 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
             logger.warning("读取 steps 失败：%s", e)
             steps = []
 
+        live_body_state = locals().get("live_body_state") or _new_live_body_state()
+
         records_meta, js_records, target_hits, related_hits, related_stats, js_dir, document = _classify_packets(
-            steps, args, substrings, regexes
+            steps, args, substrings, regexes, live_body_state.get("packets")
         )
 
         webdriver_flag, wd_err = _eval_js(page, "return navigator.webdriver === true")
         cookies = []
         try:
-            cookies = page.get_cookies(all_info=True)
+            cookies = _sanitize_cookies(page.get_cookies(all_info=True))
         except Exception as e:
             logger.warning("读取 Cookie 失败：%s", e)
 
@@ -1517,6 +1723,8 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
             end_reason=end_reason,
         )
         result["getTimedOut"] = get_timed_out
+        result["liveBodyPrefetch"] = _live_body_summary(live_body_state)
+        result["observedDynamicCandidates"] = _observed_dynamic_candidates(records_meta)
         result["outputs"] = _write_outputs(
             args, browser_path, records_meta, target_hits, related_hits, fingerprint, baseline_id, js_dir
         )
@@ -1626,10 +1834,16 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
 
 
 class _SelfTestPacket:
-    def __init__(self, value: Dict[str, Any]):
+    def __init__(self, value: Dict[str, Any], fail_body: bool = False):
         self.value = value
+        self.fail_body = fail_body
+        self.body_reads = 0
 
     def to_dict(self, include_bodies: bool = False) -> Dict[str, Any]:
+        if include_bodies:
+            self.body_reads += 1
+            if self.fail_body:
+                raise RuntimeError("simulated disconnected body RPC")
         return dict(self.value)
 
 
@@ -1643,6 +1857,18 @@ def run_self_test() -> int:
     assert defaults.max_body_bytes == 10 * 1024 * 1024, "普通 body 默认上限错误"
     assert defaults.max_wasm_bytes == 50 * 1024 * 1024, "WASM 默认上限错误"
     assert defaults.max_related_total_bytes == 100 * 1024 * 1024, "关联总预算默认值错误"
+
+    class _CookieInfo:
+        name = "sessionid"
+        domain = "example.com"
+        path = "/"
+        value = "secret-session"
+        secure = True
+
+    sanitized = _sanitize_cookies([_CookieInfo()])
+    assert sanitized[0]["value"] == "<redacted>", "Cookie value 必须脱敏"
+    assert sanitized[0]["valueLength"] == len("secret-session"), "Cookie 长度摘要缺失"
+    json.dumps({"cookies": sanitized}, ensure_ascii=False, default=_json_default)
 
     header_only = {
         "url": "https://api.example.com/login",
@@ -1814,6 +2040,31 @@ def run_self_test() -> int:
         no_target = _classify_packets([_SelfTestPacket(r) for r in records], args, [], [])
         assert len(no_target[2]) == 0, "未指定 targets 时不应把所有包当成目标包"
 
+        # 断连前已预取正文时，收尾不应再次依赖浏览器 RPC。
+        live_args = SimpleNamespace(
+            url="https://example.com/login",
+            case_subdir=os.path.join(root, "case"),
+            out_dir=out_dir,
+            no_related_bodies=False,
+            max_related_packets=60,
+            max_related_total_bytes=1024 * 1024,
+            max_target_total_bytes=1024 * 1024,
+            max_body_bytes=10 * 1024 * 1024,
+            max_wasm_bytes=50 * 1024 * 1024,
+            body_inline_bytes=1024,
+        )
+        live_packet = _SelfTestPacket({
+            **records[5],
+            "response_body": '{"code":0}',
+        })
+        live_state = _new_live_body_state()
+        _hydrate_live_evidence([live_packet], live_args, ["/login/submit"], [], live_state)
+        assert 0 in live_state["packets"], "在线时应预取终态正文"
+        live_packet.fail_body = True
+        classified_live = _classify_packets([live_packet], live_args, ["/login/submit"], [], live_state["packets"])
+        assert classified_live[2][0]["response_body"] == '{"code":0}', "收尾应复用在线预取正文"
+        assert live_packet.body_reads == 1, "缓存正文不应在收尾重复调用浏览器 RPC"
+
         # ---- 断连探测 / partial 快照 / 信号中断 / 结束原因（收尾加固回归）----
         # 1) _browser_gone：驱动内部状态 introspection（零 RPC）
         dead_driver = SimpleNamespace(_is_running=False, _ws=SimpleNamespace(connected=False))
@@ -1939,7 +2190,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     result["ruyipageVersion"] = ver
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=_json_default))
     else:
         print(render_markdown(result))
     if not result["ok"]:
@@ -1972,6 +2223,11 @@ def render_markdown(r: Dict[str, Any]) -> str:
     L.append(f"- baselineId：{r.get('baselineId')}")
     L.append(f"- 抓包总数：{r.get('packetCount')}")
     L.append(f"- JS 文件数：{r.get('jsFileCount')}")
+    live = r.get("liveBodyPrefetch") or {}
+    L.append(
+        f"- 采集中正文预取：{live.get('packetCount', 0)} 包 / {live.get('bytes', 0)}B"
+        f"（失败包 {live.get('failedPacketCount', 0)}）"
+    )
     L.append(f"- 终态目标命中数：{r.get('targetHitCount')}（非 OPTIONS 2xx {r.get('acceptedTargetCount')}）")
     target_body = r.get("targetBodyCapture") or {}
     body_policy = r.get("bodyPolicy") or {}
@@ -2010,6 +2266,14 @@ def render_markdown(r: Dict[str, Any]) -> str:
         L.append("")
         L.append("[未通过] 终态目标未达成：指定 --targets/--targets-regex 后未捕获到终态接口的非 OPTIONS 2xx 响应（Step 1 缺失）。")
         L.append("请重采（--click/--scroll/--manual-pause）或由用户提供 cURL/HAR/原始请求文本，不得转源码搜索。")
+        candidates = r.get("observedDynamicCandidates") or []
+        if candidates:
+            L.append("本次实际观察到以下动态 2xx 接口；它们只是重采候选，不自动冒充终态：")
+            for item in candidates:
+                L.append(
+                    f"- `{item.get('method')} {item.get('status')}` {item.get('url')}"
+                    f"（{item.get('count')} 次，{item.get('contentType') or 'content-type unknown'}）"
+                )
     if r.get("onlyOptionsWarning"):
         L.append(f"- [警告] 仅捕获到 OPTIONS 预检，未捕获真实业务响应：{r['onlyOptionsWarning']}")
     if r.get("webdriverCheckError"):

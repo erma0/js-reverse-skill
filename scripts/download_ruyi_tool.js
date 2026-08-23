@@ -337,8 +337,38 @@ async function main() {
   if (args.markdown) process.stdout.write(renderMarkdown(result));
 }
 
+function isCertificateChainError(err) {
+  return /unable to verify|self[- ]signed certificate|certificate.*(unknown|verify|chain)|UNABLE_TO_GET_ISSUER_CERT/i
+    .test(String(err && (err.message || err) || ''));
+}
+
+function retryWithSystemCa() {
+  if (process.env.RUYI_SYSTEM_CA_RETRY === '1' || process.execArgv.includes('--use-system-ca')) return null;
+  const ret = spawnSync(
+    process.execPath,
+    ['--use-system-ca', __filename].concat(process.argv.slice(2)),
+    {
+      encoding: 'utf8',
+      timeout: 1900000,
+      windowsHide: true,
+      env: { ...process.env, RUYI_SYSTEM_CA_RETRY: '1' },
+    },
+  );
+  return ret;
+}
+
 try {
   main().catch((err) => {
+    if (isCertificateChainError(err)) {
+      const retried = retryWithSystemCa();
+      if (retried) {
+        console.error('[提示] Node 内置 CA 无法验证当前网络证书，已使用操作系统 CA 做一次安全重试。');
+        if (retried.stdout) process.stdout.write(retried.stdout);
+        if (retried.stderr) process.stderr.write(retried.stderr);
+        process.exit(retried.status == null ? 1 : retried.status);
+        return;
+      }
+    }
     console.error(err.message || String(err));
     console.error(usage());
     process.exit(1);

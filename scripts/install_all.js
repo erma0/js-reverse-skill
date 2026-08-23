@@ -128,7 +128,10 @@ function detectState(pythonSpec) {
 
   if (result.ruyipagePackage) {
     const checkScript = path.join(__dirname, 'check_external_tools.js');
-    const checkArgs = [checkScript, '--python', pythonSpec.cmd, '--ruyipage-install-dir', RUYIPAGE_BROWSERS_DIR, '--json'];
+    // 安装前先做广义检测：项目 tools/ + ruyipage 默认 managed runtime 都算可复用。
+    // 不能强制 --ruyipage-install-dir 指向尚为空的项目目录，否则会遮蔽 AppData 中
+    // 已验证的 runtime，触发无意义的重复下载。
+    const checkArgs = [checkScript, '--python', pythonSpec.cmd, '--project-dir', PROJECT_ROOT, '--json'];
     if (pythonSpec.args.length) checkArgs.push('--python-args', pythonSpec.args.join(' '));
     const checkRet = run(process.execPath, checkArgs, 60000);
     try {
@@ -249,7 +252,7 @@ function install(state, pythonSpec, mirror) {
 
 function verify(pythonSpec) {
   const script = path.join(__dirname, 'check_external_tools.js');
-  const checkArgs = [script, '--python', pythonSpec.cmd, '--ruyipage-install-dir', RUYIPAGE_BROWSERS_DIR, '--ruyitrace-home', RUYITRACE_DIR, '--json'];
+  const checkArgs = [script, '--python', pythonSpec.cmd, '--project-dir', PROJECT_ROOT, '--ruyitrace-home', RUYITRACE_DIR, '--json'];
   if (pythonSpec.args.length) checkArgs.push('--python-args', pythonSpec.args.join(' '));
   const ret = run(process.execPath, checkArgs, 60000);
   let parsed = null;

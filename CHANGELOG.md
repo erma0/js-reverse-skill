@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Unreleased
+
+### 抓包稳定性与环境检测
+- `forensic_ruyipage.py` 在等待期间增量预取 JS/目标/动态 API body，断连收尾优先复用缓存；新增 `liveBodyPrefetch` 与实际动态 2xx 候选摘要，降低“只剩 partial-steps、正文未落盘”的丢证风险。
+- ruyiPage CookieInfo 统一转为脱敏纯字典，`--json` 不再因第三方 Cookie 对象不可序列化而在落盘完成后报错，完整 Cookie value 不写入报告。
+- Windows managed runtime 扫描跟随 junction/symlink；`install_all.js` 不再用空项目安装目录遮蔽全局已验证 runtime；下载器遇系统证书链错误时自动用 `--use-system-ca` 重试一次。
+
 ## 2.3.54 - 2026-08-23
 
 ### 变更（吸纳拼多多 anti_content 实战：风控分层定位协议 + 环境检测对齐探针法）
