@@ -84,6 +84,14 @@
       "verifiedAt": "2026-07-11"
     },
     {
+      "title": "雪碧图/样式干扰——图片数字拼装还原（猿人学第4题）",
+      "domains": ["match.yuanrenxue.cn"],
+      "signals": ["sprite", "雪碧图", "j_key", "img_number", "left", "base64 PNG", "像素哈希", "question/4", "style interference"],
+      "strategy": "A 纯算还原 + DOM ground truth：j_key=md5(base64(key+value)) 过滤干扰图，按 index+left/8.5 还原数字顺序，像素哈希字典识别（像素层仅 0-9 十种模板，非 base64 层）",
+      "file": "yuanrenxue-match4-sprite-pixelsort.md",
+      "verifiedAt": "2026-08-23"
+    },
+    {
       "title": "快手 __NS_hxfalcon + kww 双轨签名",
       "domains": ["kuaishou.com"],
       "signals": ["__NS_hxfalcon", "kww", "Jose", "kwpsec", "Brook VM", "Mihawk VM", "caver"],

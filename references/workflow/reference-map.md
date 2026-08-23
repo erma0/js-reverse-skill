@@ -11,6 +11,7 @@
 | 加密入口和算法识别 | `references/crypto/crypto-entry.md`、`crypto-patterns.md`、`algorithm-families.md`；密文特征入口 `scripts/identify_crypto.js`，Cookie 生成方归因 `scripts/analyze_cookie_attribution.js` |
 | 混淆与 AST | `references/deobfuscation/obfuscation-identify.md`、`assets/ast-patterns/` |
 | 字体映射/CSS 渲染层反爬（woff/woff2、PUA 码点） | `references/rendering/font-anti-crawl.md` |
+| 图片型内容反爬（base64/像素判定、雪碧图数字拼装、DOM ground truth 验证） | `references/rendering/image-content-reversal.md` |
 | 浏览器环境、对象模型、真实性保护与 native 缺口 | `references/env/env-object-model.md`、`env-debug-loop.md`、`env-detect-bypass.md`、`env-native-protection.md`、`native-capability-gap.md`、`object-shape-private-state.md`、`runtime-frameworks.md`、`webapi-env-detection-matrix.md` |
 | iframe、Worker 或移动 H5 | `references/env/env-iframe.md`、`mobile-h5-env.md`、`references/workflow/worker-signing.md` |
 | WASM | `references/env/env-wasm.md`，遇到 import、memory、streaming 或整包 Emscripten/webpack bundle 黑盒执行再读 `env-wasm-advanced.md`，harness 用 `templates/wasm-loader/emscripten-bundle-blackbox.js` |
@@ -114,6 +115,7 @@
 ### rendering
 
 - `references/rendering/font-anti-crawl.md`
+- `references/rendering/image-content-reversal.md`
 
 ### tooling
 
