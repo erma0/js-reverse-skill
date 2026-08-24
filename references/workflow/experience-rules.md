@@ -98,7 +98,8 @@ XHR Hook 的安装顺序决定能否截获最终 URL——若 JSVMP 先加载并
 | `cases/jsvmp-dual-sign-xhr-intercept-cacheOpts-jsdom-firefox.md` | 规则 1/3/12/14/16 实战验证 |
 | `cases/jsvmp-ruishu6-cookie-412-sdenv.md` | 规则 2/6/8 实战验证 |
 | `cases/universal-vmp-source-instrumentation.md` | 规则 1/2/8/9 实战验证 |
-| `cases/browser-extract-modified-md5-yuanrenxue.md` | 规则 10 实战验证（T常量篡改降级信号） |
+| `cases/modified-md5-xhr-done-yuanrenxue.md` | 规则 10 实战验证（T常量篡改 + XHR.DONE 步长退化根因；降级前先做时间冻结对照法） |
 | `cases/yidun-jigsaw.md` | 规则 20 实战验证（m 空串陷阱 + 全字段解密 + 逐点统计） |
 | `cases/yidun-intellisense-vm-env.md` | 规则 20 实战验证（成功样本链路字段核对） |
 | `cases/yuanrenxue-match4-sprite-pixelsort.md` | 规则 21 + 图片像素判定（base64 唯一 ≠ 像素唯一）实战验证 |
+| `cases/yuanrenxue-match6-aarcsa-honeymoon-risk.md` | 会话状态类风控（蜜月期/频率/惩罚层）+ 反模式 13/14/15 实战验证 |
