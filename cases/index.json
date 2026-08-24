@@ -92,6 +92,15 @@
       "verifiedAt": "2026-08-23"
     },
     {
+      "title": "猿人学 match 题号速查索引",
+      "domains": ["match.yuanrenxue.cn", "yuanrenxue.com"],
+      "signals": ["题号速查", "match", "AAEncode", "RSA", "雪碧图", "修改版 MD5", "确定性 PRNG", "蜜月期"],
+      "strategy": "题号 → 技术特征 → 案例文件速查表：按题号刷题时先查本表定位已有案例与已实测特征，未记录题走完整流程后回填",
+      "file": "yuanrenxue-match-index.md",
+      "kind": "template",
+      "verifiedAt": "2026-08-24"
+    },
+    {
       "title": "快手 __NS_hxfalcon + kww 双轨签名",
       "domains": ["kuaishou.com"],
       "signals": ["__NS_hxfalcon", "kww", "Jose", "kwpsec", "Brook VM", "Mihawk VM", "caver"],
