@@ -40,6 +40,7 @@
 - 已经定位或初步定位加密入口。
 - 相关 JS 文件已经保存到本地，或确认可以获取。
 - 已经整理 `source → entry → builder → writer` 四层链路，至少确认 writer。
+- 已按 SKILL.md 4.4 产出 `notes/entry-chain.md` 与 `notes/missing-env-priority.md`，且 `node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` 退出码 0（两份文件缺一或门禁未过不得开始补环境）。
 - 取证来源为 ruyiPage + RuyiTrace 时，已导入 NDJSON 日志并生成 `notes/ruyitrace-summary.md`；尚未导入时按默认自动 trace 采集（`capture_ruyitrace_log.js`）并导入，自动失败或需登录/验证码/复杂交互时转手动由用户提供日志；用户明确确认无法提供时才降级。
 - 已经检查 Node 泄露阻断，不把 `process/Buffer/require/module/global` 暴露给目标 JS。
 - 已经在补环境初始化阶段启用 JS 层 NativeProtect 保护，或记录用户明确豁免原因。
@@ -320,6 +321,30 @@ window[r(791)]||(function(){var n=t;w[n(722)](e);window[r(791)]=!0}())
 ```
 
 详见 `references/workflow/common-pitfalls.md` 反模式 8。
+
+### 同步死循环：vm 沙箱执行长时间不返回
+
+**现象**：`vm.runInContext` 长时间不返回，外部超时 kill 后无任何错误栈，也没有新增输出。
+
+**根因**：目标 JSVMP 在缺失环境下 opcode 分支跳转进入错误循环（真实浏览器中该分支不会进入）；或等待 `setInterval`/事件（见下节）。注意另一种静默退化：环境缺**静态属性**（如 `XMLHttpRequest.DONE`）时算法不报错但结果偏移（match5 实战：缺 DONE 导致 MD5 分组步长从 16 退化为 1），症状全部表现为 `token failed`，极难定位——补环境时静态属性与实例方法同等重要。
+
+**诊断步骤**：
+1. 用 `new vm.Script(code).runInContext(ctx, {timeout: 20000})` 设置同步超时；超时抛出的是普通 `Error`（`name` 不是 `TimeoutError`），catch 后按 message 判断
+2. timeout 未生效时先确认包装/补丁代码真的被执行了——在 run 前后各打一行日志（match5 实战：字符串替换 patch 未命中导致实际跑的是旧代码，白等 60s）
+3. 死循环大概率是环境缺失：给 ctx 的 window 套 Proxy，记录所有返回 `undefined` 的属性访问（探测模式），按缺失清单补齐后复测——**不要加大超时硬等**
+4. 超过 20+ 步仍未推进：触发 SKILL.md 4.4 上下文防耗尽检查点（落阶段报告 → 对齐用户），不继续盲跑
+
+**示例**（Proxy 探测缺失属性）：
+```javascript
+const missing = new Set();
+const proxyWin = new Proxy(ctx.window, {
+  get(t, k) {
+    if (!(k in t) && typeof k === 'string' && !k.startsWith('__')) missing.add(k);
+    return t[k];
+  }
+});
+// 把 proxyWin 注入 ctx 再跑一轮，输出 [...missing] 即缺失清单
+```
 
 ### setInterval 阻止进程退出
 
