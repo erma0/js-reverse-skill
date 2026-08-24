@@ -58,7 +58,17 @@
 1. `GET /api/question/7?page=N&pageSize=10&kw=` 无签名参数，仅需 `sessionid` cookie；requests 直连即可（无 TLS 检测）
 2. 响应 `{status, data, woff}`：`data` 每条为 6 个 `&#xNNNN;` PUA 码点实体（6 位数字）；`woff` 为 base64 TrueType 字体
 3. 字体码点随请求轮换（PUA 区），但 0-9 的 `glyf.flags` md5 指纹跨字体/跨会话固定
-4. 指纹→数字表（2026-08 验证）：`9bb9…→2, 0aef…→0, f9d1…→8, 3dcf…→7, 9ebc…→5, ec94…→4, 4119…→9, af60…→6, 2c0e…→1, b024…→3`（完整值见交付 result/final.py）
+4. 指纹→数字表（`md5(glyf flags)`，2026-08 验证，跨字体/跨会话稳定）：
+
+   | 指纹 | 数字 | 指纹 | 数字 |
+   |------|------|------|------|
+   | `9bb92485b3e2ba4bd8a93ebbd3a0fa4e` | 2 | `ec9467393c47041e0fafff7f4a2852a8` | 4 |
+   | `0aef9a3385d96e7bdd1f3003669a940c` | 0 | `4119e3dc64f73251d40cf1fc0323e20f` | 9 |
+   | `f9d12372b7002b9a1522dd3dd142cf70` | 8 | `af603543300bfc5f0e35e941d4208759` | 6 |
+   | `3dcfec8e26ef48730f25363da55da77a` | 7 | `2c0ec07331fa25dc226f1ca83561cb46` | 1 |
+   | `9ebca885e21990cee127d23d03acb3ac` | 5 | `b024173b00a3c901b6e696ba12812124` | 3 |
+
+   交付参考实现：`ai-js-reverse/yuanrenxue-match7/result/final.py`（与 skill 仓库同级的实战仓库）
 5. 末页（第 5 页）UA 必须为 `yuanrenxue`（与 match4/5/6 同）
 6. 提交接口 `POST /a/7`，body `answer=<5页之和>`；正确返回 `{"result":"success","created":true,"code":2}`，重复提交返回 `code=1`
 7. GET `/match/7` HTML 会 `Set-Cookie` 重置 sessionid——本题无需开窗，也不要开窗
