@@ -1138,6 +1138,7 @@ def _build_result(args, browser_path, baseline_id, fingerprint, cookies,
         "profileDir": args.profile_dir,
         "fpDir": args.fp_dir,
         "baselineId": baseline_id,
+        "useragentOverride": getattr(args, "ua", "") or None,
         "packetCount": len(records_meta),
         "jsFileCount": len(js_records),
         "targetHitCount": len(target_hits),
@@ -1541,6 +1542,21 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
             applied = ctx.apply_emulation(page)
             logger.info("智能指纹仿真已注入：%s", applied)
 
+        # --ua 必须在 apply_emulation 之后调用：智能指纹的 headers 仿真会设置 UA，
+        # 后设置的 useragent 才能覆盖。只覆盖 UA 字符串；eval.toString() 等
+        # 内核级检测不受影响（此类阻断按 env-detect-bypass.md 内核级差异检测定位）。
+        if args.ua:
+            if hasattr(page, "set_useragent"):
+                try:
+                    page.set_useragent(args.ua)
+                    logger.info("UA 已覆盖（--ua）：%s", args.ua)
+                except Exception as e:
+                    logger.warning("set_useragent 失败，本次取证 UA 未覆盖：%s", e)
+            else:
+                logger.warning(
+                    "当前 ruyipage 版本无 set_useragent 方法，--ua 未生效；请升级 ruyipage（pip install ruyiPage --upgrade）"
+                )
+
         regexes = []
         if args.targets_regex:
             for r in args.targets_regex.split(","):
@@ -1825,6 +1841,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     p.add_argument("--proxy-auth", default="", help="出口代理认证 user:pass（透传 proxy_user/proxy_pwd），可选；账号密码只写 fpfile，不写业务脚本/交付物")
     p.add_argument("--manual-geo", default="", help="地理探测失败时的 manual_geo（JSON 字符串或文件路径）")
     p.add_argument("--no-fp", action="store_true", help="跳过 smart_fingerprint（禁用智能指纹）")
+    p.add_argument("--ua", default="", help="覆盖取证浏览器 UA（目标站校验 UA 为特定浏览器时用，如 Chrome）；在智能指纹仿真之后应用，同时影响 navigator.userAgent 与请求头。注意：只覆盖 UA 字符串，eval.toString() 等内核级检测不受影响，此类阻断见 references/env/env-detect-bypass.md 内核级差异检测")
     p.add_argument("--wait", type=int, default=120, help="等待首次终态目标命中的超时秒；命中后另执行完整 --target-settle 收尾窗口，未命中到点自动关闭，默认 120；验证码/登录等需人工操作的场景建议调大（如 300）")
     p.add_argument("--settle", type=int, default=5, help="未指定 --targets 时的静默窗口：包数不再增长且连续 N 秒无新包视为抓包完成，默认 5")
     p.add_argument("--target-settle", type=int, default=3, help="终态接口首次出现 HTTP 2xx 后继续抓取的秒数，用于接收后置回调或额外业务重试；脚本无法通用判断响应体中的业务成功码，预期可能重试时请调大，默认 3")
@@ -2192,6 +2209,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "headless": False,
         "humanAlgorithm": args.human_algorithm,
         "smartFingerprint": not args.no_fp,
+        "useragentOverride": args.ua or None,
         "targets": [s for s in args.targets.split(",") if s.strip()],
         "targetSettle": args.target_settle,
         "relatedBodies": not args.no_related_bodies,
@@ -2258,6 +2276,8 @@ def render_markdown(r: Dict[str, Any]) -> str:
     extra = end_reason_map.get(er)
     L.append(f"- 结束原因：{er}" + (f"（{extra}）" if extra else ""))
     L.append(f"- baselineId：{r.get('baselineId')}")
+    if r.get("useragentOverride"):
+        L.append(f"- UA 覆盖（--ua）：{r.get('useragentOverride')}")
     L.append(f"- 抓包总数：{r.get('packetCount')}")
     L.append(f"- JS 文件数：{r.get('jsFileCount')}")
     live = r.get("liveBodyPrefetch") or {}
