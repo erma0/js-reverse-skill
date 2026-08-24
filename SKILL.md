@@ -143,7 +143,8 @@ REAL_VERIFY
   ├─ 失败 + 无 trace → FORENSIC_CAPTURE
   └─ sign-only → SIGN_ONLY_DELIVER
 DIAGNOSE（403/风控码失败的首选入口；双对照细则见第 10 节分层定位协议）
-  ├─ 200 + 业务层风控文案 → 会话状态类风控（蜜月期/频率限制/惩罚计数），
+  ├─ 200 + 业务层风控文案 → 会话状态类风控（蜜月期/惩罚计数；"放慢速度"
+  │  类文案在签名确认正确前不得按字面归因频率），
   │  按 ip-risk-control.md 专节排查；惩罚期内基线失败 → 冷却，不做实验
   ├─ 正向对照 200 + 反向对照 403 → 签名内容层 → 环境检测对齐（探针法）→ IMPLEMENT
   ├─ 正向对照 403 → 连接层嫌疑成立 → IMPLEMENT 路径 E（TLS/Session 对齐）
@@ -428,7 +429,7 @@ node scripts/compare_fixture.js --fixture case/fixtures/<样本>.fixture.json --
 1. **正向对照**：浏览器**新鲜**签名 + 纯协议客户端（curl_cffi 等）重放 → 200 ⇒ 连接层无问题，问题在自己的签名内容；403 ⇒ 连接层嫌疑才成立。内嵌 serverTime/时间戳的签名有有效期，对照必须用采集后立即重放的新鲜样本并记录采集→重放延迟；**用过期样本得到的 403 不构成任何结论**（实战误判：拼多多 40002 被误判为连接层风控）。
 2. **反向对照**：自己的签名 + 真实浏览器连接（取证阶段 ruyipage `add_preload_script` hook XHR.open 替换目标参数，hook 必须带执行标记并验证）→ 403 ⇒ 服务端校验签名内容，与连接无关。
 3. 定位为「签名内容被校验」后，用**对齐探针法**测量 SDK 实际内嵌的环境检测并逐位对齐（见 `references/env/env-detect-bypass.md`），不要先假设需要复现 canvas/行为轨迹等完整浏览器指纹。
-4. **对照必须在健康 session 下做，且一次只改一个变量**：连续失败会触发站点惩罚机制（惩罚期内连浏览器基线请求都被拒，对照数据全部作废）；每组对照前先复刻一次确定成功的基线请求，失败即冷却后重做。HTTP 200 + 业务层风控文案时先按 `references/network/ip-risk-control.md` 会话状态类风控专节（蜜月期窗口/频率限制/失败惩罚）排查。
+4. **对照必须在健康 session 下做，且一次只改一个变量**：连续失败会触发站点惩罚机制（惩罚期内连浏览器基线请求都被拒，对照数据全部作废）；每组对照前先复刻一次确定成功的基线请求，失败即冷却后重做。HTTP 200 + 业务层风控文案时先按 `references/network/ip-risk-control.md` 会话状态类风控专节（蜜月期窗口/"频率墙"误判警示/失败惩罚）排查。
 
 未完成上述对照，不得宣布连接层风控结论，不得转而交付浏览器内核取数方案（取证浏览器脚本放进 `case/` 也算交付违规）。双对照结果写入 `result/验证记录.json` 顶层 `riskLayerDiagnosis` 字段（`forwardControl`/`reverseControl`/`conclusion`，正向必须含 `captureToReplayMs` 采集→重放延迟，反向必须含 `hookVerified: true`），并过门禁：
 
