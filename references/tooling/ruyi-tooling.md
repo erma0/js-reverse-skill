@@ -320,7 +320,14 @@ new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, clientX: 3, clien
    - 全部已抓包用 `page.capture.steps`（**不是** `get_all`）读取。
    - `CapturePacket.to_dict(include_bodies=True)` 含 `url / method / request_headers / response_status / response_headers / request_body / response_body / is_failed`。
    - `ctx = opts.smart_fingerprint(...)` → `ctx.apply_emulation(page)`；`ctx.to_dict()` 持久化基线。
+   - **导航 / 交互 / 环境覆写（方法名与 Playwright 不同，勿按 Playwright 猜）**：
+     - 构造：`page = FirefoxPage(opts)`（`opts` 由 `FirefoxOptions` 构建）；`launch()` 不接受 `opts` 参数，返回值即 page 对象。
+     - 导航：`page.get(url, timeout=, wait="interactive")`（不是 `goto` / `navigate`）。
+     - 执行 JS：`page.run_js(expr, timeout=)`，取返回值在表达式内 `return`。
+     - UA 覆盖：`page.set_useragent(ua)`——在 `apply_emulation` **之后**调用才能覆盖指纹仿真设置的 UA；仅覆盖 UA 字符串，`eval.toString()` 等内核级检测无效（见 `references/env/env-detect-bypass.md` 内核级差异检测）。标准取证优先用 `forensic_ruyipage.py --ua`，不要为改 UA 手写探针。
+     - Cookie：`page.set_cookies({"name": ..., "value": ..., "domain": ...})`（dict 或 dict 列表，不是 Playwright 的 `add_cookies`）；读取用 `page.get_cookies(all_info=True)`。
    - **Firefox 155+ 兼容**：ruyipage ≥1.2.62 已原生内置（`capture.start` 上下文订阅失败自动降级全局；`smart_fingerprint` 自带脚本可访问的 `about:blank` 启动页；提权窗口下 `allow_system_access` 按需自动开启）。**旧版本（<1.2.62）由共享脚本兜底，禁止改 site-packages/wheel 内部**：`forensic_ruyipage.py` 已自动补 `--remote-allow-system-access`（管理员/提权 Windows 下 Firefox 155+ 拒绝浏览器外的远程调试连接，ruyipage ≤1.2.61 均不自动加），并对 `session.subscribe` 的 privileged-scope 报错做全局订阅降级（ruyipage 1.2.61 回退了 1.2.45 自带的降级逻辑）。遇到这两个问题先修 `forensic_ruyipage.py`，不要在临时解压的 wheel / site-packages 里改 `capture.py` 或 `firefox_options.py`——升级或重装即丢失。
+   - 不确定的方法名 / 签名一律先内省（`dir(page)`、`inspect.signature(page.get)`），禁止按 Playwright / Selenium API 命名习惯猜——match5 实测 `goto` / `add_cookies` / `page.close` 均不存在，按 Playwright 写法逐轮报错浪费 5+ 轮。
 3. 抓包完成后 `page.capture.stop()` 会确保响应体加载；JS 文件优先从 `response_body` 落盘，不要改用普通 `requests` 重新下载（会丢失指纹上下文）。
 
 只有当 `node scripts/check_external_tools.js --markdown --project-dir <project-root>` 显示“默认解析路径是否为定制 Firefox：是”时，才可直接 `FirefoxPage()` 或 `launch(headless=False)`。否则必须显式指定已验证的定制 Firefox 路径。

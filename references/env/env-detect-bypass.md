@@ -399,6 +399,33 @@ function createFullBrowserEnv(options = {}) {
 
 注意：对齐目标以「真实浏览器实测输出」为准，不以「检测项列表理论值」为准——某些位在真实浏览器里就是 null/未设置（如 fbeZ 的 index 7），沙箱照抄实测值即可，不要"修正"它。
 
+## 内核级差异检测（UA 覆盖无效的深层检测）
+
+> **触发条件**：目标站提示"限制浏览器"（如仅支持 Chrome），但用 `forensic_ruyipage.py --ua` 覆盖 UA 后行为不变——检测的不是 UA 字符串，而是浏览器内核固有差异。实战来源：猿人学 match5——题目"限制 chrome"，改 UA 为 Chrome 后签名 `m` 仍不生成；真正机制是混淆加载器用 `eval.toString()` 精确匹配 Chrome 的单行格式选择解码分支，Firefox（取证内核）走错分支产生 PUA 非法字符（`SyntaxError: illegal character U+F759`），签名永不生成（`cases/modified-md5-xhr-done-yuanrenxue.md`）。
+
+常见内核级检测项（改 UA / 改指纹均无效）：
+
+| 检测项 | Chrome / Node | Firefox（取证内核） | 典型用法 |
+|--------|--------------|--------------------|---------|
+| `eval.toString()` | `"function eval() { [native code] }"`（单行） | 同串但含换行 `\n` | 与 Chrome 格式全等比较，决定走正确解码分支还是干扰分支 |
+| `new Error().stack` 帧格式 | `    at fn (file:1:2)` | `fn@file:1:2` | 分支选择 / 环境识别 |
+| `window.chrome` | 存在 | 不存在 | Chrome 内核识别（见上方指纹检测） |
+
+诊断动作（取证浏览器内 `run_js` 一次采齐，无需多轮探针）：
+
+```javascript
+JSON.stringify({
+  ua: navigator.userAgent,
+  evalStr: eval.toString(),
+  stackHead: new Error().stack.split('\n').slice(0, 3),
+  hasChrome: typeof window.chrome
+})
+```
+
+**取证侧影响**：ruyipage / RuyiTrace 均为 Firefox 内核，命中内核级检测时取证浏览器无法触发目标路径（签名不生成、目标请求 400/403 且与 UA、Cookie 无关）。此时按 SKILL.md 状态机进入 `BLOCKED_FORENSIC`：输出卡点与检测证据对齐用户，不要无限换姿势重试取证，也不要跳过 Step 2 静默推进。
+
+**补环境侧机会**：Node 的 `eval.toString()` 恰为 Chrome 单行格式——检测 Chrome 内核的分支在 Node 沙箱**天然走对**（match5 即靠此路径纯协议还原，Node 补环境无需伪造该检测项，保持默认即通过）；反过来检测 Firefox 内核的站点则不适合 Node 路线。判断顺序：先在取证浏览器内采样确认检测项，再决定取证降级方式与补环境方向。
+
 ## 重要说明
 
 本文件提供的"最小沙箱"、"XHR stub"、"jQuery stub"等模板仅适用于**探测模式**。进入**交付模式**时，必须按 `env-object-model.md` 和 `env-native-protection.md` 的要求补齐原型链、属性描述符、访问器、native-like toString 等真实性保护，不得把普通对象作为最终交付方案。
@@ -409,3 +436,4 @@ function createFullBrowserEnv(options = {}) {
 |---------|--------|
 | `cases/jsvmp-xhr-interceptor-env-emulation.md` | 环境检测绕过（navigator.webdriver / plugins / DOM 布局） |
 | `cases/pdd-anti-content-fbez-blackbox.md` | 签名内嵌环境检测对齐探针法（Wt() flag 浏览器采样 + 沙箱 diff） |
+| `cases/modified-md5-xhr-done-yuanrenxue.md` | 内核级差异检测（eval.toString() 分支检测，Node 天然匹配 Chrome 格式） |
