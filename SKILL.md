@@ -111,7 +111,16 @@ MATERIALS_FALLBACK（工具不可用降级，细则见 decision-tree.md 阻塞�
   │   （强制声明：经验沉淀与最终总结写明未走 ruyipage/RuyiTrace、证据为手动材料 + 真实请求反证）
   └─ 仅 URL 或材料校验不通过 → FORENSIC_CAPTURE（先修复工具）
 STEP2_ONLY → CASE_LOOKUP
-FORENSIC_CAPTURE → TRACE_CAPTURE
+FORENSIC_CAPTURE
+  ├─ 终态目标取证达成（终态 2xx 命中）→ TRACE_CAPTURE
+  └─ 目标请求持续被拒且定位到内核级/环境检测阻断 → BLOCKED_FORENSIC
+BLOCKED_FORENSIC（取证被目标站检测阻断，与工具缺失不同）
+  ├─ UA 类检测 → 用 forensic_ruyipage.py --ua 覆盖后重采 → 达成则 TRACE_CAPTURE
+  ├─ 内核级检测（eval.toString/Error.stack 等，UA 覆盖无效，取证细则见
+  │   references/env/env-detect-bypass.md 内核级差异检测）→ 输出卡点对齐用户：
+  │   用户提供真实浏览器 cURL/HAR 走 MATERIALS_FALLBACK，或用户确认降级
+  │   （降级义务同 MATERIALS_FALLBACK：经验沉淀与最终总结写明 Step 2 缺失原因）
+  └─ 未定位到检测证据不得进入本节点（先按 4.2 重采 / DIAGNOSE 排查）
 TRACE_CAPTURE
   ├─ 采集成功 + 质量达标 + 出口门禁复检通过 → CASE_LOOKUP
   ├─ 质量不足 → TRACE_RETRY
@@ -175,6 +184,8 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 
 从请求中提取目标 URL、接口 URL、目标参数、请求方法、范围和项目根目录。目标 URL + 目标参数可确定即直接推进；仅两者缺一且无法合理提取时才问一次最小信息。若实现需要额外动态参数，列出参数名、位置、用途假设和证据后纳入请求链范围。
 
+用户约束与 skill 规则的仲裁（启动阶段只裁定一次，不得反复权衡）：用户说「不接受浏览器自动化」「不用 Playwright」等，默认约束**最终交付物**（第 3 节纯协议红线），不改变取证阶段允许 ruyipage 定制 Firefox / RuyiTrace 的规则（绝对规则 8），两者不冲突时无需多轮权衡；「忽略已有案例经验」指不直接套用历史结论（绝对规则 2 仍要求先走 CASE_LOOKUP 做时效校验），不是跳过必经节点。仅当用户约束明确指向取证动作本身（如「不许打开浏览器」）时才问一次确认取舍。
+
 用户说明重装 Node、替换 Firefox、迁移 tools 目录或升级 ruyipage/RuyiTrace 时，重新执行完整环境检查，不得沿用旧快照。
 
 环境检查与快照写入按第 0 节 GATE-1 执行。不得因已有阶段报告或 `result/` 跳过环境快照写入或证据核验。
@@ -206,6 +217,9 @@ python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root>
 #   加 --cookie "name=value; name2=value2"（可多条，分号分隔；缺省 domain 取 --url 主机）
 #   显式指定域名可用 --cookie-domain ".example.com"。注入发生在导航前，页面与抓包均携带该会话。
 #   RED LINE 提示：--cookie 仅用于"注入到取证浏览器以还原真实会话过程"，不替代最终交付的协议实现。
+# 目标站校验 UA 为特定浏览器时：加 --ua "<UA字符串>" 覆盖取证浏览器 UA（在智能指纹之后应用）。
+#   只覆盖 UA 字符串；eval.toString() 等内核级检测覆盖无效，命中此类检测按状态机 BLOCKED_FORENSIC 处理
+#   （见 references/env/env-detect-bypass.md 内核级差异检测），禁止为改 UA 手写取证探针。
 ```
 
 终态目标请求未命中 = Step 1 缺失，禁止转源码搜索继续：`PARTIAL`（仅 OPTIONS/非 2xx）与 `NO_TARGET`（完全未命中）均退出码非 0；任一非 OPTIONS 2xx 命中即 `PASS` 退出码 0。HTTP 2xx 只表示目标请求已取证，不表示业务成功（通用脚本不猜业务码）。登录可能因验证码/校验失败重试时调大 `--target-settle`，保证重试仍在同一会话内；关联材料以最后一次有效终态向前回溯，验证码中间接口不是额外终态门禁（load → verify 由分析阶段从同一会话回溯）。body 超过 JSON 内联预览阈值时必须读取对应 `saved_to` 完整文件，`*_complete=false` 不能拿预览替代原始证据。需要用户交互时提示其在窗口完成操作——**操作完成后用户直接关闭浏览器窗口即视为手动结束抓包，脚本会立即收尾落盘（报告 endReason=browser-closed），不是失败**；浏览器已关/日志出现 WebSocket 断连时脚本仍在收尾分类，禁止 kill 进程，等 `FORENSIC DONE` 或 JSON 输出；万一进程被强杀，`case/forensic/partial-steps.jsonl` 保留了全部包元数据兜底（该文件残留即说明未正常收尾）。用户也可提供 cURL/HAR/原始请求文本；终态命中并落盘后再回 EVIDENCE_GATE。JS 源码关键词定位只能作辅助假设。
@@ -294,9 +308,9 @@ node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown
 
 详见 `references/env/env-debug-loop.md` 的「RuyiTrace 优先诊断门禁」。
 
-**上下文防耗尽检查点（硬约束）**：TRACE_ANALYZE / IMPLEMENT / REAL_VERIFY 任一阶段消耗大量步骤（20+ 步未推进）或上下文接近耗尽时，先回看上条两份文件是否已覆盖当前崩溃点：未覆盖先补全再继续；已覆盖仍打转时落阶段报告。判定标准：trace 已定位到关键资源/入口，或当前节点已消耗 20+ 步仍未推进（TRACE_ANALYZE 未进 IMPLEMENT、IMPLEMENT 黑盒调试打转、REAL_VERIFY 反复排查未定位根因）。
+**上下文防耗尽检查点（硬约束）**：TRACE_ANALYZE / IMPLEMENT / REAL_VERIFY 任一阶段消耗大量步骤（20+ 步未推进）或上下文接近耗尽时，按固定动作序列执行：①回看上条两份文件是否已覆盖当前崩溃点——未覆盖先补全再继续；②已覆盖仍打转 → 落阶段报告（当前状态、已证实事实、缺失证据、下一步输入）；③落报告后仍无新进展 → 停止实验，向用户输出卡点与方向选项（继续攻坚 / 换路径 / 用户补材料），不得在无进展下继续消耗步骤。判定标准：trace 已定位到关键资源/入口，或当前节点已消耗 20+ 步仍未推进（TRACE_ANALYZE 未进 IMPLEMENT、IMPLEMENT 黑盒调试打转、REAL_VERIFY 反复排查未定位根因）。「想问用户 vs 再试一轮」的摇摆本身就是在消耗步骤——触发本检查点后摇摆超过 2 轮即视为已触发，必须执行上述序列。
 
-**IMPLEMENT 硬前置条件**：必须满足「trace 质量达标（含目标信号命中）」或「用户明确确认轻量路径」。两条均不满足时停在 TRACE_ANALYZE，不得以 mock、猜测或实验性实现替代证据。EXTERNAL_LOOKUP 的假设若与本次 trace 定位的 builder/writer 冲突，以 trace 为准，禁止先去测未被 trace 证明的 SDK 导出接口。**Step 2 缺失（check_trace_gate.js 退出码 1）时不得进入 IMPLEMENT**：不得以 EXTERNAL_LOOKUP 网络方案、边界声明、同族算法替代或 mock 填补 Step 2 证据缺口；轻量路径豁免的前提是 Step 1 + Step 2 齐备（见 4.3），Step 2 未产出不构成豁免条件。唯一例外是状态机中的 MATERIALS_FALLBACK 节点（RuyiTrace 工具不可用且自动安装失败 + 用户材料经 check_evidence.js 校验通过）：该路径以「Node 直连真实接口、服务端响应反证」替代 Step 2，REAL_VERIFY 不可豁免，且必须在经验沉淀与最终总结写明取证偏差。
+**IMPLEMENT 硬前置条件**：必须满足「trace 质量达标（含目标信号命中）」或「用户明确确认轻量路径」。两条均不满足时停在 TRACE_ANALYZE，不得以 mock、猜测或实验性实现替代证据。EXTERNAL_LOOKUP 的假设若与本次 trace 定位的 builder/writer 冲突，以 trace 为准，禁止先去测未被 trace 证明的 SDK 导出接口。**Step 2 缺失（check_trace_gate.js 退出码 1）时不得进入 IMPLEMENT**：不得以 EXTERNAL_LOOKUP 网络方案、边界声明、同族算法替代或 mock 填补 Step 2 证据缺口；轻量路径豁免的前提是 Step 1 + Step 2 齐备（见 4.3），Step 2 未产出不构成豁免条件。例外仅两个，均为用户显式确认的降级且 REAL_VERIFY 不可豁免、必须在经验沉淀与最终总结写明取证偏差：①状态机中的 MATERIALS_FALLBACK 节点（RuyiTrace 工具不可用且自动安装失败 + 用户材料经 check_evidence.js 校验通过），以「Node 直连真实接口、服务端响应反证」替代 Step 2；②BLOCKED_FORENSIC 节点用户确认降级（内核级检测使 RuyiTrace 无法触发目标路径，有检测证据且用户已知情），以 Step 1 网络证据 + 落盘 JS 源码分析替代 Step 2。**AI 自行判定「trace 采集不到/太难」不构成降级理由**——没有用户确认的 Step 2 缺失一律停在状态机对应节点。
 
 ## 5. CASE_LOOKUP
 
@@ -351,6 +365,8 @@ node scripts/analyze_cookie_attribution.js --case-dir <project-root> [--cookie <
 ## 8. TRACE_ANALYZE
 
 **先 trace、后读源码（硬约束）**：进入本节后先跑 `import_ruyitrace_log` 生成摘要，再用 `search_trace --url <target-signal>` 直接定位请求链和 `stack.file:line:col`，最后才按行号/字符偏移切源码片段。禁止在拿到 trace 前先读 8MB 大 bundle 手工猜 webpack module id 或写 probe1~N 静态解析——那会耗尽上下文且命中率低。定位大文件 JS 关键词必须用 `search_js.js`；禁止 grep 单行超 64KB 的压缩 JS、禁止现场手搓 `node -e`（PowerShell 转义翻车）。**响应体非明文（`code` 非 0、`data` 二进制/乱码）时同理**：先查 trace 的 xhrNative 响应记录确认响应形态，再按响应方向四层（response→reader→decoder→parser，见 `references/crypto/crypto-entry.md`）追响应处理链；禁止先搜源码里的密钥串猜解密算法——密钥可能作用于别的字段。
+
+**Windows 写临时脚本规范（探针/runner/补环境脚本一律遵守）**：优先用编辑工具直接写文件；必须用 PowerShell 时一律单引号 here-string `@'...'@`（内部 `$` 不插值）配合 `[IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))` 落盘。禁止双引号 here-string（`$` 插值破坏 JS 语法）、禁止 base64 编码绕路（多一轮转译仍会翻车）、禁止 `node -e` / `python -c` 内联长脚本。写完先跑一次语法检查（`node --check` / `py -3 -m py_compile`）再执行，避免把转义错误误判成目标 JS 的行为。
 
 读取 NDJSON 的 API、时间、stack、文件、行列号和参数摘要，按调用频率与网络写入时间定位热路径。分析时按定位顺序使用：
 

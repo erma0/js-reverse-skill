@@ -66,10 +66,11 @@ case 根目录只允许两个子目录（完整权威目录树见 `references/qu
 
 ### 1.1 ruyipage 抓包（目标未命中需重采）
 1. 目标接口已知时运行通用脚本 `python scripts/forensic_ruyipage.py --url <目标页> --case-dir <project-root> --targets <目标接口URL或关键词> --markdown`（内部已用 `targets=True` 抓全部包并落盘 JS 到 `case/js/original/`，不必手写 `page.capture.start`）。指定 `--targets/--targets-regex` 后，未捕获到非 OPTIONS 2xx 目标响应时脚本退出码非 0，必须停在 `EVIDENCE_GATE` 重采或请用户补 cURL/HAR，不得把同域无关请求当成 Step 1 证据。
-2. 收集：网络包（HAR）、Cookie、JS 文件 URL、响应状态码
-3. 下载目标 JS 文件到 `case/js/original/`
-4. 写入指纹基线 `case/notes/fingerprint-baseline.json`
-5. 抓包结果复用到 TRACE_CAPTURE RuyiTrace 采集 + TRACE_ANALYZE 日志分析，**不重抓**
+2. 目标站校验 UA 时加 `--ua "<UA字符串>"`（如 Chrome UA）；改 UA 后仍被拒且定位到 `eval.toString()` 等内核级检测 → 进入状态机 `BLOCKED_FORENSIC` 输出卡点对齐用户（见 `references/env/env-detect-bypass.md` 内核级差异检测），不得手写探针或跳过 Step 2。
+3. 收集：网络包（HAR）、Cookie、JS 文件 URL、响应状态码
+4. 下载目标 JS 文件到 `case/js/original/`
+5. 写入指纹基线 `case/notes/fingerprint-baseline.json`
+6. 抓包结果复用到 TRACE_CAPTURE RuyiTrace 采集 + TRACE_ANALYZE 日志分析，**不重抓**
 
 ### 1.2 反爬类型识别
 基于抓包结果判断：
