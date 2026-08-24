@@ -54,7 +54,8 @@ def build_map(font_b64: str) -> dict:
     font = TTFont(io.BytesIO(base64.b64decode(font_b64)))   # 先解码！
     cmap, mapping = font.getBestCmap(), {}
     for cp, gname in cmap.items():
-        digest = md5(bytes(font["glyf"][gname].flags)).hexdigest()
+        # getattr 防空字形（flags 可能为 None，如 space/.notdef），空指纹不会命中字典
+        digest = md5(bytes(getattr(font["glyf"][gname], "flags", b""))).hexdigest()
         if digest in DIGIT_MD5:
             mapping[cp] = DIGIT_MD5[digest]
     return mapping
