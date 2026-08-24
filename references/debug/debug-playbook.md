@@ -160,7 +160,10 @@
 环节 4：随机串
   ├─ 长度是否匹配
   ├─ 字符集：hex / alphanumeric / 自定义
-  └─ 生成方法：Math.random vs crypto.randomBytes
+  ├─ 生成方法：Math.random vs crypto.randomBytes
+  └─ 客户端随机源是否被魔改为确定性（快速判定：同一明文调用两次加密函数，
+     密文相同 ⇒ 确定性加密，标准库随机 PS/IV 生成的密文会被服务端拒绝，
+     必须复刻其 PRNG；详见 common-pitfalls.md 反模式 15）
 
 环节 5：密钥/盐值
   ├─ 密钥值是否正确（注意空格、换行、编码）
