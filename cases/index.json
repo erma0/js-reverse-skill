@@ -100,9 +100,17 @@
       "verifiedAt": "2026-08-23"
     },
     {
+      "title": "动态字体映射——glyf 字形指纹还原（猿人学第7题）",
+      "domains": ["match.yuanrenxue.cn"],
+      "signals": ["woff", "fonteditor", "动态字体", "PUA", "question/7", "glyf flags", "fontTools", "cmap 轮换", "pgx-num"],
+      "strategy": "A 纯算还原（内容还原型，Step 2 豁免）：每页解析响应内嵌 base64 TTF 的 glyf flags md5 指纹，查 0-9 静态指纹字典建码点映射后解码求和；requests 直连无 TLS 检测；末页 UA=yuanrenxue；无需开窗（开窗 GET HTML 会 Set-Cookie 重置登录态致提交 401）",
+      "file": "yuanrenxue-match7-dynamic-font.md",
+      "verifiedAt": "2026-08-24"
+    },
+    {
       "title": "猿人学 match 题号速查索引",
       "domains": ["match.yuanrenxue.cn", "yuanrenxue.com"],
-      "signals": ["题号速查", "match", "AAEncode", "RSA", "雪碧图", "修改版 MD5", "确定性 PRNG", "蜜月期"],
+      "signals": ["题号速查", "match", "AAEncode", "RSA", "雪碧图", "修改版 MD5", "确定性 PRNG", "蜜月期", "动态字体"],
       "strategy": "题号 → 技术特征 → 案例文件速查表：按题号刷题时先查本表定位已有案例与已实测特征，未记录题走完整流程后回填",
       "file": "yuanrenxue-match-index.md",
       "kind": "template",
