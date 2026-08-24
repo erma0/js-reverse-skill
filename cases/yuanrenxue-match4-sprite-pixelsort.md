@@ -99,5 +99,5 @@
 |---------|--------|
 | `references/rendering/font-anti-crawl.md` | 同为图片/字体渲染类反爬的还原思路 |
 | `references/workflow/decision-tree.md` | 题型判定 + 路径决策 |
-| `cases/browser-extract-modified-md5-yuanrenxue.md` | 猿人学同平台其他题目（第5题修改版 MD5），CASE_LOOKUP 相互参照 |
+| `cases/modified-md5-xhr-done-yuanrenxue.md` | 猿人学同平台其他题目（第5题修改版 MD5），CASE_LOOKUP 相互参照 |
 | `cases/sm2-sm4-sm3-guomi-jobonline.md` | 纯算还原路径示例 |

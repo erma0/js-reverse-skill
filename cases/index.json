@@ -76,12 +76,20 @@
       "verifiedAt": "2026-07-12"
     },
     {
-      "title": "修改版 MD5 与 WAF Cookie",
+      "title": "修改版 MD5 + WAF Cookie 纯协议还原（猿人学第5题）",
       "domains": ["match.yuanrenxue.cn", "yuanrenxue.com"],
-      "signals": ["RM4hZBv0dDon443M", "modified MD5", "$_zw", "charCode anti-hook", "WAF cookie", "obfuscator.io"],
-      "strategy": "浏览器取证提取关键值后在 Node.js 复现修改版 MD5，请求阶段复用完整 Cookie 链并识别静默降级",
-      "file": "browser-extract-modified-md5-yuanrenxue.md",
-      "verifiedAt": "2026-07-11"
+      "signals": ["RM4hZBv0dDon443M", "modified MD5", "$_zw", "charCode anti-hook", "WAF cookie", "obfuscator.io", "XMLHttpRequest.DONE", "AES-128-ECB", "蜜月期"],
+      "strategy": "B vm 沙箱补环境跑 decoded5.js 纯协议生成 m/f/cookie m/RM4 全参数；XHR.DONE*4 分组步长缺失是 token failed 根因；curl_cffi 开蜜月期窗口逐页请求，末页 UA=yuanrenxue",
+      "file": "modified-md5-xhr-done-yuanrenxue.md",
+      "verifiedAt": "2026-08-24"
+    },
+    {
+      "title": "AAEncode + RSA 签名 + 蜜月期会话风控（猿人学第6题）",
+      "domains": ["match.yuanrenxue.cn"],
+      "signals": ["AAEncode", "颜文字混淆", "JSEncrypt", "RSA-1024", "question/6", "风控不通过", "别匆忙", "蜜月期", "window.o"],
+      "strategy": "B vm 沙箱跑 delect.js 生成 m（双层 URL 编码的 RSA-1024 明文 1|t）+ curl_cffi 请求；q 单段链即可（多段链反被拒）；jsbn am 初始化 try-catch 吞错需手动挂回；蜜月期开窗+末页 UA=yuanrenxue",
+      "file": "yuanrenxue-match6-aarcsa-honeymoon-risk.md",
+      "verifiedAt": "2026-08-24"
     },
     {
       "title": "雪碧图/样式干扰——图片数字拼装还原（猿人学第4题）",
