@@ -9,6 +9,7 @@
 | 5 | 修改版 MD5 + WAF Cookie | 魔改 MD5（T 常量注入 + `XMLHttpRequest.DONE*4` 分组步长，缺 XHR 时步长退化 1 是 token failed 根因）→ vm 沙箱补环境跑 decoded5.js 纯协议还原；蜜月期开窗同第 6 题 | `cases/modified-md5-xhr-done-yuanrenxue.md` | B vm 沙箱补环境（纯协议） | 2026-08-24 |
 | 6 | AAEncode 混淆 + RSA 签名 + 蜜月期风控 | AAEncode 段仅产出 `window.o=1`（幌子）；m=二次 URL 编码的 RSA-1024("1\|"+t)，q 单段链 `1-<t>\|` 即可（多段链反被拒）；jsbn `am` 初始化被 try-catch 吞错需手动挂回；蜜月期开窗（GET HTML 约 5 秒、成功续期）+ 末页 UA=yuanrenxue | `cases/yuanrenxue-match6-aarcsa-honeymoon-risk.md` | B vm 沙箱补环境 + curl_cffi（纯协议） | 2026-08-24 |
 | 7 | 动态字体（随风漂移） | 接口响应内嵌 base64 TTF + data 为 PUA 码点实体；码点每请求轮换但 `glyf.flags` md5 指纹跨字体固定 → 指纹字典法还原；请求侧全明文无签名，requests 直连（无 TLS 检测、无蜜月期、**勿开窗**：开窗 HTML 会 Set-Cookie 重置登录态致提交 401）；`m` 参数是 `/api/match/7`（404）hook 遗留可忽略；末页 UA=yuanrenxue | `cases/yuanrenxue-match7-dynamic-font.md` | A 纯算还原（内容还原型，Step 2 豁免） | 2026-08-24 |
+| 9 | 动态 Cookie m（RSA+循环前缀） | 挑战 JS 含 `decrypt(ts)` 循环 N 次（N=2~5 随机）→ `m = prefix + encodeURIComponent(RSA_PKCS1_v1.5(ts)) + 'r'` 走 cookie；udc.js **定期更新**（公钥随之变，必须二进制抓取最新版，文本解码会损坏文件）；signer **禁止缓存 RSA**（缓存版 8/8 失败，无缓存模拟浏览器循环加密稳定通过）；数据**绑定 sessionid**（固定 session → 答案 27848571 不变）；sessionid 由 API 响应 set-cookie 下发；提交有随机拒绝需重试（≤8 次）；末页 UA=yuanrenxue | `cases/yuanrenxue-match9-dynamic-cookie2.md` | B vm 沙箱补环境（纯协议，无缓存循环加密） | 2026-08-25 |
 
 ## 用法
 

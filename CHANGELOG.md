@@ -12,6 +12,20 @@
 - `capture_ruyitrace_log.js` 新增 `--cookie`/`--cookie-domain`：自动 trace 启动前把预置 Cookie 写入 trace profile 的 `cookies.sqlite`（firefox 未启动时经 `node:sqlite` 注入，Firefox 116+ moz_cookies schema，幂等按唯一约束覆盖）；需预置会话的 trace 场景不用再靠手动登录。`--input` 手动导入忽略 cookie；`node:sqlite` 不可用（Node<22.5）时优雅降级为告警并继续，可手动登录兜底。
 - 自定义执行 JS 触发目标请求（如自动点击滑动）未落地：RuyiTrace 走 spawn 无页面驱动，自动合成事件（isTrusted=false）可能被风控识别并污染"非自动请求"取证真实性，维持用户手动交互以保全证据。
 
+## 2.3.55 - 2026-08-25
+
+### 变更（新增猿人学第 9 题案例：动态 Cookie m——RSA(ts)+循环前缀 纯协议还原）
+
+- **新增案例 `cases/yuanrenxue-match9-dynamic-cookie2.md`（+match-index 表 +index.json 登记）**：
+  挑战 JS eval 后设置 cookie `m = prefix + encodeURIComponent(RSA_PKCS1_v1.5(ts)) + 'r'`（prefix=循环次数 2~5 随机，
+  明文=裸 ts）；B 路径 vm 沙箱补环境：Node vm 原样执行 udc.js + 挑战代码生成 m，curl_cffi 提交验证后直接拉 5 页。
+  固定 sessionid 绑定数据（答案 27848571 不变）。
+- **沉淀三个隐蔽坑（均曾导致纯协议长期失败）**：① udc.js 定期更新 → 公钥过期 m 必失败，必须每次运行**二进制抓取**最新版；
+  ② udc.js 用 `decode('utf-8', errors='ignore')` 下载会**丢字节损坏文件**（md5 变化难排查），全程二进制处理；
+  ③ signer **禁止缓存 RSA**（循环 N 次 decrypt 每次真实加密取最后一次；缓存复用 1 次加密实测 8/8 失败，无缓存稳定通过）。
+  另含 jsjiami v5 覆盖 console.log（Node 输出用 process.stdout.write）、数据绑定 sessionid 而非"数据周期重置"、
+  sessionid 由 API 响应 set-cookie 下发、提交随机拒绝需重试（≤8 次）等经验。
+
 ## 2.3.54 - 2026-08-23
 
 ### 变更（吸纳拼多多 anti_content 实战：风控分层定位协议 + 环境检测对齐探针法）
