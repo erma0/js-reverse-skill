@@ -90,6 +90,11 @@ XHR Hook 的安装顺序决定能否截获最终 URL——若 JSVMP 先加载并
 ### 21. 解析顺序/过滤不确定时，用页面渲染 DOM 做 ground truth
 当纯协议解析结果不确定（如图片数字的**顺序**、干扰图**过滤**、**识别**是否正确），不要盲目提交答案。用 ruyipage 打开页面（如需登录态就注入 cookie），**同一时刻**做两件事：抓接口响应原始数据 + 从 DOM 提取渲染位置（`getBoundingClientRect` 的 x/y = 最终显示位置）。对比「协议解析结果」vs「DOM 实际显示顺序」，不一致就 dump 每张图的 index/left/x 反推排序规律，修正协议逻辑，一致后再提交做最终业务验证。**反例**：不验证就提交，首次 wrong 才定位到"HTML 顺序 ≠ 渲染顺序"。这比盲提交高效，且能逼出 CSS 布局参与的排序规则（如雪碧图 `inline-flex` + `width` + `left` 偏移 → 排序键 = `有效图序号 + left/宽度`）。见 `references/rendering/image-content-reversal.md`。
 
+## 十、黑盒执行语义
+
+### 22. 黑盒执行加密函数禁止缓存复用（挑战循环语义）
+挑战代码常循环多次调用同一加密函数（如 `decrypt(ts)` 循环 N 次、N=2~5 随机、取最后一次结果），RSA 等算法每次真实加密带随机 padding、输出不同。把 N 次循环"优化"成缓存 1 次结果复用 = 改变挑战代码的实际执行语义 → 服务端全量拒绝（实测缓存版 8/8 失败，无缓存版稳定通过）。服务端校验的是**挑战代码语义**，不是"结果是否正确"，任何"性能优化"改变语义都会失败。**反例**：为性能缓存复用 RSA 结果，签名格式全对但全被拒，排查时误归因到算法/公钥。注意事项：循环次数、比较运算符等"常量"也可能是随机化的，必须原样执行挑战代码获取，不能静态提取数字（match9 的 prefix=循环次数 2~5 随机）。
+
 ## 相关案例
 
 | 案例文件 | 关联点 |
@@ -103,3 +108,4 @@ XHR Hook 的安装顺序决定能否截获最终 URL——若 JSVMP 先加载并
 | `cases/yidun-intellisense-vm-env.md` | 规则 20 实战验证（成功样本链路字段核对） |
 | `cases/yuanrenxue-match4-sprite-pixelsort.md` | 规则 21 + 图片像素判定（base64 唯一 ≠ 像素唯一）实战验证 |
 | `cases/yuanrenxue-match6-aarcsa-honeymoon-risk.md` | 会话状态类风控（蜜月期/频率/惩罚层）+ 反模式 13/14/15 实战验证 |
+| `cases/yuanrenxue-match9-dynamic-cookie2.md` | 规则 22 实战验证（RSA 循环加密禁缓存）+ 黑盒 SDK 定期更新（二进制抓取）+ 数据绑定 session 基线 |

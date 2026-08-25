@@ -338,6 +338,16 @@ try {
 })();
 ```
 
+## 沙箱执行侧输出劫持
+
+混淆/反调试代码（如 jsjiami v5）可能主动**覆写 console 方法**（`console.log = noop` 或直接清空），作为反调试手段之一。浏览器里表现为 DevTools 无输出；**Node vm 沙箱里执行后同样生效**——挑战代码跑完 exit 0 但 `console.log(m)` 输出为空，极易误判"代码没执行/结果为空"（猿人学 match9 实测）。
+
+识别与应对：
+
+- 特征：沙箱执行无报错、无输出，但代码路径实际已跑。先插 `process.stdout.write('MARK\n')` 验证代码是否执行到，区分"没执行"与"输出被劫持"。
+- 调试输出一律用 `process.stdout.write(...)`（或写入文件），不依赖 console。
+- 需要保留 console 时，在挑战代码加载前保存原始引用（沙箱内先 `const _log = console.log` 再 eval 挑战代码），或加载后检查 `console.log === original` 是否被覆写。
+
 ## 反调试识别清单
 
 在分析新目标时，先快速识别是否存在反调试：
@@ -355,5 +365,6 @@ try {
 | Selenium 检测 | `$cdc_` / `__webdriver_script_fn` / `_phantom` | 浏览器自动化 |
 | defineProperty 篡改 | `Object.defineProperty` 被覆写 | Hook 注入 |
 | Proxy 检测 | `new Proxy` try/catch | Proxy Hook |
+| console 方法覆写 | 混淆代码内 `console.log = noop` / 清空 console | Node 沙箱调试输出（用 process.stdout.write） |
 
 识别到反调试后，先在 `case/notes/` 记录检测类型和触发条件，再按对应绕过方案处理。绕过脚本作为临时 Hook，调用栈确认后立即清理或归档。

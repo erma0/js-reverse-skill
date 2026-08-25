@@ -12,6 +12,17 @@
 - `capture_ruyitrace_log.js` 新增 `--cookie`/`--cookie-domain`：自动 trace 启动前把预置 Cookie 写入 trace profile 的 `cookies.sqlite`（firefox 未启动时经 `node:sqlite` 注入，Firefox 116+ moz_cookies schema，幂等按唯一约束覆盖）；需预置会话的 trace 场景不用再靠手动登录。`--input` 手动导入忽略 cookie；`node:sqlite` 不可用（Node<22.5）时优雅降级为告警并继续，可手动登录兜底。
 - 自定义执行 JS 触发目标请求（如自动点击滑动）未落地：RuyiTrace 走 spawn 无页面驱动，自动合成事件（isTrusted=false）可能被风控识别并污染"非自动请求"取证真实性，维持用户手动交互以保全证据。
 
+## 2.3.56 - 2026-08-25
+
+### 变更（回流 match9 增量经验：黑盒 SDK 保鲜 / 禁缓存 / session 基线 / 输出劫持）
+
+- **`references/network/dynamic-resource.md` 新增「黑盒加密 SDK 定期更新」专节**：udc.js 类挑战 SDK 公钥/密钥随版本轮换，旧副本"解析全对但请求全拒"（服务端解不开密文，错误与签名错误混淆难排查）；纪律 = 每次运行二进制抓取最新版 + 全程二进制处理（`decode('utf-8', errors='ignore')` 会丢字节损坏文件、md5 漂移难定位）。
+- **`references/workflow/experience-rules.md` 新增规则 22「黑盒执行加密函数禁止缓存复用」**：挑战代码循环 N 次真实加密取最后一次（RSA 随机 padding、输出不同），缓存复用 1 次 = 改变挑战代码语义 → 服务端全量拒绝（实测缓存版 8/8 失败，无缓存稳定通过）；循环次数/比较运算符等"常量"也可能随机化，必须原样执行挑战代码获取。
+- **`references/network/ip-risk-control.md` 会话状态类风控新增第五类「数据绑定会话基线」**：答题类数据差异先固定 session 重放验证（数据恒定 = 绑定会话），别误判"数据周期重置/IP 限流"；会话 cookie 可能由 API 响应 set-cookie 下发而非页面。
+- **`references/hooks/anti-debug.md` 新增「沙箱执行侧输出劫持」**：jsjiami v5 等反调试覆写 console.log → Node vm 沙箱 exit 0 但输出为空，误判"没执行/结果为空"；调试输出一律 process.stdout.write，识别清单补 console 覆写行。
+- **`references/workflow/common-pitfalls.md` 新增反模式 19**：数据差异未先验 session 基线 → 误判"平台数据周期重置/IP 限流"（带正确做法与判定测试）。
+- match-index 相关参考补 `dynamic-resource.md` / `anti-debug.md` 指针，标注 match9 对应经验。
+
 ## 2.3.55 - 2026-08-25
 
 ### 变更（新增猿人学第 9 题案例：动态 Cookie m——RSA(ts)+循环前缀 纯协议还原）

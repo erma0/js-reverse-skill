@@ -23,5 +23,8 @@
 - `cases/_template.md`：新增案例骨架。
 - `references/rendering/image-content-reversal.md`：图片型内容反爬通用方法（match/4 核心）。
 - `references/rendering/font-anti-crawl.md`：字体反爬通用方法（match/7 核心：内嵌形态识别、字形指纹法、ground truth 验证阶梯）。
-- `references/network/ip-risk-control.md`：会话状态类风控识别专节（蜜月期/惩罚计数，match/5/6 实测）。
-- `references/workflow/experience-rules.md`：规则 21（DOM ground truth）+ 规则 10（签名哈希常量篡改降级信号）。
+- `references/network/ip-risk-control.md`：会话状态类风控识别专节（蜜月期/惩罚计数/数据绑定 session 基线，match/5/6/9 实测）。
+- `references/network/dynamic-resource.md`：黑盒加密 SDK 定期更新专节（公钥随版本轮换 + 二进制抓取纪律，match/9 核心）。
+- `references/hooks/anti-debug.md`：沙箱执行侧输出劫持（jsjiami 覆写 console.log，match/9 实测）。
+- `references/workflow/experience-rules.md`：规则 21（DOM ground truth）+ 规则 10（签名哈希常量篡改降级信号）+ 规则 22（黑盒执行禁止缓存复用）。
+- `references/workflow/common-pitfalls.md`：反模式 19（数据差异未先验 session 基线）。
