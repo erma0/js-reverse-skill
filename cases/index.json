@@ -262,6 +262,32 @@
       "verifiedAt": "2026-08-25"
     },
     {
+      "title": "瑞数 v3 变种 + 重放攻击对抗（猿人学第10题）—— 反例案例",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match10",
+        "瑞数 v3",
+        "rs.js",
+        "api2/10",
+        "$_ts 字符串表",
+        "代码组装器",
+        "重放攻击对抗",
+        "obfuscator.io 控制流平坦化",
+        "jsjiami v6",
+        "meta challenge",
+        "offset 动态随机数",
+        "Function debugger 循环",
+        "eval.toString 检测",
+        "m 参数 RSA 分块",
+        "反例案例"
+      ],
+      "strategy": "⚠️ 反例：违规用 ruyipage 浏览器黑盒取数（应走 B vm 沙箱补环境 + 对齐探针法，未完成）。技术指纹与可验证事实可作 CASE_LOOKUP 参考：rs.js + api2/10 + 内联组装链 + offset 动态随机数 + meta challenge 拼装 m；m 由瑞数 hook XHR.open 自动注入，实时生成绑定 page；数据绑定 sessionid；末页 UA=yuanrenxue；提交接口表单编码",
+      "file": "yuanrenxue-match10-ruishu3-replay-defense.md",
+      "verifiedAt": "2026-08-25"
+    },
+    {
       "title": "猿人学 match 题号速查索引",
       "domains": [
         "match.yuanrenxue.cn",

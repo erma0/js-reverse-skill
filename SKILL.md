@@ -163,6 +163,8 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 
 退出码 0（Step 2 已具备且目标 writer 覆盖满足）才可进入 CASE_LOOKUP；NDJSON 已产出但 writer 信号未命中时，状态是“Step 2 已具备、目标链路覆盖不足”，进入 TRACE_RETRY，不得写成“没有 trace”。详见 4.2 节「TRACE_CAPTURE 出口门禁复检」。
 
+**阶段动作边界（硬约束）**：状态机每个节点只允许该节点的取证/分析动作，**前置阶段不得发起外部重放/对照实验**。重放实验（判断参数可重放性、绑定关系、UA/cookie/TLS 因素）属 **DIAGNOSE** 范畴，TRACE_CAPTURE / CASE_LOOKUP / EXTERNAL_LOOKUP / IDENTIFY / TRACE_ANALYZE 阶段一律不得向目标接口发起重放请求——这些阶段只做取证（forensic_ruyipage.py / capture_ruyitrace_log.js）、本地证据分析（import_ruyitrace_log.js / search_trace.js / search_js.js）和案例/网络检索。需要判断「m 是否可重放/绑定 page/绑定 UA」时，先完成 TRACE_ANALYZE 定位 builder/writer，进入 IMPLEMENT 写出实现后再到 REAL_VERIFY/DIAGNOSE 做对照实验。前置阶段发起重放会：①消耗会话状态/触发惩罚期污染后续取证；②在签名链未定位时归因错误（match10 实测：CASE_LOOKUP 前重放 m 全部 400，误判为 TLS/cookie 问题，实际是 sessionid 被服务端重置 + 未做 session 基线验证）。
+
 激活后立即建立以下 11 项 TODO 并随状态推进勾选：
 
 1. INTENT_CONFIRM
@@ -298,16 +300,12 @@ node scripts/write_stage_report.js --case-dir <project-root> --stage <阶段> --
 
 **阶段报告默认不生成，仅在以下场景按需落盘**：多轮复杂补环境 / 跨会话续接风险、上下文防耗尽检查点触发、或用户明确要求。关键结论随节点落盘（IDENTIFY 结论、WASM 黑盒跑通、body 结构确认、实现方案选定等）不受默认省略限制，必须写入 `case/阶段报告/`；最小报告至少含当前状态、已证实事实、缺失证据、下一步输入。
 
-**进入补环境前的证据前置（硬约束）**：走路径 B/C/D（最小 JS 沙箱、WASM、环境伪装）且需要提供或补齐浏览器对象时，必须先基于 RuyiTrace NDJSON 产出以下两份文件，禁止先根据 Node.js 报错盲补——盲补会导致十几轮「加载→崩→猜→再加载」的空转循环：
-- `notes/entry-chain.md`：入口函数 → 请求链 → 关键 `stack.file:line:col`；其中 TRACE_ANALYZE 已定位的 builder/writer 即 IMPLEMENT 第一实现目标。
-- `notes/missing-env-priority.md`：用 `scripts/analyze_trace.js --summary` 从 NDJSON 抽取的 SDK 实际读取环境清单（含 `api`、`stack.file`、`line`、`col`、环境模块、补齐优先级和「RuyiTrace 证据 / Node trace 补充 / 推断」标记）。黑盒执行无法逐项精确复现时，该文件至少列出已观测的环境读取/挂载点，并标注「黑盒执行，不逐项精确复现」；不得以黑盒为由跳过。
-两文件缺一不得开始补环境；产出后必须过门禁脚本复核，退出码非 0 同样不得开始补环境：
+**IMPLEMENT 准入三件套（不可跳过）**：进入 IMPLEMENT 前必须按序完成，任一缺失停在 TRACE_ANALYZE。**禁止先根据 Node.js 报错盲补——盲补会导致十几轮「加载→崩→猜→再加载」的空转循环**：
+1. **证据前置**：走路径 B/C/D（最小 JS 沙箱、WASM、环境伪装）且需补浏览器对象时，先基于 RuyiTrace NDJSON 产出 `notes/entry-chain.md`（入口函数 → 请求链 → 关键 `stack.file:line:col`，TRACE_ANALYZE 已定位的 builder/writer 即 IMPLEMENT 第一实现目标）与 `notes/missing-env-priority.md`（用 `scripts/analyze_trace.js --summary` 从 NDJSON 抽取的 SDK 实际读取环境清单，含 `api`、`stack.file`、`line`、`col`、环境模块、补齐优先级和「RuyiTrace 证据 / Node trace 补充 / 推断」标记；黑盒执行无法逐项精确复现时至少列出已观测的环境读取/挂载点并标注「黑盒执行，不逐项精确复现」）。两文件缺一不得开始补环境。
+2. **门禁脚本复核**：`node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` 退出码非 0 不得开始补环境（详见 `references/env/env-debug-loop.md` 的「RuyiTrace 优先诊断门禁」）。
+3. **Step 2 前置**：`node scripts/check_trace_gate.js` 退出码 0（Step 2 已具备且目标 writer 覆盖满足）。Step 2 缺失不得进入 IMPLEMENT，例外见下方「IMPLEMENT 硬前置条件」。
 
-```powershell
-node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown
-```
-
-详见 `references/env/env-debug-loop.md` 的「RuyiTrace 优先诊断门禁」。
+**补环境死循环诊断（硬约束）**：vm 沙箱补环境遇死循环/空转/无输出时，**禁止用「插桩 while(1)」定位**（破坏字符串字面量、破坏 native 检测、低效）——必须用 Proxy 探测 window 缺失属性访问 + `vm.Script(...).runInContext(ctx, {timeout})` 定位卡点，按缺失清单补齐（反模式 16）。典型卡点：XHR 静态属性缺失（如 `XMLHttpRequest.DONE`）导致算法静默退化、`Function.prototype.toString` 暴露 jsdom 实现、反调试 `Function("debugger")` 循环。
 
 **上下文防耗尽检查点（硬约束）**：TRACE_ANALYZE / IMPLEMENT / REAL_VERIFY 任一阶段消耗大量步骤（20+ 步未推进）或上下文接近耗尽时，按固定动作序列执行：①回看上条两份文件是否已覆盖当前崩溃点——未覆盖先补全再继续；②已覆盖仍打转 → 落阶段报告（当前状态、已证实事实、缺失证据、下一步输入）；③落报告后仍无新进展 → 停止实验，向用户输出卡点与方向选项（继续攻坚 / 换路径 / 用户补材料），不得在无进展下继续消耗步骤。判定标准：trace 已定位到关键资源/入口，或当前节点已消耗 20+ 步仍未推进（TRACE_ANALYZE 未进 IMPLEMENT、IMPLEMENT 黑盒调试打转、REAL_VERIFY 反复排查未定位根因）。「想问用户 vs 再试一轮」的摇摆本身就是在消耗步骤——触发本检查点后摇摆超过 2 轮即视为已触发，必须执行上述序列。**纯思考的决策循环同样触发**：同一决策（方案/库选择、是否执行、档位判定）重新权衡 ≥2 次、或重复查询已查过的索引/重新判断已有结论，即视为已触发——取首个决策立即执行，由验证结果而非思考内再确认判定对错；连续两段思考之间没有任何工具调用的，说明正在打转，立即执行上述序列。**收尾保底**：无论预算消耗到什么程度，进入 Phase 5 收尾时交付物清单不得缩水——`最终项目总结.md`、`经验沉淀-<站点>.md`、`验证记录.json` 与 `check_final_artifact.js` 门禁一项不可省（决策循环烧掉预算后只写总结就收场 = 任务未完成，match7 实证教训）。
 
@@ -331,6 +329,8 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 ## 7. IDENTIFY
 
 先比较至少两组请求（区分计数器递增与纯随机存疑时补第三组），把字段分为固定值、时间值、随机值、会话值、服务端下发值、加密值。对每个目标参数建立 `source → entry → builder → writer` 链。
+
+**数据类题先验 session 基线（硬约束）**：接口响应是数据列表（答题/榜单/列表类）时，IDENTIFY 阶段必须先做 session 基线验证——固定 sessionid 重放同一请求两次，数据恒定 ⇒ 绑定会话（后续请求固定复用该 session）；数据变化 ⇒ 不绑定会话。未做此验证不得归因"平台数据周期重置/IP 限流/风控"（反模式 19）。常见陷阱：①服务端在页面加载或 API 响应时 Set-Cookie 重置 sessionid（取证注入的登录态被覆盖）；②数据绑定 sessionid 但 sessionid 由 API 响应下发而非页面；③匿名 session 每次数据不同 ≠ 平台重置。同站案例命中时把"数据绑定 session 基线"作为必检项（match-index 已标注的题号尤其要查）。
 
 下表为 T1 识别信号路由（识别指纹 → 初始路径；识别≠协议复现，协议细节以本 case 证据与厂商知识库为准）：
 
@@ -404,6 +404,8 @@ E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定�
 ## 10. REAL_VERIFY
 
 默认验证是交付必要条件，不是可选演示。除非用户明确 sign-only，否则必须用最终纯协议入口向真实 API 发请求。只读/验签请求默认真实执行；有业务副作用的写请求执行前先宣布目标 URL、方法、次数和预期影响，随后继续。
+
+**写请求格式取证（硬约束）**：提交/写入接口的请求格式（Content-Type、body 编码方式、字段名）必须从页面源码（`case/forensic/document.html` 的 form/submit 逻辑）或 capture.json 的真实成功样本取证，**禁止猜测**。常见陷阱：①页面用 jQuery `$.ajax({data: {answer: x}})` 默认表单编码（`application/x-www-form-urlencoded`），AI 误用 `application/json`；②CSRF token 字段名/位置因站点而异；③提交接口路径与数据接口不同域。写请求前必须列出「Content-Type + body 构造依据」并引用 capture/document.html 具体行号，不得凭"通常用 JSON"发起请求（match10 实测：JSON 提交持续 wrong answer，改表单编码即 success）。
 
 进入真实请求前先完成离线回归：把取证阶段抓到的真实样本（同输入参数 + 浏览器侧期望输出）固化为 `case/fixtures/*.fixture.json`，用本地入口以同样输入生成实际输出，逐字段过门禁比对；任一字段不一致先回 IMPLEMENT 排查，不得带着已知偏差发起真实请求：
 

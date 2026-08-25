@@ -306,11 +306,11 @@
 
 **正确做法**：
 1. 取证持续 4xx：先 `forensic_ruyipage.py --ua` 排除 UA 检测；无效则按 `references/env/env-detect-bypass.md` 内核级差异检测采样定位；定位到内核级检测 → `BLOCKED_FORENSIC` 对齐用户
-2. 补环境死循环：`vm.Script(...).runInContext(ctx, {timeout})` + Proxy 探测 window 缺失属性访问（探测模式），按缺失清单补齐（重点排查 XHR 等静态属性缺失导致的算法静默退化，见 `cases/modified-md5-xhr-done-yuanrenxue.md`），不加大超时硬等
+2. 补环境死循环：`vm.Script(...).runInContext(ctx, {timeout})` + Proxy 探测 window 缺失属性访问（探测模式），按缺失清单补齐（重点排查 XHR 等静态属性缺失导致的算法静默退化，见 `cases/modified-md5-xhr-done-yuanrenxue.md`），不加大超时硬等。**禁止用「插桩 while(1)/for 定位空转循环」**——会破坏字符串字面量、破坏 native 检测、低效且定位不准（match10 实测：插桩 while(1) 5 个控制流循环都进入但卡点定位失败，改 Proxy 探测才能定位缺失属性）；正确诊断顺序是「vm timeout 定位是否纯 CPU 死循环 → Proxy 探测定缺失属性 → 按缺失清单补齐」
 3. 触发 20+ 步止损线：落阶段报告 + 向用户输出卡点与方向选项；「问 vs 不问」摇摆超过 2 轮即视为已触发，必须执行 SKILL.md 4.4 检查点动作序列
 4. 取证探针：优先标准脚本参数（`--ua` / `--cookie` / `--click`）；确需手写时方法名先内省（`dir(page)`），禁止按 Playwright API 命名习惯猜
 
-**判定测试**：翻执行记录——死循环/打转期间是否做过至少一次根因诊断（Proxy 探测 / timeout 定位 / 缺失属性清单）？跳过 Step 2 进补环境前是否有用户确认或检测证据支撑的显式降级声明？「问用户 vs 再试一轮」摇摆是否超过 2 轮？任一为是即违反本条。
+**判定测试**：翻执行记录——死循环/打转期间是否做过至少一次根因诊断（Proxy 探测 / timeout 定位 / 缺失属性清单）？跳过 Step 2 进补环境前是否有用户确认或检测证据支撑的显式降级声明？「问用户 vs 再试一轮」摇摆是否超过 2 轮？用「插桩 while(1)」定位空转即违反本条。任一为是即违反本条。
 
 ## 反模式 17：方案已定却反复重新权衡——纯思考打转，零工具调用产出
 
@@ -373,9 +373,32 @@
 
 **判定测试**：翻执行记录——把"数据变化"归因到平台重置/风控前，是否先做了固定 session 重放实验？没有即违反本条。
 
+## 反模式 20：VM 沙箱补环境卡死后转投浏览器黑盒取数
+
+**实战案例**：猿人学第10题（match10，瑞数 v3 变种 + 重放攻击对抗）
+
+**AI 的操作**：vm 沙箱执行瑞数 rs.js + api2/10 + 内联脚本的组装链遇 W5/W3 空转，用「插桩 while(1)」定位失败（反模式 16）后，未走对齐探针法、未走 BLOCKED_FORENSIC 对齐用户，直接换策略「用 ruyipage 取证浏览器 hook eval 截获组装代码」→ hook 干扰瑞数执行 → 最终「决策：先用浏览器黑盒方式解出答案（ruyipage 让页面自然加载 5 页 + hook 收集数据）」，solve.py 用 ruyipage 直接取数当作交付。
+
+**AI 的辩护**："vm 路线卡在环境检测，成本太高，业界难题级；先用浏览器解出答案验证思路，再回头补纯协议。"
+
+**为什么不成立**：
+- 「vm 沙箱补环境卡死」是**本步骤**的问题，不是「纯协议不可行」的证据——反模式 5/16 已明确：补环境死循环先做根因诊断（Proxy 探测 + timeout 定位缺失属性），不诊断就盲换路径是滑坡
+- 瑞数 v3 环境检测项是有限集合（canvas/WebGL/WebRTC/navigator 等），对齐探针法（`references/env/env-detect-bypass.md`）可逐位 diff 测量，不是"需要完整复现浏览器"
+- 「先用浏览器解出答案」本身违反纯协议红线（§3）：以自动化浏览器完成反爬挑战、把浏览器抓到的数据当交付物。即使后续回头补纯协议，中途交付浏览器方案也违规
+- solve.py 用 ruyipage 取数会被 `check_final_artifact.js` 判不合格（浏览器自动化代码进 result/）；挪到 case/ 也算交付违规（反模式 11）
+- 实际根因不是"环境检测太难"，而是 AI 跳过 IMPLEMENT 准入三件套（未产 entry-chain.md/missing-env-priority.md、未过 check_env_prerequisites.js）直接写 vm 执行框架，盲补环境必然空转
+
+**正确做法**：
+1. vm 补环境空转：先过 IMPLEMENT 准入三件套（entry-chain.md + missing-env-priority.md + check_env_prerequisites.js），按 missing-env-priority 清单逐项补，不盲补
+2. 仍空转：vm.Script timeout 定位是否纯 CPU 死循环 → Proxy 探测 window 缺失属性 → 按缺失清单补齐（反模式 16）
+3. 定位到内核级检测（eval.toString/Error.stack 等，UA 覆盖无效）：按状态机 `BLOCKED_FORENSIC` 对齐用户（用户材料 / 确认降级），把路线选择权交还用户
+4. 不得转投浏览器内核取数方案：即使中途用浏览器验证思路，交付物必须是纯协议实现；浏览器脚本不得进 result/，挪到 case/ 也算交付违规
+
+**判定测试**：翻执行记录——vm 补环境卡死后是否做过根因诊断（Proxy 探测 / timeout / 缺失属性清单）？是否过 IMPLEMENT 准入三件套？交付物 final.js/final.py 是否纯协议（无 ruyipage/playwright/puppeteer 依赖）？任一为否即违反本条。
+
 ## 如何使用本文档
 
-1. **AI 激活 skill 后**：在 `CASE_LOOKUP` 状态简单扫视（至少看反模式 1-19 的标题）
+1. **AI 激活 skill 后**：在 `CASE_LOOKUP` 状态简单扫视（至少看反模式 1-20 的标题）
 2. **AI 在做决策时卡住**：回到本文档，看自己正在考虑的方向是不是反模式之一
 3. **AI 写代码写到一半意识到在滑向反模式**：立即停，按 `IMPLEMENT` 实现梯度推进
 4. **用户发现 AI 违反**：直接引用反模式编号质问 AI

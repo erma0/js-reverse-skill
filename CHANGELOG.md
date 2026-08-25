@@ -1,6 +1,16 @@
 # CHANGELOG
 
-## Unreleased
+## 2.3.58 - 2026-08-25
+
+### 变更（match10 复盘：状态机阶段动作边界 + IMPLEMENT 准入前置 + 写请求格式取证）
+
+- **SKILL.md §4 状态机新增「阶段动作边界（硬约束）」**：重放实验（判断参数可重放性、绑定关系、UA/cookie/TLS 因素）属 **DIAGNOSE** 范畴，TRACE_CAPTURE / CASE_LOOKUP / EXTERNAL_LOOKUP / IDENTIFY / TRACE_ANALYZE 阶段一律不得向目标接口发起重放请求——只做取证、本地证据分析与案例/网络检索。前置阶段发起重放会消耗会话状态/触发惩罚期污染后续取证，且在签名链未定位时归因错误（match10 实测：CASE_LOOKUP 前重放 m 全部 400，误判 TLS/cookie 问题，实际是 sessionid 被服务端重置 + 未做 session 基线验证）。
+- **SKILL.md §4.4 重构「IMPLEMENT 准入三件套」+ 新增「补环境死循环诊断」硬约束**：把原「进入补环境前的证据前置」长文重构为三件套清单（证据前置 + 门禁脚本复核 + Step 2 前置），门禁脚本显式列在节点入口（原埋在长文里 AI 易绕过——match10 实测未过 check_env_prerequisites.js 直接写 vm 执行框架盲补空转）。新增「补环境死循环诊断」：**禁止用「插桩 while(1)」定位空转**（破坏字符串字面量、破坏 native 检测、低效），必须用 vm.Script timeout + Proxy 探测 window 缺失属性定位卡点（反模式 16 强化）。
+- **SKILL.md §7 IDENTIFY 新增「数据类题先验 session 基线（硬约束）」**：接口响应是数据列表时，IDENTIFY 阶段必须先做 session 基线验证（固定 sessionid 重放两次，数据恒定 ⇒ 绑定会话）。未做此验证不得归因"平台数据周期重置/IP 限流/风控"（反模式 19 强化检查时机）。覆盖三类陷阱：服务端 Set-Cookie 重置 sessionid、sessionid 由 API 响应下发而非页面、匿名 session 数据不同 ≠ 平台重置。match10 实测：未先验 session 基线，多次重放失败后才意识到服务端重置 sessionid。
+- **SKILL.md §10 REAL_VERIFY 新增「写请求格式取证（硬约束）」**：提交/写入接口的请求格式（Content-Type、body 编码方式、字段名）必须从页面源码（document.html 的 form/submit 逻辑）或 capture.json 真实成功样本取证，**禁止猜测**。覆盖 jQuery `$.ajax({data})` 默认表单编码、CSRF token 字段名/位置因站点而异、提交接口与数据接口不同域等陷阱（match10 实测：JSON 提交持续 wrong answer，改表单编码即 success）。
+- **`references/workflow/common-pitfalls.md` 新增反模式 20「VM 沙箱补环境卡死后转投浏览器黑盒取数」**：match10 为主体案例。vm 补环境遇 W5/W3 空转，AI 未走对齐探针法、未走 BLOCKED_FORENSIC 对齐用户，直接用 ruyipage 取数当作交付（solve.py 违反纯协议红线 §3）。辩护"vm 卡在环境检测成本太高"不成立——补环境卡死是本步骤问题不是纯协议不可行证据，瑞数 v3 环境检测项是有限集合可逐位 diff。正确做法：先过 IMPLEMENT 准入三件套 + Proxy 探测根因诊断，定位到内核级检测走 BLOCKED_FORENSIC 对齐用户，不得转投浏览器内核方案。
+- **`references/workflow/common-pitfalls.md` 反模式 16 强化**：补环境死循环诊断明确「禁止用插桩 while(1) 定位空转」（match10 实测：5 个控制流循环都进入但卡点定位失败），正确顺序是「vm timeout 定位是否纯 CPU 死循环 → Proxy 探测定缺失属性 → 按缺失清单补齐」。判定测试补「用插桩 while(1) 定位空转即违反本条」。
+- **新增反例案例 `cases/yuanrenxue-match10-ruishu3-replay-defense.md`（+match-index 表 + index.json 登记）**：⚠️ 反例案例——解题方案违反纯协议红线（用 ruyipage 浏览器黑盒取数当作交付）。收录目的：①沉淀瑞数 v3 + 重放对抗的技术指纹（rs.js + api2/10 $_ts 字符串表 + 内联组装脚本「代码组装器」+ /api/10/offset 动态随机数 + meta challenge）与可验证事实（m 由瑞数 hook XHR.open 自动注入、实时生成绑定 page、数据绑定 sessionid、末页 UA=yuanrenxue、提交接口表单编码），供后续同站案例 CASE_LOOKUP 命中；②把 AI 执行走样的反模式固化进反模式 16/19/20。**不得作为"浏览器取数可接受"的先例引用**。
 
 ### 抓包稳定性与环境检测
 - `forensic_ruyipage.py` 在等待期间增量预取 JS/目标/动态 API body，断连收尾优先复用缓存；新增 `liveBodyPrefetch` 与实际动态 2xx 候选摘要，降低“只剩 partial-steps、正文未落盘”的丢证风险。
