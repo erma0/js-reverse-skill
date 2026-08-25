@@ -163,7 +163,7 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 
 退出码 0（Step 2 已具备且目标 writer 覆盖满足）才可进入 CASE_LOOKUP；NDJSON 已产出但 writer 信号未命中时，状态是“Step 2 已具备、目标链路覆盖不足”，进入 TRACE_RETRY，不得写成“没有 trace”。详见 4.2 节「TRACE_CAPTURE 出口门禁复检」。
 
-**阶段动作边界（硬约束）**：状态机每个节点只允许该节点的取证/分析动作，**前置阶段不得发起外部重放/对照实验**。重放实验（判断参数可重放性、绑定关系、UA/cookie/TLS 因素）属 **DIAGNOSE** 范畴，TRACE_CAPTURE / CASE_LOOKUP / EXTERNAL_LOOKUP / IDENTIFY / TRACE_ANALYZE 阶段一律不得向目标接口发起重放请求——这些阶段只做取证（forensic_ruyipage.py / capture_ruyitrace_log.js）、本地证据分析（import_ruyitrace_log.js / search_trace.js / search_js.js）和案例/网络检索。需要判断「m 是否可重放/绑定 page/绑定 UA」时，先完成 TRACE_ANALYZE 定位 builder/writer，进入 IMPLEMENT 写出实现后再到 REAL_VERIFY/DIAGNOSE 做对照实验。前置阶段发起重放会：①消耗会话状态/触发惩罚期污染后续取证；②在签名链未定位时归因错误（match10 实测：CASE_LOOKUP 前重放 m 全部 400，误判为 TLS/cookie 问题，实际是 sessionid 被服务端重置 + 未做 session 基线验证）。
+**阶段动作边界（硬约束）**：状态机每个节点只允许该节点的取证/分析动作，**前置阶段不得发起外部重放/对照实验**。重放实验（判断参数可重放性、绑定关系、UA/cookie/TLS 因素）属 **DIAGNOSE** 范畴，TRACE_CAPTURE / CASE_LOOKUP / EXTERNAL_LOOKUP / IDENTIFY / TRACE_ANALYZE 阶段一律不得向目标接口发起重放请求——这些阶段只做取证（forensic_ruyipage.py / capture_ruyitrace_log.js）、本地证据分析（import_ruyitrace_log.js / search_trace.js / search_js.js）和案例/网络检索。需要判断参数可重放性/绑定关系时，先完成 TRACE_ANALYZE 定位 builder/writer，进入 IMPLEMENT 写出实现后再到 REAL_VERIFY/DIAGNOSE 做对照实验。前置阶段发起重放会：①消耗会话状态/触发风控污染后续取证；②在签名链未定位时归因错误（把会话/cookie 层问题误判为签名或连接层问题，因缺乏对照基础）。
 
 激活后立即建立以下 11 项 TODO 并随状态推进勾选：
 
@@ -401,7 +401,7 @@ E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定�
 
 默认验证是交付必要条件，不是可选演示。除非用户明确 sign-only，否则必须用最终纯协议入口向真实 API 发请求。只读/验签请求默认真实执行；有业务副作用的写请求执行前先宣布目标 URL、方法、次数和预期影响，随后继续。
 
-**写请求格式取证（硬约束）**：提交/写入接口的请求格式（Content-Type、body 编码方式、字段名）必须从页面源码（`case/forensic/document.html` 的 form/submit 逻辑）或 capture.json 的真实成功样本取证，**禁止猜测**。常见陷阱：①页面用 jQuery `$.ajax({data: {answer: x}})` 默认表单编码（`application/x-www-form-urlencoded`），AI 误用 `application/json`；②CSRF token 字段名/位置因站点而异；③提交接口路径与数据接口不同域。写请求前必须列出「Content-Type + body 构造依据」并引用 capture/document.html 具体行号，不得凭"通常用 JSON"发起请求（match10 实测：JSON 提交持续 wrong answer，改表单编码即 success）。
+**写请求格式取证（硬约束）**：提交/写入接口的请求格式（Content-Type、body 编码方式、字段名）必须从页面源码（`case/forensic/document.html` 的 form/submit 逻辑）或 capture.json 的真实成功样本取证，**禁止猜测**。常见陷阱：①页面用 jQuery `$.ajax({data: {...}})` 默认表单编码（`application/x-www-form-urlencoded`），AI 误用 `application/json`；②CSRF token 字段名/位置因站点而异；③提交接口路径与数据接口不同域。写请求前必须列出「Content-Type + body 构造依据」并引用 capture/document.html 具体行号，不得凭"通常用 JSON"发起请求（实战：JSON 提交持续被服务端拒，改表单编码即通过）。
 
 进入真实请求前先完成离线回归：把取证阶段抓到的真实样本（同输入参数 + 浏览器侧期望输出）固化为 `case/fixtures/*.fixture.json`，用本地入口以同样输入生成实际输出，逐字段过门禁比对；任一字段不一致先回 IMPLEMENT 排查，不得带着已知偏差发起真实请求：
 

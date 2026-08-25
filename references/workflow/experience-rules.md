@@ -111,4 +111,4 @@ XHR Hook 的安装顺序决定能否截获最终 URL——若 JSVMP 先加载并
 | `cases/yidun-intellisense-vm-env.md` | 规则 20 实战验证（成功样本链路字段核对） |
 | `cases/yuanrenxue-match4-sprite-pixelsort.md` | 规则 21 + 图片像素判定（base64 唯一 ≠ 像素唯一）实战验证 |
 | `cases/yuanrenxue-match6-aarcsa-honeymoon-risk.md` | 会话状态类风控（蜜月期/频率/惩罚层）+ 反模式 13/14/15 实战验证 |
-| `cases/yuanrenxue-match9-dynamic-cookie2.md` | 规则 22 实战验证（RSA 循环加密禁缓存）+ 规则 23 实战验证（随机边缘拒绝需大样本判别）+ 数据绑定 session 基线（反模式 19）+ 黑盒 SDK 定期更新（dynamic-resource.md 专节） |
+| `cases/yuanrenxue-match9-dynamic-cookie2.md` | 规则 22 实战验证（RSA 循环加密禁缓存）+ 规则 23 实战验证（随机边缘拒绝需大样本判别）+ 数据绑定会话（反模式 19）+ 黑盒 SDK 定期更新（dynamic-resource.md 专节） |
