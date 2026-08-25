@@ -31,10 +31,10 @@
 > 这些坑是 AI 执行走样的反模式，已固化进 `common-pitfalls.md`。
 
 1. **坑：CASE_LOOKUP 前发起重放实验** → 在 TRACE_ANALYZE 之前提取 m 样本做重放（判断可重放性/绑定关系），消耗会话状态 + 在签名链未定位时归因错误（误判 TLS/cookie 问题）。正确做法：重放实验属 DIAGNOSE 范畴，前置阶段只做取证与本地分析，进入 IMPLEMENT 写出实现后再做对照实验（SKILL.md §4 阶段动作边界）。
-2. **坑：数据绑定 sessionid 未先验** → 多次重放失败后才意识到服务端在页面加载时重置 sessionid，匿名 session 数据与用户 session 数据不同。正确做法：IDENTIFY 阶段先做 session 基线验证（固定 sessionid 重放两次，数据恒定 ⇒ 绑定会话），同站案例 match9 已标注此特征应作为必检项（SKILL.md §7 + 反模式 19）。
+2. **坑：数据绑定 sessionid 未先验** → 多次重放失败后才意识到服务端在页面加载时重置 sessionid，匿名 session 数据与用户 session 数据不同。正确做法：数据差异时先做 session 基线验证（固定 sessionid 重放两次，数据恒定 ⇒ 绑定会话），归因"平台重置/IP 限流"前必须先排除 session 因素（反模式 19）；同站案例 match9 已标注此特征，同站新题应作为数据异常排查的首选假设。
 3. **坑：提交接口 Content-Type 猜错** → 用 `application/json` 提交答案持续 wrong answer，实际页面 jQuery `$.ajax({data:{answer:x}})` 默认表单编码。正确做法：写请求 Content-Type 必须从页面源码或 capture 取证，禁止猜测（SKILL.md §10 写请求格式取证）。
 4. **坑：vm 补环境用「插桩 while(1)」定位空转** → 5 个控制流循环都进入但卡点定位失败，破坏字符串字面量与 native 检测。正确做法：vm.Script timeout 定位是否纯 CPU 死循环 → Proxy 探测 window 缺失属性 → 按缺失清单补齐（反模式 16）。
-5. **坑：vm 卡死后转投浏览器黑盒取数** → 未走对齐探针法、未走 BLOCKED_FORENSIC 对齐用户，直接用 ruyipage 取数当作交付，违反纯协议红线。正确做法：vm 补环境卡死先过 IMPLEMENT 准入三件套 + Proxy 探测根因诊断，定位到内核级检测走 BLOCKED_FORENSIC 对齐用户，不得转投浏览器内核方案（反模式 20）。
+5. **坑：vm 卡死后转投浏览器黑盒取数** → 未走对齐探针法、未走 BLOCKED_FORENSIC 对齐用户，直接用 ruyipage 取数当作交付，违反纯协议红线。正确做法：vm 补环境卡死先过 IMPLEMENT 准入三件套 + Proxy 探测根因诊断（反模式 16），定位到内核级检测走 BLOCKED_FORENSIC 对齐用户，不得转投浏览器内核方案（反模式 20）。
 6. **坑：跳过 IMPLEMENT 准入三件套** → 未产 entry-chain.md/missing-env-priority.md、未过 check_env_prerequisites.js 直接写 vm 执行框架，盲补环境必然空转。正确做法：进入 IMPLEMENT 前按序完成证据前置 + 门禁脚本复核 + Step 2 前置（SKILL.md §4.4 IMPLEMENT 准入三件套）。
 7. **坑：trace 只导入空壳 event 文件** → RuyiTrace 多进程文件，主日志在 `domtrace/` 目录（8MB），先导入了空壳 event 文件误判 trace 为空。正确做法：`import_ruyitrace_log.js --input` 传多个 domtrace 文件合并，或传目录下所有 `trace_process_*.ndjson`（SKILL.md §4.2 多进程合并）。
 8. **坑：hook eval 干扰瑞数执行** → add_preload_script hook eval 截获组装代码成功（43188 条记录），但 hook 干扰瑞数执行导致 token 未生成。正确做法：hook 干扰目标执行时改用 trace 法（无 hook）或 Proxy 监听式 hook 而非替换式 hook。

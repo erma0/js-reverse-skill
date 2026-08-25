@@ -305,8 +305,6 @@ node scripts/write_stage_report.js --case-dir <project-root> --stage <阶段> --
 2. **门禁脚本复核**：`node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` 退出码非 0 不得开始补环境（详见 `references/env/env-debug-loop.md` 的「RuyiTrace 优先诊断门禁」）。
 3. **Step 2 前置**：`node scripts/check_trace_gate.js` 退出码 0（Step 2 已具备且目标 writer 覆盖满足）。Step 2 缺失不得进入 IMPLEMENT，例外见下方「IMPLEMENT 硬前置条件」。
 
-**补环境死循环诊断（硬约束）**：vm 沙箱补环境遇死循环/空转/无输出时，**禁止用「插桩 while(1)」定位**（破坏字符串字面量、破坏 native 检测、低效）——必须用 Proxy 探测 window 缺失属性访问 + `vm.Script(...).runInContext(ctx, {timeout})` 定位卡点，按缺失清单补齐（反模式 16）。典型卡点：XHR 静态属性缺失（如 `XMLHttpRequest.DONE`）导致算法静默退化、`Function.prototype.toString` 暴露 jsdom 实现、反调试 `Function("debugger")` 循环。
-
 **上下文防耗尽检查点（硬约束）**：TRACE_ANALYZE / IMPLEMENT / REAL_VERIFY 任一阶段消耗大量步骤（20+ 步未推进）或上下文接近耗尽时，按固定动作序列执行：①回看上条两份文件是否已覆盖当前崩溃点——未覆盖先补全再继续；②已覆盖仍打转 → 落阶段报告（当前状态、已证实事实、缺失证据、下一步输入）；③落报告后仍无新进展 → 停止实验，向用户输出卡点与方向选项（继续攻坚 / 换路径 / 用户补材料），不得在无进展下继续消耗步骤。判定标准：trace 已定位到关键资源/入口，或当前节点已消耗 20+ 步仍未推进（TRACE_ANALYZE 未进 IMPLEMENT、IMPLEMENT 黑盒调试打转、REAL_VERIFY 反复排查未定位根因）。「想问用户 vs 再试一轮」的摇摆本身就是在消耗步骤——触发本检查点后摇摆超过 2 轮即视为已触发，必须执行上述序列。**纯思考的决策循环同样触发**：同一决策（方案/库选择、是否执行、档位判定）重新权衡 ≥2 次、或重复查询已查过的索引/重新判断已有结论，即视为已触发——取首个决策立即执行，由验证结果而非思考内再确认判定对错；连续两段思考之间没有任何工具调用的，说明正在打转，立即执行上述序列。**收尾保底**：无论预算消耗到什么程度，进入 Phase 5 收尾时交付物清单不得缩水——`最终项目总结.md`、`经验沉淀-<站点>.md`、`验证记录.json` 与 `check_final_artifact.js` 门禁一项不可省（决策循环烧掉预算后只写总结就收场 = 任务未完成，match7 实证教训）。
 
 **IMPLEMENT 硬前置条件**：必须满足「trace 质量达标（含目标信号命中）」或「用户明确确认轻量路径」。两条均不满足时停在 TRACE_ANALYZE，不得以 mock、猜测或实验性实现替代证据。EXTERNAL_LOOKUP 的假设若与本次 trace 定位的 builder/writer 冲突，以 trace 为准，禁止先去测未被 trace 证明的 SDK 导出接口。**Step 2 缺失（check_trace_gate.js 退出码 1）时不得进入 IMPLEMENT**：不得以 EXTERNAL_LOOKUP 网络方案、边界声明、同族算法替代或 mock 填补 Step 2 证据缺口；轻量路径豁免的前提是 Step 1 + Step 2 齐备（见 4.3），Step 2 未产出不构成豁免条件。例外共三个：①②均为用户显式确认的降级且 REAL_VERIFY 不可豁免、必须在经验沉淀与最终总结写明取证偏差——①状态机中的 MATERIALS_FALLBACK 节点（RuyiTrace 工具不可用且自动安装失败 + 用户材料经 check_evidence.js 校验通过），以「Node 直连真实接口、服务端响应反证」替代 Step 2；②BLOCKED_FORENSIC 节点用户确认降级（内核级检测使 RuyiTrace 无法触发目标路径，有检测证据且用户已知情），以 Step 1 网络证据 + 落盘 JS 源码分析替代 Step 2；③**内容还原型豁免（无需用户确认）**：请求侧参数全部为明文（page/pageSize/kw 等，无任何待还原的签名/token/指纹参数），难点在响应解密/内容还原（字体映射、图片拼装等），且 Step 1 已捕获完整响应证据——此时 Step 2（运行时 trace）无证据价值，可在 EVIDENCE_GATE 判定「只有 Step 1」时声明「Step 2 豁免：内容还原型，无运行时签名链路」后跳过 TRACE_CAPTURE 直接 CASE_LOOKUP，并在经验沉淀与最终总结写明判定依据（请求侧明文参数清单 + 响应自包含证据）。请求侧存在任何待还原参数的 case 不得使用本豁免。**AI 自行判定「trace 采集不到/太难」不构成降级理由**——没有用户确认的 Step 2 缺失一律停在状态机对应节点。
@@ -329,8 +327,6 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 ## 7. IDENTIFY
 
 先比较至少两组请求（区分计数器递增与纯随机存疑时补第三组），把字段分为固定值、时间值、随机值、会话值、服务端下发值、加密值。对每个目标参数建立 `source → entry → builder → writer` 链。
-
-**数据类题先验 session 基线（硬约束）**：接口响应是数据列表（答题/榜单/列表类）时，IDENTIFY 阶段必须先做 session 基线验证——固定 sessionid 重放同一请求两次，数据恒定 ⇒ 绑定会话（后续请求固定复用该 session）；数据变化 ⇒ 不绑定会话。未做此验证不得归因"平台数据周期重置/IP 限流/风控"（反模式 19）。常见陷阱：①服务端在页面加载或 API 响应时 Set-Cookie 重置 sessionid（取证注入的登录态被覆盖）；②数据绑定 sessionid 但 sessionid 由 API 响应下发而非页面；③匿名 session 每次数据不同 ≠ 平台重置。同站案例命中时把"数据绑定 session 基线"作为必检项（match-index 已标注的题号尤其要查）。
 
 下表为 T1 识别信号路由（识别指纹 → 初始路径；识别≠协议复现，协议细节以本 case 证据与厂商知识库为准）：
 
