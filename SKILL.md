@@ -369,6 +369,8 @@ node scripts/analyze_cookie_attribution.js --case-dir <project-root> [--cookie <
 
 **Windows 写临时脚本规范（探针/runner/补环境脚本一律遵守）**：优先用编辑工具直接写文件；必须用 PowerShell 时一律单引号 here-string `@'...'@`（内部 `$` 不插值）配合 `[IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))` 落盘。禁止双引号 here-string（`$` 插值破坏 JS 语法）、禁止 base64 编码绕路（多一轮转译仍会翻车）、禁止 `node -e` / `python -c` 内联长脚本。写完先跑一次语法检查（`node --check` / `py -3 -m py_compile`）再执行，避免把转义错误误判成目标 JS 的行为。
 
+**依赖 JS 版本校验（硬约束）**：被挑战代码引用的黑盒 SDK（如 udc.js 类"动态工具 JS"）可能**定期更新**（公钥/算法随版本变化），用旧副本实现会导致签名"格式全对但服务端全拒"且极难排查（match9 最耗时根因）。进入实现前校验关键依赖 JS 与站点当前版本一致（`curl -s <url> | md5sum` 对比本地副本）；抓取 JS **一律二进制**（`urlopen(url).read()` + `wb` 写回），**禁止** `decode('utf-8', errors='ignore')` 后文本写回——会静默丢字节损坏文件（md5 变化、无报错）。交付脚本对关键依赖内置"启动自动抓取 + hash 对比"。详见 `references/network/dynamic-resource.md` 专节。
+
 读取 NDJSON 的 API、时间、stack、文件、行列号和参数摘要，按调用频率与网络写入时间定位热路径。分析时按定位顺序使用：
 
 ```powershell

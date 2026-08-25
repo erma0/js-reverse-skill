@@ -12,6 +12,14 @@
 - `capture_ruyitrace_log.js` 新增 `--cookie`/`--cookie-domain`：自动 trace 启动前把预置 Cookie 写入 trace profile 的 `cookies.sqlite`（firefox 未启动时经 `node:sqlite` 注入，Firefox 116+ moz_cookies schema，幂等按唯一约束覆盖）；需预置会话的 trace 场景不用再靠手动登录。`--input` 手动导入忽略 cookie；`node:sqlite` 不可用（Node<22.5）时优雅降级为告警并继续，可手动登录兜底。
 - 自定义执行 JS 触发目标请求（如自动点击滑动）未落地：RuyiTrace 走 spawn 无页面驱动，自动合成事件（isTrusted=false）可能被风控识别并污染"非自动请求"取证真实性，维持用户手动交互以保全证据。
 
+## 2.3.57 - 2026-08-25
+
+### 变更（match9 复盘复查：补齐 2.3.56 未覆盖的"随机边缘拒绝"盲点）
+
+- **`references/workflow/experience-rules.md` 新增规则 23「提交结果时好时坏 → 先大样本统计判别随机拒绝 vs 固定条件，禁止盲试参数」**：随机边缘拒绝（10~50% 通过、失败与成功同挑战文案）易被误判为"ts 年龄时间窗口"并盲试 sleep/延迟参数（match9 实测第二大耗时点：盲试 1.0~2.5s 与精确控龄多轮，实际是随机边缘拒绝，vm m 50% vs 浏览器 eval m 100%）。应对：对照实验确认签名语义后停止调参，重试机制兜底（≤8 次、间隔 2s，50% 下 ≈99.6% 通过），单次失败不构成签名错误证据。
+- **SKILL.md §8 TRACE_ANALYZE 新增「依赖 JS 版本校验（硬约束）」**：把 2.3.56 已固化的 dynamic-resource.md 专节（黑盒 SDK 定期更新/二进制抓取纪律）提升为 SKILL.md 主线硬约束——进入实现前校验关键依赖 JS 与站点 hash 一致，抓取一律二进制；避免该最耗时根因（match9 第一大耗时点）在流程入口被忽略。
+- **`references/network/ip-risk-control.md` 会话状态类风控表新增「随机边缘拒绝」机制行**：大样本判别 + 重试兜底（指向规则 23）。
+
 ## 2.3.56 - 2026-08-25
 
 ### 变更（回流 match9 增量经验：黑盒 SDK 保鲜 / 禁缓存 / session 基线 / 输出劫持）
