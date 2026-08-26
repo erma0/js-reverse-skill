@@ -174,7 +174,7 @@ grep -c "userAgentData\|navigator\.connection\|getBattery\|window\.chrome\|perfo
 - **FORENSIC_CAPTURE**: `search_code(keyword="_SdkGlueInit")` 定位配置；`scripts(action='save')` 保存三件套（webmssdk.es5.js / bdms.js / sdk-glue.js）到 `case/js/`
 - **TRACE_CAPTURE**: 加载顺序 webmssdk → bdms → sdk-glue → `_SdkGlueInit`；签名在 XHR send 阶段追加
 - **TRACE_ANALYZE**: 用 trace 取证 `compare_env` + `evaluate_js` 分批采集真实环境，与 jsdom 逐项 diff，**确认需要补的环境项范围后再写补丁**
-- **IMPLEMENT**: jsdom 配置需 `resources:'usable'`；XHR Hook 必须在 SDK 加载前安装；`scanPrototypeChain` 的 `Object.prototype` 边界不能突破
+- **IMPLEMENT**: jsdom 必须离线（禁 `resources:'usable'`），改为自装完整 `XMLHttpRequest` 存根；XHR Hook 必须在 SDK 加载前安装；`scanPrototypeChain` 的 `Object.prototype` 边界不能突破
 - **REAL_VERIFY**: 连续 ≥5 次请求验证，200 + 空 body = 环境指纹不对不是算法错
 
 ## 原始定位路径（参考，不要跳过 Phase 直接照做）
@@ -379,7 +379,7 @@ function generateABogus(fullUrl, cookieStr) {
 | 8 | `JSON.stringify` / `JSON.parse` 的 toString 格式暴露 Node.js 环境 | JSVMP 生成 192 字符 a_bogus 但服务端返回 HTTP 200 + 空 body（2 字节）。签名格式正确但环境指纹哈希不匹配 | V8 原生函数的 `toString()` 返回单行格式 `function stringify() { [native code] }`，而 Firefox 格式是多行 `function stringify() {\n    [native code]\n}`。**必须显式 `markNative(JSON.stringify)` 和 `markNative(JSON.parse)`**，因为它们不在任何 DOM 原型链上，`scanPrototypeChain` 扫描不到 |
 | 9 | `doc.createElement` 等 DOM 实例方法未被 markNative | 同上：签名格式正确但服务端静默拒绝 | jsdom 的部分 DOM 方法直接挂在实例上而非原型链上，`scanPrototypeChain(doc, 5)` 扫描不到。**必须在 env-patch 末尾显式标记**：`markNative(doc.createElement)`、`markNative(doc.getElementById)`、`markNative(doc.querySelector)`、`markNative(doc.querySelectorAll)` 等 |
 | 10 | jsdomPatterns 正则不完整导致部分 jsdom 函数 toString 泄露 | 同上 | jsdom 内部函数有两个额外特征模式需要加入检测正则：`/tryImplForWrapper/` 和 `/ceReactionsPreSteps/`。漏掉这两个会导致部分 DOM 操作函数的 `toString()` 暴露完整 jsdom 源码 |
-| 11 | `resources: 'usable'` 是 JSVMP 拦截器激活的必要条件 | 不加 `resources: 'usable'` 时 SDK 加载成功、`byted_acrawler.frontierSign()` 能返回 X-Bogus，但 JSVMP 的 XHR 拦截器不触发（a_bogus 不生成） | jsdom 的 `resources: 'usable'` 选项会启用完整的 XHR 实现（含网络层），JSVMP 拦截器依赖这个完整实现才能正确 Hook `XMLHttpRequest.prototype.open`。不加此选项时 XHR 是简化版，拦截器无法正常工作。副作用是会尝试加载外部脚本导致 `SyntaxError: Unexpected token '<'`，但不影响 SDK 功能 |
+| 11 | jsdom 默认 XHR 是简化版，JSVMP 拦截器不触发 | 不开完整 XHR 时 SDK 加载成功、`byted_acrawler.frontierSign()` 能返回 X-Bogus，但 JSVMP 的 XHR 拦截器不触发（a_bogus 不生成） | 历史做法是加 `resources: 'usable'`（当时实测有效），但该选项会让 jsdom **联网**加载页面子资源，已被 SKILL.md 绝对规则 8 / 纯协议红线禁止（还会报 `SyntaxError: Unexpected token '<'`）。合规替代：保持离线，在 SDK 加载前自己装一个 `XMLHttpRequest` 存根（`open/setRequestHeader/send/getAllResponseHeaders/readyState/status` 齐全并 `markNative`），让拦截器有完整原型可 Hook，`send()` 只记录请求不真发；签名取出后由 `final.js` 用纯协议 HTTP 客户端发出 |
 | 12 | `navigator.permissions` 和 `navigator.clipboard` 缺失 | 环境指纹哈希不匹配 | Firefox 浏览器有这两个 API，jsdom 没有。需要补充存根：`nav.permissions = { query: markNative(function query() { return Promise.resolve({ state: 'prompt' }); }) }` 和 `nav.clipboard = { readText/writeText 存根 }` |
 
 ### 踩坑记录（2026-04-19 抖音 a_bogus 二次复用补充）

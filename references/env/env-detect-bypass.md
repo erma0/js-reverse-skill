@@ -339,21 +339,23 @@ function createjQueryStub() {
 }
 ```
 
-## 完整环境补全模板（jsdom）
+## 完整环境补全模板（jsdom，离线）
 
-当最小补全不够时，使用 jsdom 提供完整 DOM 环境：
+当最小补全不够时，使用 jsdom 提供完整 DOM 环境。红线（SKILL.md 绝对规则 8 / 第 3 节）：只允许**离线**使用——HTML 由本地字符串构造，脚本来自本 case 取证落盘产物，禁止 `JSDOM.fromURL()`，禁止 `resources: 'usable'`（会真去拉取页面子资源，等于把目标页当签名服务，且暴露 `jsdom/x.y.z` UA 与残缺 DOM 指纹）。`url` 只影响 `document.URL` / `location`，本身不发请求，取值必须来自取证记录而不是运行时拼出的目标地址。
 
 ```javascript
+const fs = require('node:fs');
 const { JSDOM } = require('jsdom');
 
 function createFullBrowserEnv(options = {}) {
     const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
-        url: options.url || 'https://example.com',
+        // 来自取证记录的 location.href，仅用于对齐 document.URL，不触发网络请求
+        url: options.locationHref,
         referrer: options.referrer || '',
         contentType: 'text/html',
         pretendToBeVisual: true,
+        // 只执行本地落盘脚本；不开 resources，jsdom 不会加载任何远端资源
         runScripts: 'dangerously',
-        resources: 'usable',
     });
 
     const { window } = dom;
@@ -364,6 +366,11 @@ function createFullBrowserEnv(options = {}) {
     }
     if (!window.atob) {
         window.atob = (b64) => Buffer.from(b64, 'base64').toString('binary');
+    }
+
+    // 目标脚本一律从取证落盘文件读入，不在运行时联网拉取
+    for (const file of options.scriptFiles || []) {
+        window.eval(fs.readFileSync(file, 'utf8'));
     }
 
     return { dom, window, document: window.document };
