@@ -42,6 +42,60 @@ const EDGES = {
 // 允许发起重放/写请求的节点（重放类动作守卫）
 const REPLAY_NODES = ['REAL_VERIFY', 'DIAGNOSE'];
 
+// SKILL.md §4 的 11 项执行 TODO 与状态节点映射（节点 → TODO 序号，1-based）。
+// 脚本输出 [TODO] 提示驱动清单维护，把口头约定变成技术约束；
+// 分支/降级节点（TRACE_RETRY、BLOCKED_FORENSIC 等）归入最近的主 TODO 项。
+const TODO_ITEMS = [
+  'INTENT_CONFIRM',
+  'ENV_READY（续接模式直接勾掉）',
+  'EVIDENCE_GATE',
+  'FORENSIC_CAPTURE / TRACE_CAPTURE（含 TRACE_RETRY 与降级分支）',
+  'CASE_LOOKUP（本地 search_cases + EXTERNAL_LOOKUP）',
+  'IDENTIFY',
+  'TRACE_ANALYZE',
+  'IMPLEMENT',
+  'REAL_VERIFY（含 DIAGNOSE）',
+  'DELIVER / SIGN_ONLY_DELIVER',
+  'CLEANUP',
+];
+const NODE_TO_TODO = {
+  INTENT_CONFIRM: 1,
+  ENV_READY: 2,
+  EVIDENCE_GATE: 3,
+  STEP2_ONLY: 3,
+  MATERIALS_FALLBACK: 4,
+  FORENSIC_CAPTURE: 4,
+  BLOCKED_FORENSIC: 4,
+  TRACE_CAPTURE: 4,
+  TRACE_RETRY: 4,
+  CASE_LOOKUP: 5,
+  EXTERNAL_LOOKUP: 5,
+  IDENTIFY: 6,
+  TRACE_ANALYZE: 7,
+  IMPLEMENT: 8,
+  REAL_VERIFY: 9,
+  DIAGNOSE: 9,
+  DELIVER: 10,
+  SIGN_ONLY_DELIVER: 10,
+  CLEANUP: 11,
+  DONE: 11,
+};
+
+function todoHint(node, mode) {
+  const idx = NODE_TO_TODO[node];
+  if (!idx) return '';
+  const label = TODO_ITEMS[idx - 1];
+  const heads = {
+    init: `[TODO] 立即创建 SKILL.md §4 的 11 项执行 TODO，第 ${idx} 项「${label}」置为进行中`,
+    resume: `[TODO] 续接时核对执行 TODO：当前节点对应第 ${idx} 项「${label}」`,
+    enter: `[TODO] 勾选完成第 ${idx} 项「${label}」（不新建子任务）`,
+    back: `[TODO] 第 ${idx} 项「${label}」重新置为进行中（回退，不新建子任务）`,
+    same: `[TODO] 第 ${idx} 项「${label}」保持进行中`,
+  };
+  const head = heads[mode] || heads.same;
+  return `${head}；宿主环境无 TODO 工具时在状态行中报告该项进度`;
+}
+
 function parseArgs(argv) {
   const args = {
     caseDir: '',
@@ -97,6 +151,8 @@ function usage() {
   跳过必经节点会被拒绝并提示合法路径。
 - --guard replay：当前节点不在 REAL_VERIFY/DIAGNOSE 时拒绝（退出码 2），并写入 blocks 审计；
   --force 放行但保留审计记录。
+- --init/--set 输出带 [TODO] 提示：对应 SKILL.md §4 的 11 项执行 TODO 的创建/勾选/回退动作，
+  必须跟随执行（宿主环境无 TODO 工具时在状态行中报告该项进度）。
 - 每次状态转换后必须输出状态行（当前状态(证据状态) → 目标状态(关键结论)）。`;
 }
 
@@ -202,6 +258,14 @@ function main() {
     if (doSet('INTENT_CONFIRM', false).ok) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: 未访问节点回退未拒绝'); }
     const guardOk = REPLAY_NODES.includes(readState(tmp).node);
     if (guardOk) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: guard 误放行'); }
+    if (TODO_ITEMS.length !== 11) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: TODO_ITEMS 应为 11 项'); }
+    for (const node of Object.keys(EDGES)) {
+      if (!NODE_TO_TODO[node]) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(`self-test: 节点 ${node} 缺少 TODO 映射`); }
+    }
+    for (const node of Object.keys(NODE_TO_TODO)) {
+      if (!(node in EDGES)) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(`self-test: TODO 映射含未知节点 ${node}`); }
+    }
+    if (!todoHint('FORENSIC_CAPTURE', 'enter').includes('第 4 项')) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: todoHint 输出异常'); }
     fs.rmSync(tmp, { recursive: true, force: true });
     console.log('state_machine.js self-test: PASS');
     return 0;
@@ -216,7 +280,15 @@ function main() {
 
   if (args.init) {
     const { state, created } = initState(caseDir, args.node);
-    console.log(created ? `已初始化状态跟踪：${state.node}` : `状态已存在，当前节点：${state.node}`);
+    if (created) {
+      console.log(`已初始化状态跟踪：${state.node}`);
+      const hint = todoHint(state.node, 'init');
+      if (hint) console.log(hint);
+    } else {
+      console.log(`状态已存在，当前节点：${state.node}`);
+      const hint = todoHint(state.node, 'resume');
+      if (hint) console.log(hint);
+    }
     return 0;
   }
 
@@ -260,6 +332,7 @@ function main() {
       return 2;
     }
     const from = state.node;
+    const wasVisited = (state.visited || []).includes(to);
     state.node = to;
     state.updatedAt = new Date().toISOString();
     if (!state.visited.includes(to)) state.visited.push(to);
@@ -268,10 +341,14 @@ function main() {
       state.blocks = (state.blocks || []).concat({ at: state.updatedAt, type: 'illegal-transition-force', node: from, message: `--force 放行非法跳转 ${from} → ${to}` });
     }
     writeState(caseDir, state);
+    const hint = todoHint(to, to === from ? 'same' : wasVisited ? 'back' : 'enter');
     if (args.markdown) {
-      console.log(renderMarkdown(state, ['', `> 状态转换：${from} → **${to}**${args.note ? '（' + args.note + '）' : ''}`]));
+      const extra = [`> 状态转换：${from} → **${to}**${args.note ? '（' + args.note + '）' : ''}`];
+      if (hint) extra.push('', hint);
+      console.log(renderMarkdown(state, ['', ...extra]));
     } else {
       console.log(`STATE_TRANSITION: ${from} → ${to}${args.note ? ' | ' + args.note : ''}`);
+      if (hint) console.log(hint);
     }
     return 0;
   }

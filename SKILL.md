@@ -199,7 +199,7 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 10. DELIVER / SIGN_ONLY_DELIVER
 11. CLEANUP
 
-每进入一个状态立即勾选对应项；回退时把对应项重新置为进行中，不新建子任务。
+每进入一个状态立即勾选对应项；回退时把对应项重新置为进行中，不新建子任务。TODO 创建与勾选不是可选项：`--init` 输出会提示创建清单、每次 `--set` 输出会带 `[TODO]` 勾选提示（节点与 TODO 项的映射内置于脚本），收到提示必须立即执行对应 TODO 动作；宿主环境无 TODO 工具时改为在状态行中报告该 TODO 项进度。实测教训（match14）：只依赖文档指令不建 TODO，长会话中状态推进完全失去进度跟踪，AI 在静态分析中打转数十轮无进度信号可察觉。
 
 ### 4.1 路径、意图与环境
 
