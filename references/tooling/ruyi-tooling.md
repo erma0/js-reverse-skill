@@ -233,7 +233,7 @@ node scripts/download_ruyi_tool.js --tool ruyipage-firefox --dest <download-dir>
    - JS bundle / chunk / sourcemap URL。
    - Cookie、本地存储键名、请求头、响应状态。
    - source / entry / builder / writer 链路证据。
-7. 单个取证动作完成并沉淀必要结论后，立即清理临时截图、失败下载、临时日志和无登录态 profile；登录态 profile 单独询问用户是否保留。
+7. 单个取证动作完成并沉淀必要结论后，立即清理临时截图、失败下载、临时日志和无登录态 profile；登录态 profile 默认保留至 CLEANUP 并在最终总结中说明处置，用户明确要求删除才删，不询问。
 
 ### ruyiPage 启动硬约束
 
@@ -504,4 +504,4 @@ node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-
 - 不把完整日志直接写入最终报告。
 - 先导入并生成摘要。
 - 必要时按行分块，优先分析和目标 API / 参数生成时间段相关的片段。
-- 原始日志保存在 case 内，任务结束前询问是否保留。
+- 原始日志保存在 case 内，默认作为可复核证据保留到 CLEANUP，按 SKILL.md 第 11 节清理规则处理，不询问。

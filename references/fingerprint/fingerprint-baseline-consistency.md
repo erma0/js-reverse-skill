@@ -9,7 +9,7 @@
 - 禁止每次打开 ruyiPage 时重新随机一套指纹；不得把不同浏览器、不同 Profile、不同代理地区或不同随机 seed 的样本混用。
 - ruyiPage 必须复用同一 case 的 `base_dir`、`userdir`、`smart_fingerprint` 输出和定制 Firefox runtime；RuyiTrace 若不是同一浏览器 / profile，必须先做基线 diff。
 - 指纹 fixture、RuyiTrace 摘要、Hook 采样、最终总结都必须记录 `baselineId`。缺少 `baselineId` 或 baseline 文件时，涉及指纹的 case 不能进入最终交付。
-- 如果 UA、Client Hints、language、timezone、platform、viewport、screen、DPR、WebGL vendor/renderer、Canvas、Audio、字体、DOM 几何、proxy/IP 地区之间出现冲突，暂停并重新采样或让用户确认切换基线；不得自动合并。
+- 如果 UA、Client Hints、language、timezone、platform、viewport、screen、DPR、WebGL vendor/renderer、Canvas、Audio、字体、DOM 几何、proxy/IP 地区之间出现冲突，自动重新采样统一基线并宣布后继续；重新采样无法统一才输出卡点、只推进不依赖该基线的分析。不得自动合并。
 - 用户明确更换代理、地区、Profile、浏览器工具或登录态容器时，必须生成新的 `baselineId`，旧样本只能作为历史证据，不能和新基线混用。
 
 ## 基线文件建议结构
@@ -59,7 +59,7 @@
 3. 后续每次浏览器取证前读取 baseline；工具启动参数、profile、代理、locale、timezone、viewport 必须与 baseline 一致。
 4. 多工具采样或重新启动浏览器后，先对比 baseline：
    - 一致：继续采样。
-   - 不一致：写入 `case/notes/fingerprint-baseline-diff.md`，暂停并说明冲突字段。
+   - 不一致：写入 `case/notes/fingerprint-baseline-diff.md`，自动重新采样统一基线并宣布，统一后继续；无法统一才输出卡点、只推进不依赖该基线的分析。
 5. 指纹 fixture 写入 `baselineId`，并在 `source` 中记录采样工具、页面、UA、时区、语言、采样时间。
 6. 最终总结记录 baseline 文件、`baselineId`、是否发生 diff、冲突字段和处理方式。
 

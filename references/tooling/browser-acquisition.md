@@ -41,7 +41,7 @@
 - 后续抓包、Hook、RuyiTrace、截图、JS 收集、指纹采样和 fixture 对比必须复用同一 profile / userdir / seed / 代理 / locale / timezone / viewport / UA / Client Hints / screen / WebGL 基线。
 - 禁止每次启动工具都重新随机指纹；如果工具默认会随机，必须通过持久 profile、固定 seed、固定配置或复用首次输出值来锁定本 case 基线。
 - ruyiPage 与 RuyiTrace 如果不是同一浏览器或同一 profile，必须先对 baseline 做 diff。
-- 发现 language、timezone、platform、UA、Client Hints、screen、DPR、WebGL、Canvas、Audio、字体或代理地区不一致时，暂停并写入 `case/notes/fingerprint-baseline-diff.md`；未经用户确认，不得混用样本。
+- 发现 language、timezone、platform、UA、Client Hints、screen、DPR、WebGL、Canvas、Audio、字体或代理地区不一致时，写入 `case/notes/fingerprint-baseline-diff.md`，自动重新采样统一基线并宣布后继续；无法统一（多来源持续冲突）才输出卡点、只推进不依赖该基线的分析；不得自动混用样本。
 - 用户明确更换代理、地区、profile 或工具时，生成新的 `baselineId`，旧样本只能保留为历史证据。
 
 ### WebAPI / 指纹值采样来源硬约束
@@ -215,6 +215,6 @@ ruyiPage 的价值在于使用 Firefox + WebDriver BiDi，并配合其 managed r
 浏览器 Profile 可能包含 Cookie、localStorage、IndexedDB 和缓存，必须按敏感材料处理。
 
 - 默认不要把登录态 Profile 放入最终交付物。
-- 删除或保留登录态 Profile 前必须询问用户。
+- 登录态 Profile 默认保留并在最终总结中说明处置，用户明确要求删除才删，不为此询问。
 - 不要把真实 Cookie / token 明文写入公开笔记。
 - 优先保存脱敏后的请求样本。

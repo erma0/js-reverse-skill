@@ -149,7 +149,7 @@ function bulletLines(value, empty = '无') {
   }
   return lines;
 }
-function numberedLines(value, empty = '待补充') {
+function numberedLines(value, empty = '继续按状态机推进下一状态（默认自动推进，不等确认）') {
   const arr = asArray(value);
   if (!arr.length) return [`1. ${empty}`];
   return arr.map((item, idx) => `${idx + 1}. ${safeString(item)}`);
@@ -193,7 +193,7 @@ function renderIntakeReport(stage, data) {
     `# 阶段报告：${stage.title}`,
     '',
     `生成时间：${new Date().toISOString()}`,
-    `阶段状态：${safeString(data.status || data.stageStatus || '待确认')}`,
+    `阶段状态：${safeString(data.status || data.stageStatus || '进行中（自动推进）')}`,
     '',
     '## 1. 用户已提供信息',
     '',
@@ -222,7 +222,8 @@ function renderIntakeReport(stage, data) {
   lines.push('', '## 3. 缺失信息与阻塞点', '');
   lines.push(`- 缺失项：${safeString(data.missingItems || data.missing)}`);
   lines.push(`- 阻塞原因：${safeString(data.blockers)}`);
-  lines.push(`- 需要用户确认：${safeString(data.needUserConfirm || data.confirmation)}`);
+  const needConfirm = data.needUserConfirm || data.confirmation;
+  if (needConfirm) lines.push(`- 需要用户确认：${safeString(needConfirm)}`);
   lines.push('', '## 4. 下一步计划', '');
   const next = data.nextSteps || ['校验请求样本完整性', '按证据列出全部可疑加密参数候选并定位', '按 GATE-1 检测/安装取证工具与 TLS 客户端（默认自动，执行前宣布）'];
   lines.push(...numberedLines(next));
@@ -236,7 +237,7 @@ function renderDynamicReport(stage, data) {
     `# 阶段报告：${title}`,
     '',
     `生成时间：${new Date().toISOString()}`,
-    `阶段状态：${safeString(data.status || data.stageStatus || '待确认')}`,
+    `阶段状态：${safeString(data.status || data.stageStatus || '进行中（自动推进）')}`,
     '',
     '## 1. 当前阶段目标',
     '',

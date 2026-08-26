@@ -51,7 +51,7 @@ Step 2: RuyiTrace 日志采集（TRACE_CAPTURE）
    - JS bundle / chunk / sourcemap URL。
    - Cookie、本地存储键名、请求头、响应状态。
    - source / entry / builder / writer 链路证据。
-7. 单个取证动作完成并沉淀必要结论后，立即清理临时截图、失败下载、临时日志和无登录态 profile；登录态 profile 单独询问用户是否保留。
+7. 单个取证动作完成并沉淀必要结论后，立即清理临时截图、失败下载、临时日志和无登录态 profile；登录态 profile 默认保留至 CLEANUP 并在最终总结中说明处置，用户明确要求删除才删，不询问。
 
 ### 取证：首选通用脚本（不要手写）
 
@@ -260,7 +260,7 @@ node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-
 - 先导入并生成摘要（`import_ruyitrace_log.js` 已流式读取，不会 OOM）。
 - 单次会话可能产生数百 MB，**按 5-10 万行一段分批投喂分析**，防止一次性贴入撑爆上下文；优先分析和目标 API / 参数生成时间段相关的片段（先 `search_trace.js --url/--keyword` 定位到相关行段，只读那段）。
 - 采集时可用 `--limit` 限制单进程行数、`--ptype` 只保留关心的进程类型，从源头缩小日志。
-- 原始日志保存在 case 内，任务结束前询问是否保留。
+- 原始日志保存在 case 内，默认作为可复核证据保留到 CLEANUP，按 SKILL.md 第 11 节清理规则处理，不询问。
 
 ## RuyiTrace 优先诊断原则
 
