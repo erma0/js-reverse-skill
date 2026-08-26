@@ -1842,9 +1842,9 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     p.add_argument("--manual-geo", default="", help="地理探测失败时的 manual_geo（JSON 字符串或文件路径）")
     p.add_argument("--no-fp", action="store_true", help="跳过 smart_fingerprint（禁用智能指纹）")
     p.add_argument("--ua", default="", help="覆盖取证浏览器 UA（目标站校验 UA 为特定浏览器时用，如 Chrome）；在智能指纹仿真之后应用，同时影响 navigator.userAgent 与请求头。注意：只覆盖 UA 字符串，eval.toString() 等内核级检测不受影响，此类阻断见 references/env/env-detect-bypass.md 内核级差异检测")
-    p.add_argument("--wait", type=int, default=120, help="等待首次终态目标命中的超时秒；命中后另执行完整 --target-settle 收尾窗口，未命中到点自动关闭，默认 120；验证码/登录等需人工操作的场景建议调大（如 300）")
+    p.add_argument("--wait", type=int, default=120, help="等待首次终态目标命中的超时秒（单位秒，默认 120，上限 600）；命中后另执行完整 --target-settle 收尾窗口，未命中到点自动关闭；验证码/登录等需人工操作的场景建议调大（如 300）")
     p.add_argument("--settle", type=int, default=5, help="未指定 --targets 时的静默窗口：包数不再增长且连续 N 秒无新包视为抓包完成，默认 5")
-    p.add_argument("--target-settle", type=int, default=3, help="终态接口首次出现 HTTP 2xx 后继续抓取的秒数，用于接收后置回调或额外业务重试；脚本无法通用判断响应体中的业务成功码，预期可能重试时请调大，默认 3")
+    p.add_argument("--target-settle", type=int, default=3, help="终态接口首次出现 HTTP 2xx 后继续抓取的秒数（单位秒，默认 3，上限 120，防毫秒当秒误传），用于接收后置回调或额外业务重试；脚本无法通用判断响应体中的业务成功码，预期可能重试时请调大")
     p.add_argument("--body-inline-bytes", type=int, default=1024 * 1024, help="请求体/响应体在 JSON 中完整内联或预览的最大原始字节数，默认 1MB；超过后完整内容单独落盘")
     p.add_argument("--max-body-bytes", type=int, default=10 * 1024 * 1024, help="普通请求体/响应体完整保留的单体上限，默认 10MB；超过后仅留预览并显式标记")
     p.add_argument("--max-wasm-bytes", type=int, default=50 * 1024 * 1024, help="WASM 完整原始文件的单体上限，默认 50MB；WASM 不保存不可执行的半包")
@@ -1867,6 +1867,10 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         p.error("--url 为必填项（--self-test 除外）")
     if a.wait < 0 or a.settle < 0 or a.target_settle < 0:
         p.error("--wait/--settle/--target-settle 不能为负数")
+    if a.target_settle > 120:
+        p.error("--target-settle 单位是秒（默认 3；验证码/登录重试建议 10~30，上限 120）。当前值 %s 疑似把毫秒当秒传入（如 15000ms 应写 15），按此值收尾窗口会阻塞数小时" % a.target_settle)
+    if a.wait > 600:
+        p.error("--wait 单位是秒（默认 120；人工登录/验证码操作建议 300，上限 600）。当前值 %s 疑似把毫秒当秒传入（如 300000ms 应写 300）" % a.wait)
     if a.body_inline_bytes < 0 or a.max_body_bytes <= 0 or a.max_wasm_bytes <= 0:
         p.error("body 内联预览不能为负数，普通 body/WASM 单体上限必须为正数")
     if a.body_inline_bytes > a.max_body_bytes:

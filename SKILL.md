@@ -190,7 +190,7 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 1. INTENT_CONFIRM
 2. ENV_READY（续接模式直接勾掉）
 3. EVIDENCE_GATE
-4. FORENSIC_CAPTURE / TRACE_CAPTURE
+4. FORENSIC_CAPTURE / TRACE_CAPTURE（发起取证前先完成经验库速查定向，见 4.2 节）
 5. CASE_LOOKUP（本地 search_cases + EXTERNAL_LOOKUP）
 6. IDENTIFY
 7. TRACE_ANALYZE
@@ -227,14 +227,25 @@ URL 不是证据。脚本确认文件真实存在并可归类，才允许跳过�
 - Step 2：内容可解析、记录非空且关联目标域的 RuyiTrace NDJSON/JSONL；`ruyitrace-summary.md` 不能替代 NDJSON。Step2-only 时先导入并生成摘要，再结合日志定位，不重复采集 trace，也不因缺少 Step 1 强制网络取证。
 - 单独 JS、截图或指纹基线只作辅助材料，不计为 Step 1。
 
+**取证前强制速查（不可跳过）**：EVIDENCE_GATE 路由到 FORENSIC_CAPTURE / TRACE_CAPTURE 后、发起任何取证采集命令前，先按目标域名与特征关键词查经验库提取定向情报：
+
+```powershell
+node scripts/search_cases.js --domain <目标域名> --signal <参数名或SDK特征>
+```
+
+命中时提取三项情报写入状态行后再取证：① 终态接口模式（校准 `--targets`，禁止靠记忆猜接口路径候选）；② 同站点已知坑点与采集参数建议（等待窗口、trace 信号选择等）；③ 题型假设与可复用方法论。未命中按全新 case 取证。速查结果只是假设与路径提示（绝对规则 2），不替代本次取证证据；同站历史案例不因速查命中而免除本次取证。
+
 网络取证：
 
 ```powershell
+# 发起取证命令前先 --set 对应节点（FORENSIC_CAPTURE / TRACE_CAPTURE），取证完成再补设会被状态机拒绝；
+# 已完成上述取证前速查的情报用于校准本命令参数。
 # --targets = 本次流程的终态接口（如最终登录/业务提交接口）；任一目标 URL 的非 OPTIONS 2xx 响应命中后进入短暂收尾窗口并结束取证，
 # 抓包从页面打开前覆盖到终态，不要求用户预先列全验证码 load/verify 等中间接口。
 # 自动保存入口页面 HTML 到 case/forensic/document.html（含 412/JS challenge 页内联脚本，是 acw_sc__v2 等 challenge cookie 的强制证据）。
 # 预算与落盘细则（--wait/--manual-pause/--target-settle、60包/100MB 关联预算、bodies/wasm 落盘、预览阈值与 saved_to/_complete 语义）
 # 见 scripts/README.md 与 references/workflow/trace-flow.md，此处不重复。
+# 时间参数一律「秒」：--wait 默认 120（上限 600）、--target-settle 默认 3（上限 120）；传毫秒数值会被脚本拒绝。
 # --targets 只写能唯一标识终态接口的完整路径子串（如 api/question/13）；禁止用会误命中同号旁路接口的宽正则
 # （topic_info?href=N / api2/N / a/N 都含同一数字，宽正则会让取证在目标接口之前提前收尾 → 目标响应体丢失，见反模式 22）。
 python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root> --targets <最终业务接口关键词> --markdown
@@ -247,7 +258,7 @@ python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root>
 #   （见 references/env/env-detect-bypass.md 内核级差异检测），禁止为改 UA 手写取证探针。
 ```
 
-终态目标请求未命中 = Step 1 缺失，禁止转源码搜索继续：`PARTIAL`（仅 OPTIONS/非 2xx）与 `NO_TARGET`（完全未命中）均退出码非 0；任一非 OPTIONS 2xx 命中即 `PASS` 退出码 0。HTTP 2xx 只表示目标请求已取证，不表示业务成功（通用脚本不猜业务码）。登录可能因验证码/校验失败重试时调大 `--target-settle`，保证重试仍在同一会话内；关联材料以最后一次有效终态向前回溯，验证码中间接口不是额外终态门禁（load → verify 由分析阶段从同一会话回溯）。body 超过 JSON 内联预览阈值时必须读取对应 `saved_to` 完整文件，`*_complete=false` 不能拿预览替代原始证据。需要用户交互时提示其在窗口完成操作——**操作完成后用户直接关闭浏览器窗口即视为手动结束抓包，脚本会立即收尾落盘（报告 endReason=browser-closed），不是失败**；浏览器已关/日志出现 WebSocket 断连时脚本仍在收尾分类，禁止 kill 进程，等 `FORENSIC DONE` 或 JSON 输出；万一进程被强杀，`case/forensic/partial-steps.jsonl` 保留了全部包元数据兜底（该文件残留即说明未正常收尾）。用户也可提供 cURL/HAR/原始请求文本；终态命中并落盘后再回 EVIDENCE_GATE。JS 源码关键词定位只能作辅助假设。
+终态目标请求未命中 = Step 1 缺失，禁止转源码搜索继续：`PARTIAL`（仅 OPTIONS/非 2xx）与 `NO_TARGET`（完全未命中）均退出码非 0；任一非 OPTIONS 2xx 命中即 `PASS` 退出码 0。HTTP 2xx 只表示目标请求已取证，不表示业务成功（通用脚本不猜业务码）。登录可能因验证码/校验失败重试时调大 `--target-settle`（单位秒，默认 3；验证码/登录重试建议 10~30，上限 120），保证重试仍在同一会话内；关联材料以最后一次有效终态向前回溯，验证码中间接口不是额外终态门禁（load → verify 由分析阶段从同一会话回溯）。终态命中后的正常收尾耗时 ≈ target-settle 秒数 + 落盘时间（通常 1 分钟内）；等待取证收尾远超该预期（如超 5 分钟）时，先核对时间参数是否把毫秒当秒传入，不要无限轮询干等。body 超过 JSON 内联预览阈值时必须读取对应 `saved_to` 完整文件，`*_complete=false` 不能拿预览替代原始证据。需要用户交互时提示其在窗口完成操作——**操作完成后用户直接关闭浏览器窗口即视为手动结束抓包，脚本会立即收尾落盘（报告 endReason=browser-closed），不是失败**；浏览器已关/日志出现 WebSocket 断连时脚本仍在收尾分类，禁止 kill 进程，等 `FORENSIC DONE` 或 JSON 输出；万一进程被强杀，`case/forensic/partial-steps.jsonl` 保留了全部包元数据兜底（该文件残留即说明未正常收尾）。用户也可提供 cURL/HAR/原始请求文本；终态命中并落盘后再回 EVIDENCE_GATE。JS 源码关键词定位只能作辅助假设。
 
 Windows 下若 Python 脚本输出仍现编码异常，用 `PYTHONUTF8=1` 前缀兜底（PowerShell：`$env:PYTHONUTF8="1"`）；仓库脚本已内置 UTF-8 强制与 emoji 安全化，正常无需手动加。
 
@@ -278,7 +289,7 @@ node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-roo
 
 目标请求需手动触发时，必须提示用户在 trace 浏览器中完成操作；用户确认“已触发”前不得结束采集。不得把“没触发目标路径”当成“采集完成”。
 
-**TRACE_CAPTURE 质量判定与 TRACE_RETRY**：采集到 NDJSON 不等于达标。摘要显示「未发现 stack.file」、成功解析极低、topApis 找不到目标参数 writer、质量判定「未覆盖页面 JS」（stack.file 全为浏览器内核路径，无 http/https 页面脚本）或「有效 API 调用占比过低」（api 字段几乎全空），均按重度不足处理并进入 TRACE_RETRY。RuyiTrace 一次采集按进程写多个 `domtrace/trace_process_<pid>.ndjson`，主日志须合并所有 tab/content 进程文件（排除 parent 内核进程），只取单个文件（尤其 mtime 最新的）会把有效 trace 误判为空。完整降级顺序与验证码特化判定见 `references/workflow/trace-flow.md`。
+**TRACE_CAPTURE 质量判定与 TRACE_RETRY**：采集到 NDJSON 不等于达标。摘要显示「未发现 stack.file」、成功解析极低、topApis 找不到目标参数 writer、质量判定「未覆盖页面 JS」（stack.file 全为浏览器内核路径，无 http/https 页面脚本）或「有效 API 调用占比过低」（api 字段几乎全空），均按重度不足处理并进入 TRACE_RETRY。**判定重度不足后必须先执行重采动作（TRACE_RETRY，可调整信号/duration/手动触发方式），重采一次仍不足才允许降级做落盘 JS 静态分析**；禁止跳过重采直接进入源码静态分析——缺 trace 时静态分析极易在「参数来源靠猜」上打转空耗（match14 实证：trace event 进程未覆盖后未重采，静态分析反复纠结同一参数来源数十轮无进展）。RuyiTrace 一次采集按进程写多个 `domtrace/trace_process_<pid>.ndjson`，主日志须合并所有 tab/content 进程文件（排除 parent 内核进程），只取单个文件（尤其 mtime 最新的）会把有效 trace 误判为空。完整降级顺序与验证码特化判定见 `references/workflow/trace-flow.md`。
 
 **TRACE_CAPTURE 出口门禁复检（不可跳过）**：采集声明完成、进入 CASE_LOOKUP 前必须复跑出口门禁脚本，确认 Step 2（RuyiTrace NDJSON）真实产出。这是状态机内复检，不是 GATE-2 入口门禁的重复——GATE-2 判定初始证据路由到 TRACE_CAPTURE，出口门禁确认 TRACE_CAPTURE 是否真把 Step 2 补上了：
 

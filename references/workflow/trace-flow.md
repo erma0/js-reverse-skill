@@ -20,6 +20,16 @@ Step 2: RuyiTrace 日志采集（TRACE_CAPTURE）
 
 ## ruyipage 取证流程
 
+### 取证前速查（不可跳过）
+
+发起任何取证采集命令前，先按目标域名与特征关键词查经验库提取定向情报：
+
+```bash
+node scripts/search_cases.js --domain <目标域名> --signal <参数名或SDK特征>
+```
+
+命中时提取三项情报写入状态行后再取证：① 终态接口模式（校准 `--targets`，禁止靠记忆猜接口路径候选）；② 同站点已知坑点与采集参数建议（等待窗口、trace 信号选择等）；③ 题型假设与可复用方法论。未命中按全新 case 取证。速查结果只作假设与路径提示（SKILL.md 绝对规则 2），不替代本次取证证据；同站历史案例不因速查命中而免除本次取证。
+
 ### 启动硬约束
 
 | 约束 | 要求 |
@@ -65,7 +75,7 @@ python scripts/forensic_ruyipage.py --url <目标页> --case-dir <project-root> 
 
 取证会自动保存入口页面 HTML 到 `case/forensic/document.html`（含 412/JS challenge 页内联脚本，是 acw_sc__v2 等 challenge cookie 的强制证据），无论是否指定 `--targets`。
 
-预算与落盘细则（终态等待 `--wait 120` / `--manual-pause` / `--target-settle`、60 包/100MB 关联预算、body 单体 10MB、WASM 50MB、JSON 内联预览 1MB、四类落盘位置 target-hits/related-hits/bodies/wasm/js、`*_complete=false` 与 `saved_to` 语义）见 `scripts/README.md` 网络取证与日志采集一节；本节只保留流程与硬约束。
+预算与落盘细则（终态等待 `--wait 120` / `--manual-pause` / `--target-settle`——时间参数一律单位秒，`--wait` 上限 600、`--target-settle` 默认 3 上限 120，传毫秒数值会被脚本拒绝；60 包/100MB 关联预算、body 单体 10MB、WASM 50MB、JSON 内联预览 1MB、四类落盘位置 target-hits/related-hits/bodies/wasm/js、`*_complete=false` 与 `saved_to` 语义）见 `scripts/README.md` 网络取证与日志采集一节；本节只保留流程与硬约束。
 
 仅在复杂多步交互超出脚本参数（`--click` / `--scroll` / `--manual-pause`）能力时才手写，且必须：用 `targets=True` 抓全部包、`page.capture.wait(count=1)` 取单包、`page.capture.steps` 读全部包、`CapturePacket.to_dict()` 取响应体。详见 `references/tooling/ruyi-tooling.md` 的“逃生舱”小节。
 
