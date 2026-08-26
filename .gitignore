@@ -23,6 +23,7 @@ tools/
 # skill 根目录实战工作目录（SKILL.md：运行期 skill 目录只读，实战应在独立项目目录）
 /case/
 /result/
+/notes/
 /测试日志.txt
 
 # 通用
