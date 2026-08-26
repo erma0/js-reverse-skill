@@ -94,6 +94,7 @@ writer: arguments[1] = 签名后 URL（m 参数自动附加），页面 $.ajax �
 | 参考文档 | 关联点 |
 |---------|--------|
 | `references/workflow/common-pitfalls.md` | 反模式 16（插桩 while(1) 禁令）+ 反模式 20（VM 卡死转投浏览器黑盒，本案例为主体）+ 反模式 21（外部失败误归因通道层，本案例为主体） |
+| `references/workflow/trace-flow.md` | TRACE_ANALYZE 双轨分析（本案例为「高频≠关键」实证）+ eval 捕获三用途（本案例为动态代码收集/状态对照实证） |
 | `references/workflow/experience-rules.md` | 规则 24（黑盒执行禁止预填状态快照）+ 规则 22（禁止缓存复用） |
 | `references/env/env-object-model.md` | `<a>` href 真实 URL 解析、meta content 真实值回填 |
 | `references/network/dynamic-resource.md` | boot 每次渲染变化的动态资源新鲜拉取 + 会话配套资源专节 |

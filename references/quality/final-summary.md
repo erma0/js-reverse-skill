@@ -92,7 +92,7 @@
 
 - NativeProtect 使用情况
 - 指纹基线一致性
-- 环境与指纹 API 调用回放明细
+- 环境与指纹 API 调用回放明细：按环境模块分组（Navigator / Document / Window / Canvas / WebGL / Storage / XHR / WebRTC / 其它），每项四列——API（含访问类型）/ trace 频次 / 回放值或实现方式 / 验证结果，把 trace 证据、补环境实现、请求验证三者闭环（match10 形态）；频次数据来自过滤目标站来源后的统计（见 `references/workflow/trace-flow.md` TRACE_ANALYZE）
 - 高强度环境检测覆盖矩阵
 - Session 请求链
 - 加密参数生成与样本复用检查

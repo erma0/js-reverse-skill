@@ -231,19 +231,35 @@ node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-
 
 日志导入后按以下顺序分析。所有 case 必须先完成 Step 1（ruyipage 网络包）+ Step 2（RuyiTrace NDJSON），再进入 Node.js 缺失环境追踪：
 
-1. 统计 `api` 调用频率，优先处理高频或和目标参数生成邻近的 API。**统计前先按调用栈 `stack.file` 过滤出目标站来源**——页面引入的第三方脚本（反指纹库/统计 SDK，如 airgap.js）会产生海量日志，直接统计会得出错误的环境画像（match10 实测：某进程日志全是 airgap.js 记录，未过滤时环境访问画像完全失真）。
-2. 按 `stack.file / line / col` 聚合，定位具体 JS 文件和函数。**优先翻查 eval/Function 动态代码捕获记录**——混淆框架（瑞数/JSVMP）运行时 eval 出的完整配置对象是运行时真实状态的第一手证据，可直接对照出 sandbox 内状态残缺（match10 实测：trace 捕获的完整配置应有 921 个键名，sandbox 内仅 30 个，直接指明补环境缺口）。
-3. 分类到环境模块：
+1. 统计 `api` 调用频率（**频次轨**，定补环境优先级）。统计前先做两层过滤：
+   - **主样本识别**：多进程日志先确认业务 JS 所在的内容进程（`stack.file` 命中目标域名的进程）；部分进程日志可能全部来自第三方脚本（match10 实测：某进程日志全是第三方反指纹库记录），混入统计会让环境访问画像完全失真。
+   - **调用栈过滤**：主样本内仍按 `stack.file` 过滤出目标站来源——页面引入的第三方脚本（反指纹库/统计 SDK）会产生海量日志。
+
+   统计时按访问类型分组，用途不同：GET / CALL 频次 → 补环境优先级；SET 高频 → 状态写入 / 指纹采集通道（如 cookie 累积写入、字体枚举的 style setter），这类需要带内部状态的值管理实现（cookie jar、Proxy 透传），静态 stub 顶不住高频写入语义。
+2. 单独排查关键事件（**关键事件轨**，低频也必查）。**高频 ≠ 破案关键**——match10 实测：最高频 API（cookie setter 数千次）只是常规状态写入，破案钥匙是低频的 eval 动态代码捕获。三类关键事件必查：
+   - eval / Function 动态代码捕获记录（系统性用法见下节）。
+   - 目标参数 writer / 加密入口的调用栈。
+   - 动态资源请求（运行时生成的 script / 密文接口）前后的调用序列。
+3. 按 `stack.file / line / col` 聚合，定位具体 JS 文件和函数。
+4. 分类到环境模块：
    - Navigator / Screen / Location / Storage。
    - Canvas / WebGL / Audio / WebRTC。
    - Crypto / Performance / Date / Random。
    - DOM / Element / CSS / Layout。
    - Worker / Service Worker / iframe。
-4. 将日志结论写入：
+5. 将日志结论写入：
    - `notes/ruyitrace-summary.md`
    - `notes/missing-env-priority.md`：必须包含命中的 `api`、`stack.file`、`line`、`col`、环境模块分类、补齐优先级，以及"RuyiTrace 证据 / Node trace 补充 / 推断"标记。
    - `notes/entry-chain.md`
-5. 再进入 Node.js 缺失环境追踪和 fixtures 验证。
+6. 再进入 Node.js 缺失环境追踪和 fixtures 验证。
+
+### eval / Function 动态代码捕获的三种用途
+
+混淆框架（瑞数 / JSVMP / 代码组装器）运行时 eval 出的内容是静态分析拿不到的一手证据，按价值排序三类用法：
+
+1. **动态代码收集**：引导器流式解密拼出的核心代码、组装器动态构建的函数体，在静态下载的 JS 文件中**不存在**——eval 捕获是获取这类代码的唯一渠道。应把捕获内容保存为 JS 证据文件（进 `case/js/original/` 或 `case/js/extracted/`），作为后续算法分析输入（match10 实测：核心代码完整来自 eval 捕获，比任何静态文件都完整）。
+2. **运行时状态基准对照**：eval 出的完整配置对象与 sandbox 内同名状态做 diff（键数 / 键名 / 结构），直接定位补环境缺口——比 Proxy 探测盲找属性快得多（match10 实测：trace 捕获的完整配置应有 921 个键名，sandbox 内仅 30 个，一对照即锁定缺口）。
+3. **完整配置提取**：完整配置结构可能分散在多层混淆 / 多个下发文件中，eval 捕获的是运行时聚合后的最终形态，比静态逆向源码拼凑可靠。
 
 遇到环境错误时的处理顺序：
 
@@ -276,6 +292,7 @@ node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-
    - 与目标参数生成、请求发起、writer 写入时间邻近的调用。
    - `stack.file / line / col` 指向的 JS 文件、模块和函数。
    - navigator / screen / document / storage / canvas / WebGL / audio / crypto / performance / worker / iframe 等环境模块分类。
+   - eval 捕获的动态代码 / 完整配置与 sandbox 同名状态的 diff（状态残缺的最快定位方式，见 TRACE_ANALYZE 的三种用途）。
 5. 只有在 NDJSON 缺失、未覆盖当前路径、日志时间段不对应、或日志结论不足时，才使用 `run_with_trace.js`、Proxy trace、Hook 或断点作为补充。
 6. 输出补环境计划时，必须标明哪些环境依赖来自 RuyiTrace 证据，哪些只是 Node trace / 推断，避免把推断写成事实。
 7. RuyiTrace 长字符串字段可能被截断。导入日志后，如果任意字符串字段达到或接近 4000 字符，必须标记为疑似截断：真实长度写 `unknown`，最小长度写可见长度，不能把 4000 或可见长度解释为加密参数或指纹值真实长度。涉及 WebAPI / 指纹具体值时，未截断 RuyiTrace 值优先；RuyiTrace 未选择、缺失、未覆盖或疑似截断时，必须使用当前用户确认的取证工具在同一 fingerprint baseline 下补采完整值，不能由 AI 猜值。
