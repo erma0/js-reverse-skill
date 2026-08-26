@@ -10,6 +10,7 @@
 
 const fs = require('fs');
 const readline = require('readline');
+const { recordQueries } = require('./lib/query_log');
 
 function parseArgs(argv) {
   const args = {
@@ -189,6 +190,10 @@ async function main() {
   });
   if (!files.length) process.exit(1);
 
+  const queries = args.keywords.concat(args.regexes).map((q) => ({ target: files[0], query: q }));
+  if (args.url) queries.push({ target: files[0], query: `url:${args.url}` });
+  const warnings = recordQueries('search_trace', queries);
+
   const matches = [];
   const ctx = args.json ? 0 : Math.max(0, Math.min(args.context, 20));
   for (const file of files) {
@@ -197,11 +202,12 @@ async function main() {
   }
 
   if (args.json) {
-    console.log(JSON.stringify({ total: matches.length, matches: matches.map((m) => ({ file: m.file, lineNo: m.lineNo, fields: m.fields })) }, null, 2));
+    console.log(JSON.stringify({ total: matches.length, warnings, matches: matches.map((m) => ({ file: m.file, lineNo: m.lineNo, fields: m.fields })) }, null, 2));
     return;
   }
 
   const lines = ['# trace 检索结果', '', `- 命中：${matches.length} 条`];
+  for (const w of warnings) lines.push('', w);
   if (matches.length >= args.max) lines.push(`- （达到 --max ${args.max} 上限，可调大）`);
   lines.push('');
   const emit = (tag, no, text) => {

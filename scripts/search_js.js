@@ -14,6 +14,7 @@
  */
 
 const fs = require('fs');
+const { recordQueries } = require('./lib/query_log');
 
 function parseArgs(argv) {
   const args = {
@@ -118,6 +119,7 @@ function main() {
   }
 
   const ctx = Math.max(0, Math.min(args.context, 2000));
+  const warnings = recordQueries('search_js', args.files.flatMap((f) => args.keywords.concat(args.regexes).map((q) => ({ target: f, query: q }))));
   const results = [];
   for (const file of args.files) {
     if (!fs.existsSync(file)) {
@@ -143,11 +145,12 @@ function main() {
 
   const total = results.reduce((n, r) => n + r.matches.length, 0);
   if (args.json) {
-    console.log(JSON.stringify({ total, results }, null, 2));
+    console.log(JSON.stringify({ total, warnings, results }, null, 2));
     return;
   }
 
   const lines = ['# JS 文件检索结果', '', `- 命中：${total} 条`];
+  for (const w of warnings) lines.push('', w);
   for (const r of results) {
     lines.push('', `## ${r.file}（${r.size} B）`);
     if (!r.matches.length) { lines.push('- 无命中'); continue; }
