@@ -334,6 +334,8 @@ _DYNAMIC_CONTENT_TYPES = (
     "text/json",
     "text/plain",
 )
+# Sec-Fetch-Dest 中属于"导航/文档加载"的取值；其余（empty/script/image…）都是页面内发起的子请求。
+_NAVIGATION_FETCH_DESTS = ("document", "iframe", "frame", "embed", "object")
 
 
 def is_js_packet(pkt: Dict[str, Any]) -> bool:
@@ -362,10 +364,39 @@ def match_targets(pkt: Dict[str, Any], substrings: List[str], regexes: List[re.P
     return False
 
 
+def _is_navigation_packet(pkt: Dict[str, Any]) -> bool:
+    """区分导航请求（页面/框架）与脚本发起的 XHR/fetch。
+
+    Firefox 会为所有请求带 Sec-Fetch-Dest：导航是 document/iframe，XHR/fetch 是 empty。
+    缺失该头时按 Accept 头判断；两者都缺失（旧记录/精简 metadata）保守视为导航，
+    保持"text/html 即入口文档"的历史行为。
+    """
+    dest = _header_value(pkt.get("request_headers"), "sec-fetch-dest").lower().strip()
+    if dest:
+        return dest in _NAVIGATION_FETCH_DESTS
+    if _header_value(pkt.get("request_headers"), "x-requested-with"):
+        return False
+    accept = _header_value(pkt.get("request_headers"), "accept").lower().strip()
+    if not accept:
+        return True
+    return accept.startswith("text/html")
+
+
+def _is_dynamic_script_packet(pkt: Dict[str, Any]) -> bool:
+    """动态下发的脚本包：JS 后缀/JS content-type，或 XHR/fetch 拿到的 text/html 脚本。"""
+    if is_js_packet(pkt):
+        return True
+    ct = _response_content_type(pkt)
+    return ct.startswith("text/html") and not _is_navigation_packet(pkt)
+
+
 def _related_reason(pkt: Dict[str, Any]) -> Optional[str]:
-    """返回前置动态请求的保留原因；None 表示不拉取 body。"""
+    """返回前置动态请求的保留原因；None 表示不拉取 body。
+
+    动态脚本包（含 XHR 拿到的 text/html 脚本）走 JS 落盘通道，这里不重复保留。
+    """
     method = str(pkt.get("method") or "").upper()
-    if method == "OPTIONS" or is_js_packet(pkt):
+    if method == "OPTIONS" or _is_dynamic_script_packet(pkt):
         return None
     url = str(pkt.get("url") or "")
     ct = _response_content_type(pkt)
@@ -695,11 +726,12 @@ def _response_content_type(d: Dict[str, Any]) -> str:
 
 
 def _is_entry_document(d: Dict[str, Any], args_url: str) -> bool:
-    """识别入口页面 HTML：content-type 为 text/html，或 URL 与目标 URL 一致（覆盖 412/challenge 页）。
+    """识别入口页面 HTML：导航请求且 content-type 为 text/html，或 URL 与目标 URL 一致（覆盖 412/challenge 页）。
 
     acw_sc__v2 等 challenge cookie 的首次 412 响应是 text/html 内联脚本，必须保存，
-    否则后续无法还原 challenge 链。"""
-    if _response_content_type(d).startswith("text/html"):
+    否则后续无法还原 challenge 链。反例：脚本用 XHR/fetch 拉到的 text/html（动态下发的
+    可 eval 脚本，如猿人学 match14 的 /api2/14）不是入口文档，不能占用 document.html。"""
+    if _response_content_type(d).startswith("text/html") and _is_navigation_packet(d):
         return True
     url = (d.get("url") or "").split("?")[0].split("#")[0].rstrip("/")
     target = (args_url or "").split("?")[0].split("#")[0].rstrip("/")
@@ -856,7 +888,7 @@ def _hydrate_live_evidence(steps, args, substrings, regexes, state: Dict[str, An
             continue
 
         is_target = bool(substrings or regexes) and match_targets(meta, substrings, regexes)
-        is_js = is_js_packet(meta)
+        is_js = _is_dynamic_script_packet(meta)
         is_doc = _is_entry_document(meta, args.url)
         is_related = not args.no_related_bodies and _is_related_packet(meta)
         reasons = []
@@ -1019,7 +1051,7 @@ def _classify_packets(steps, args, substrings, regexes, body_cache=None):
 
     for i, (p, meta) in enumerate(packets):
         d = meta
-        is_js = is_js_packet(d)
+        is_js = _is_dynamic_script_packet(d)
         is_target = has_target_filter and match_targets(d, substrings, regexes)
         is_doc = document is None and _is_entry_document(d, args.url)
         if is_js or is_target or is_doc:
@@ -1430,7 +1462,7 @@ def _flush_partial(args, steps) -> Optional[str]:
 
 def _apply_ruyipage_anti_hang_patch():
     """防挂补丁（依赖 ruyipage 内部实现，失败仅告警不阻断）：
-    - CapturePacket._fallback_fetch_body 保留但仅对 JS 包放行：capture.stop() 逐包拉 body 时，
+    - CapturePacket._fallback_fetch_body 保留但仅对动态脚本包放行：capture.stop() 逐包拉 body 时，
       拿不到 body 的 GET 会逐个在页面内 replay fetch（15s/个），京东等大页面 GET 多会拖到数百秒；
       本脚本收尾已不调 stop()，改为按需 to_dict(include_bodies=True)（仅 JS / 目标命中包拉 body），
       replay 成本有界。JS 是后续定位分析的关键证据，其 gzip/br 响应体 BiDi collector 常拿不到，
@@ -1444,7 +1476,11 @@ def _apply_ruyipage_anti_hang_patch():
         def _js_only_fallback(self):
             if self.method != "GET" or not self.url or not self._owner:
                 return None
-            if not is_js_packet({"url": self.url, "response_headers": dict(self.response_headers or {})}):
+            if not _is_dynamic_script_packet({
+                "url": self.url,
+                "request_headers": dict(getattr(self, "request_headers", None) or {}),
+                "response_headers": dict(self.response_headers or {}),
+            }):
                 return None
             return orig(self)
         _cap.CapturePacket._fallback_fetch_body = _js_only_fallback
@@ -1955,6 +1991,29 @@ def run_self_test() -> int:
     retry_related = _select_related_indices(retry_records, [2, 5], 60)
     assert retry_related == [0, 1, 3, 4], f"多次终态提交未保留最后一次验证码链：{retry_related}"
 
+    # 动态下发脚本：URL 无 .js 后缀、content-type 为 text/html，但由 XHR/fetch 发起
+    # （猿人学 match14 的 /api2/14）。必须进 JS 落盘通道，且不能被认成入口文档。
+    dynamic_script = {
+        "url": "https://match.example.com/api2/14",
+        "method": "GET",
+        "response_status": 200,
+        "request_headers": {"sec-fetch-dest": "empty", "x-requested-with": "XMLHttpRequest"},
+        "response_headers": {"content-type": "text/html; charset=utf-8"},
+    }
+    entry_doc = {
+        "url": "https://match.example.com/match/14",
+        "method": "GET",
+        "response_status": 200,
+        "request_headers": {"sec-fetch-dest": "document", "accept": "text/html,*/*"},
+        "response_headers": {"content-type": "text/html; charset=utf-8"},
+    }
+    assert _is_dynamic_script_packet(dynamic_script), "XHR 拿到的 text/html 脚本未识别为动态脚本"
+    assert not _is_entry_document(dynamic_script, "https://match.example.com/match/14"), \
+        "动态脚本包不应占用入口文档"
+    assert not _is_dynamic_script_packet(entry_doc), "入口导航 HTML 不应被当成动态脚本"
+    assert _is_entry_document(entry_doc, "https://match.example.com/match/14"), "入口文档识别失效"
+    assert _related_reason(dynamic_script) is None, "动态脚本包应由 JS 通道保留，不进 related"
+
     packets = [_SelfTestPacket(records[0]), _SelfTestPacket(records[5])]
     assert _target_reached(packets, ["/login/submit"], []), "最终业务接口应触发终态"
     assert not _target_reached([_SelfTestPacket(records[0])], ["/login/submit"], []), "未到终态不应提前结束"
@@ -2093,6 +2152,19 @@ def run_self_test() -> int:
         assert {h.get("related_reason") for h in related_hits} == {"flow-url"}, "关联材料原因标注错误"
         no_target = _classify_packets([_SelfTestPacket(r) for r in records], args, [], [])
         assert len(no_target[2]) == 0, "未指定 targets 时不应把所有包当成目标包"
+
+        # 动态下发脚本（XHR 拿到的 text/html）必须落到 case/js/original，不能被当成入口文档丢弃。
+        script_records = [
+            dict(entry_doc, response_body="<html><script src=/m.js></script></html>"),
+            dict(dynamic_script, response_body="window.match14='token';"),
+        ]
+        script_classified = _classify_packets([_SelfTestPacket(r) for r in script_records], args, [], [])
+        script_js = script_classified[1]
+        assert [j.get("url") for j in script_js] == [dynamic_script["url"]], \
+            f"动态下发脚本未落盘到 JS 目录：{script_js}"
+        assert script_js[0].get("size") > 0 and not script_js[0].get("body_missing"), "动态脚本响应体为空"
+        assert script_classified[6] and script_classified[6].get("url") == entry_doc["url"], \
+            "入口文档应仍由导航请求占位"
 
         # 断连前已预取正文时，收尾不应再次依赖浏览器 RPC。
         live_args = SimpleNamespace(
