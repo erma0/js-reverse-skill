@@ -1,6 +1,6 @@
 # 脚本索引
 
-本目录包含 62 个可执行脚本（53 个 JavaScript、9 个 Python），按功能分为 10 类。以下索引以 `scripts/` 当前实际文件为准，不包含 `README.md` 与 `lib/` 共享模块。
+本目录包含 64 个可执行脚本（55 个 JavaScript、9 个 Python），按功能分为 11 类。以下索引以 `scripts/` 当前实际文件为准，不包含 `README.md` 与 `lib/` 共享模块。
 
 本文中的 `<project-root>` 指项目根目录，其下包含平级的 `case/` 与 `result/` 目录。需要 case 目录的脚本使用 `<project-root>/case`，需要项目根目录的脚本直接使用 `<project-root>`。`forensic_ruyipage.py` 与 `capture_ruyitrace_log.js` 会在 `--case-dir` 下创建 `case/`，因此必须传入 `<project-root>`。`check_session_resume`/`check_fingerprint_fixture`/`check_trace_api_coverage` 已归一化，传 `<project-root>` 或 `<project-root>/case` 均可。
 
@@ -27,6 +27,13 @@
 | `write_markdown_utf8.js` | 以 UTF-8 写入 Markdown，避免 Windows 编码问题 | `node scripts/write_markdown_utf8.js --input 草稿.md --out 最终项目总结.md --markdown` |
 | `write_stage_report.js` | 以 UTF-8 写入中文命名阶段报告 | `node scripts/write_stage_report.js --case-dir <project-root> --stage 需求信息确认 --markdown` |
 | `check_stage_reports.js` | 检查阶段报告中文文件名、UTF-8、必要阶段及动态字段 | `node scripts/check_stage_reports.js --case-dir <project-root> --require-stage 需求信息确认 --markdown` |
+
+## 状态机与聚合门禁（2 个）
+
+| 脚本 | 功能 | 典型用法 |
+|------|------|---------|
+| `state_machine.js` | 执行状态强制跟踪：状态持久化到 case/state.json，`--set` 校验 SKILL.md §4 状态机转换合法性（跳过必经节点被拒）、`--guard replay` 拦截前置阶段重放/写请求（越权退出码 2 并留审计） | `node scripts/state_machine.js --case-dir <project-root> --set IMPLEMENT --markdown`；`node scripts/state_machine.js --case-dir <project-root> --guard replay` |
+| `gate.js` | 节点聚合门禁：进入节点前一次跑完该节点必验门禁并汇总 PASS/FAIL/SKIP；无 `--at` 时从 state.json 读当前节点；含 FAIL 或需参数缺失退出码非 0 | `node scripts/gate.js --case-dir <project-root> --at IMPLEMENT --url <target> --markdown` |
 
 ## 网络取证与日志采集（5 个）
 
