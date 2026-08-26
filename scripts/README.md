@@ -32,7 +32,7 @@
 
 | 脚本 | 功能 | 典型用法 |
 |------|------|---------|
-| `state_machine.js` | 执行状态强制跟踪：状态持久化到 case/state.json，`--set` 校验 SKILL.md §4 状态机转换合法性（跳过必经节点被拒）、`--guard replay` 拦截前置阶段重放/写请求（越权退出码 2 并留审计） | `node scripts/state_machine.js --case-dir <project-root> --set IMPLEMENT --markdown`；`node scripts/state_machine.js --case-dir <project-root> --guard replay` |
+| `state_machine.js` | 执行状态强制跟踪：状态持久化到 case/state.json，`--set` 校验 SKILL.md §4 状态机转换合法性（跳过必经节点被拒）、`--guard replay` 拦截前置阶段重放/写请求、`--guard external` 拦截取证前的外部题解检索（越权退出码 2 并留审计）；`--init`/`--set`/`--guard` 输出均渲染 11 项「执行 TODO 清单」勾选表并落盘 `state.json.todo` | `node scripts/state_machine.js --case-dir <project-root> --set IMPLEMENT --markdown`；`node scripts/state_machine.js --case-dir <project-root> --guard replay`；`node scripts/state_machine.js --case-dir <project-root> --guard external` |
 | `gate.js` | 节点聚合门禁：进入节点前一次跑完该节点必验门禁并汇总 PASS/FAIL/SKIP；无 `--at` 时从 state.json 读当前节点；含 FAIL 或需参数缺失退出码非 0 | `node scripts/gate.js --case-dir <project-root> --at IMPLEMENT --url <target> --markdown` |
 
 ## 网络取证与日志采集（5 个）
