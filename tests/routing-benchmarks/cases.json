@@ -4,127 +4,249 @@
     {
       "id": "RB-001",
       "title": "GATE-2 硬阻断：URL 不是证据，空目录必须停在 EVIDENCE_GATE",
-      "skillAnchors": ["URL 不是证据"],
+      "skillAnchors": [
+        "URL 不是证据"
+      ],
       "script": "check_evidence.js",
-      "args": ["--case-dir", "{caseDir}", "--url", "https://api.example.com/v1/data", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--url",
+        "https://api.example.com/v1/data",
+        "--markdown"
+      ],
       "files": {},
       "expectExit": 1,
-      "stdoutIncludes": ["缺失证据"]
+      "stdoutIncludes": [
+        "缺失证据"
+      ]
     },
     {
       "id": "RB-002",
       "title": "单独 JS 文件只是辅助材料，不计为 Step 1",
-      "skillAnchors": ["单独 JS、截图或指纹基线只作辅助材料"],
+      "skillAnchors": [
+        "单独 JS、截图或指纹基线只作辅助材料"
+      ],
       "script": "check_evidence.js",
-      "args": ["--case-dir", "{caseDir}", "--url", "https://api.example.com/v1/data", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--url",
+        "https://api.example.com/v1/data",
+        "--markdown"
+      ],
       "files": {
         "case/forensic/app.js": "var a = 1; function sign(x) { return x; }"
       },
       "expectExit": 1,
-      "stdoutIncludes": ["Step 1 网络取证证据"]
+      "stdoutIncludes": [
+        "Step 1 网络取证证据"
+      ]
     },
     {
       "id": "RB-003",
       "title": "capture 命中 --require-network-signal 的非 OPTIONS 2xx 时 Step 1 具备（缺 Step 2 仍阻断）",
-      "skillAnchors": ["--require-network-signal"],
+      "skillAnchors": [
+        "--require-network-signal"
+      ],
       "script": "check_evidence.js",
-      "args": ["--case-dir", "{caseDir}", "--url", "https://api.example.com/v1/data", "--require-network-signal", "api.example.com/v1/data", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--url",
+        "https://api.example.com/v1/data",
+        "--require-network-signal",
+        "api.example.com/v1/data",
+        "--markdown"
+      ],
       "files": {
         "case/forensic/capture.json": "[{\"url\": \"https://api.example.com/v1/data\", \"method\": \"POST\", \"request_body\": \"x=1\", \"response_status\": 200, \"response_headers\": {\"content-type\": \"application/json\"}}]"
       },
       "expectExit": 1,
-      "stdoutIncludes": ["Step 2"],
-      "stdoutExcludes": ["Step 1 网络取证证据（无有效"]
+      "stdoutIncludes": [
+        "Step 2"
+      ],
+      "stdoutExcludes": [
+        "Step 1 网络取证证据（无有效"
+      ]
     },
     {
       "id": "RB-004",
       "title": "目标接口只有 OPTIONS 响应不算 Step 1 命中（PARTIAL 语义）",
-      "skillAnchors": ["OPTIONS"],
+      "skillAnchors": [
+        "OPTIONS"
+      ],
       "script": "check_evidence.js",
-      "args": ["--case-dir", "{caseDir}", "--url", "https://api.example.com/v1/data", "--require-network-signal", "api.example.com/v1/data", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--url",
+        "https://api.example.com/v1/data",
+        "--require-network-signal",
+        "api.example.com/v1/data",
+        "--markdown"
+      ],
       "files": {
         "case/forensic/capture.json": "[{\"url\": \"https://api.example.com/v1/data\", \"method\": \"OPTIONS\", \"response_status\": 204, \"response_headers\": {}}]"
       },
       "expectExit": 1,
-      "stdoutIncludes": ["Step 1 网络取证证据"]
+      "stdoutIncludes": [
+        "Step 1 网络取证证据"
+      ]
     },
     {
       "id": "RB-005",
       "title": "TRACE_CAPTURE 出口门禁：Step 1-only 不得进入 CASE_LOOKUP",
-      "skillAnchors": ["TRACE_CAPTURE 出口门禁复检"],
+      "skillAnchors": [
+        "TRACE_CAPTURE 出口门禁复检"
+      ],
       "script": "check_trace_gate.js",
-      "args": ["--case-dir", "{caseDir}", "--url", "https://api.example.com/v1/data", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--url",
+        "https://api.example.com/v1/data",
+        "--markdown"
+      ],
       "files": {
         "case/forensic/capture.json": "[{\"url\": \"https://api.example.com/v1/data\", \"method\": \"POST\", \"request_body\": \"x=1\", \"response_status\": 200}]"
       },
       "expectExit": 1,
-      "stdoutIncludes": ["停在 TRACE_CAPTURE"]
+      "stdoutIncludes": [
+        "停在 TRACE_CAPTURE"
+      ]
     },
     {
       "id": "RB-006",
       "title": "Step1+Step2 齐备且 writer 信号命中 → 出口门禁放行 CASE_LOOKUP",
-      "skillAnchors": ["才可进入 CASE_LOOKUP"],
+      "skillAnchors": [
+        "才可进入 CASE_LOOKUP"
+      ],
       "script": "check_trace_gate.js",
-      "args": ["--case-dir", "{caseDir}", "--url", "https://api.example.com/v1/data", "--require-trace-signal", "Headers.set", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--url",
+        "https://api.example.com/v1/data",
+        "--require-trace-signal",
+        "Headers.set",
+        "--markdown"
+      ],
       "files": {
         "case/forensic/capture.json": "[{\"url\": \"https://api.example.com/v1/data\", \"method\": \"POST\", \"request_body\": \"x=1\", \"response_status\": 200}]",
         "case/ruyi-trace/logs/trace.ndjson": "{\"api\": \"Headers.set\", \"t\": \"call\", \"args\": [\"x-sign\", \"abc\"], \"url\": \"https://api.example.com/v1/data\", \"stack\": [{\"file\": \"https://static.example.com/app.js\", \"line\": 10, \"col\": 5}]}\n"
       },
       "expectExit": 0,
-      "stdoutIncludes": ["可进入 CASE_LOOKUP"]
+      "stdoutIncludes": [
+        "可进入 CASE_LOOKUP"
+      ]
     },
     {
       "id": "RB-007",
       "title": "NDJSON 已产出但 writer 信号未命中 → 覆盖不足停在 TRACE_RETRY，不得写成「没有 trace」",
-      "skillAnchors": ["不得写成“没有 trace”"],
+      "skillAnchors": [
+        "不得写成“没有 trace”"
+      ],
       "script": "check_trace_gate.js",
-      "args": ["--case-dir", "{caseDir}", "--url", "https://api.example.com/v1/data", "--require-trace-signal", "handshake", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--url",
+        "https://api.example.com/v1/data",
+        "--require-trace-signal",
+        "handshake",
+        "--markdown"
+      ],
       "files": {
         "case/forensic/capture.json": "[{\"url\": \"https://api.example.com/v1/data\", \"method\": \"POST\", \"request_body\": \"x=1\", \"response_status\": 200}]",
         "case/ruyi-trace/logs/trace.ndjson": "{\"api\": \"Headers.set\", \"t\": \"call\", \"args\": [\"x-sign\", \"abc\"], \"url\": \"https://api.example.com/v1/data\", \"stack\": [{\"file\": \"https://static.example.com/app.js\", \"line\": 10, \"col\": 5}]}\n"
       },
       "expectExit": 1,
-      "stdoutIncludes": ["TRACE_RETRY"]
+      "stdoutIncludes": [
+        "TRACE_RETRY"
+      ]
     },
     {
       "id": "RB-008",
       "title": "裸泛化 API（createElement）不得作为 writer 证据信号，门禁直接拒绝",
-      "skillAnchors": ["裸 `createElement`"],
+      "skillAnchors": [
+        "裸 `createElement`"
+      ],
       "script": "check_trace_gate.js",
-      "args": ["--case-dir", "{caseDir}", "--url", "https://api.example.com/v1/data", "--require-trace-signal", "createElement", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--url",
+        "https://api.example.com/v1/data",
+        "--require-trace-signal",
+        "createElement",
+        "--markdown"
+      ],
       "files": {},
       "expectExit": 1,
-      "outputIncludes": ["泛化"]
+      "outputIncludes": [
+        "泛化"
+      ]
     },
     {
       "id": "RB-009",
       "title": "STEP2_ONLY：用户已提供 NDJSON 时出口门禁直接通过",
-      "skillAnchors": ["STEP2_ONLY"],
+      "skillAnchors": [
+        "STEP2_ONLY"
+      ],
       "script": "check_trace_gate.js",
-      "args": ["--case-dir", "{caseDir}", "--url", "https://api.example.com/v1/data", "--inputs", "{caseDir}/input.ndjson", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--url",
+        "https://api.example.com/v1/data",
+        "--inputs",
+        "{caseDir}/input.ndjson",
+        "--markdown"
+      ],
       "files": {
         "input.ndjson": "{\"stack\": [{\"file\": \"https://static.example.com/app.js\", \"line\": 1, \"col\": 1}], \"api\": \"fetch\"}\n"
       },
       "expectExit": 0,
-      "stdoutIncludes": ["可进入 CASE_LOOKUP"]
+      "stdoutIncludes": [
+        "可进入 CASE_LOOKUP"
+      ]
     },
     {
       "id": "RB-010",
       "title": "用户 cURL 材料通过内容校验后计入 Step 1（MATERIALS_FALLBACK 前提之一）",
-      "skillAnchors": ["HAR、cURL、原始 HTTP 请求文本"],
+      "skillAnchors": [
+        "HAR、cURL、原始 HTTP 请求文本"
+      ],
       "script": "check_evidence.js",
-      "args": ["--case-dir", "{caseDir}", "--url", "https://api.example.com/v1/data", "--inputs", "{caseDir}/req.txt", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--url",
+        "https://api.example.com/v1/data",
+        "--inputs",
+        "{caseDir}/req.txt",
+        "--markdown"
+      ],
       "files": {
         "req.txt": "curl 'https://api.example.com/v1/data' -X POST -H 'content-type: application/json' --data '{\"x\":1}'"
       },
       "expectExit": 1,
-      "stdoutIncludes": ["计入 Step 1"],
-      "stdoutExcludes": ["Step 1 网络取证证据（无有效"]
+      "stdoutIncludes": [
+        "计入 Step 1"
+      ],
+      "stdoutExcludes": [
+        "Step 1 网络取证证据（无有效"
+      ]
     },
     {
       "id": "RB-011",
       "title": "状态机文本锚点：MATERIALS_FALLBACK 节点与 IMPLEMENT 的 Step 2 前置不得被删",
-      "skillAnchors": ["MATERIALS_FALLBACK", "Step 2 缺失（check_trace_gate.js 退出码 1）时不得进入 IMPLEMENT", "EXTERNAL_LOOKUP 豁免"],
+      "skillAnchors": [
+        "MATERIALS_FALLBACK",
+        "Step 2 缺失（check_trace_gate.js 退出码 1）时不得进入 IMPLEMENT",
+        "EXTERNAL_LOOKUP 豁免"
+      ],
       "script": null,
       "args": [],
       "files": {},
@@ -133,7 +255,12 @@
     {
       "id": "RB-012",
       "title": "T1 识别信号表锚点：主流 SDK/验证码/字体反爬行不得被删",
-      "skillAnchors": ["webmssdk", "h5st", "geetest", "woff"],
+      "skillAnchors": [
+        "webmssdk",
+        "h5st",
+        "geetest",
+        "woff"
+      ],
       "script": null,
       "args": [],
       "files": {},
@@ -142,152 +269,282 @@
     {
       "id": "RB-013",
       "title": "identify_crypto：32 位 hex 样本必须给出 MD5 族假设（IDENTIFY 特征驱动）",
-      "skillAnchors": ["identify_crypto.js"],
+      "skillAnchors": [
+        "identify_crypto.js"
+      ],
       "script": "identify_crypto.js",
-      "args": ["--value", "e10adc3949ba59abbe56e057f20f883e", "--markdown"],
+      "args": [
+        "--value",
+        "e10adc3949ba59abbe56e057f20f883e",
+        "--markdown"
+      ],
       "files": {},
       "expectExit": 0,
-      "stdoutIncludes": ["MD5"]
+      "stdoutIncludes": [
+        "MD5"
+      ]
     },
     {
       "id": "RB-014",
       "title": "Cookie 归因：capture Set-Cookie × trace cookie 写入双源融合可用",
-      "skillAnchors": ["analyze_cookie_attribution.js"],
+      "skillAnchors": [
+        "analyze_cookie_attribution.js"
+      ],
       "script": "analyze_cookie_attribution.js",
-      "args": ["--case-dir", "{caseDir}", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--markdown"
+      ],
       "files": {
         "case/forensic/capture.json": "[{\"url\": \"https://www.example.com/\", \"method\": \"GET\", \"response_status\": 200, \"response_headers\": {\"set-cookie\": \"SESS=abc; Path=/; HttpOnly\"}}]",
         "case/ruyi-trace/logs/trace.ndjson": "{\"api\": \"document.cookie(set)\", \"t\": \"set\", \"args\": [\"acw_sc__v2=xyz; path=/\"], \"stack\": [{\"file\": \"https://www.example.com/\", \"line\": 3, \"col\": 1}]}\n"
       },
       "expectExit": 0,
-      "stdoutIncludes": ["acw_sc__v2 | js", "SESS | server"]
+      "stdoutIncludes": [
+        "acw_sc__v2 | js",
+        "SESS | server"
+      ]
     },
     {
       "id": "RB-015",
       "title": "REAL_VERIFY 前置离线回归：fixture 与实际输出一致时 compare_fixture 放行",
-      "skillAnchors": ["compare_fixture.js"],
+      "skillAnchors": [
+        "compare_fixture.js"
+      ],
       "script": "compare_fixture.js",
-      "args": ["--fixture", "{caseDir}/sample.fixture.json", "--actual", "{caseDir}/actual.json", "--field", "sign", "--markdown"],
+      "args": [
+        "--fixture",
+        "{caseDir}/sample.fixture.json",
+        "--actual",
+        "{caseDir}/actual.json",
+        "--field",
+        "sign",
+        "--markdown"
+      ],
       "files": {
         "sample.fixture.json": "{\"param\": \"sign\", \"input\": {\"a\": 1}, \"expected\": {\"sign\": \"abc123\"}}",
         "actual.json": "{\"output\": {\"sign\": \"abc123\"}}"
       },
       "expectExit": 0,
-      "stdoutIncludes": ["通过"]
+      "stdoutIncludes": [
+        "通过"
+      ]
     },
     {
       "id": "RB-016",
       "title": "REAL_VERIFY 前置离线回归：输出偏差必须被拦截（退出码 2），不得带偏差进真实请求",
-      "skillAnchors": ["不得带着已知偏差发起真实请求"],
+      "skillAnchors": [
+        "不得带着已知偏差发起真实请求"
+      ],
       "script": "compare_fixture.js",
-      "args": ["--fixture", "{caseDir}/sample.fixture.json", "--actual", "{caseDir}/actual.json", "--field", "sign", "--markdown"],
+      "args": [
+        "--fixture",
+        "{caseDir}/sample.fixture.json",
+        "--actual",
+        "{caseDir}/actual.json",
+        "--field",
+        "sign",
+        "--markdown"
+      ],
       "files": {
         "sample.fixture.json": "{\"param\": \"sign\", \"input\": {\"a\": 1}, \"expected\": {\"sign\": \"abc123\"}}",
         "actual.json": "{\"output\": {\"sign\": \"deadbeef\"}}"
       },
       "expectExit": 2,
-      "stdoutIncludes": ["失败"]
+      "stdoutIncludes": [
+        "失败"
+      ]
     },
     {
       "id": "RB-017",
       "title": "IMPLEMENT 补环境前置：entry-chain + missing-env-priority 两文件达标才放行",
-      "skillAnchors": ["check_env_prerequisites.js", "两文件缺一不得开始补环境"],
+      "skillAnchors": [
+        "check_env_prerequisites.js",
+        "两文件缺一不得开始补环境"
+      ],
       "script": "check_env_prerequisites.js",
-      "args": ["--case-dir", "{caseDir}", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--markdown"
+      ],
       "files": {
         "case/notes/entry-chain.md": "入口 window.sign\n请求链 fetch ← makeSign\n关键 stack https://static.example.com/app.js:120:8",
         "case/notes/missing-env-priority.md": "| 模块 | api | 优先级 | 证据 |\n|---|---|---|---|\n| navigator | userAgent | P0 | RuyiTrace 证据 |\n| screen | width | P1 | 推断 |"
       },
       "expectExit": 0,
-      "stdoutIncludes": ["可开始补环境"]
+      "stdoutIncludes": [
+        "可开始补环境"
+      ]
     },
     {
       "id": "RB-018",
       "title": "IMPLEMENT 补环境前置：两文件缺失必须拦截，禁止盲补空转循环",
-      "skillAnchors": ["禁止先根据 Node.js 报错盲补"],
+      "skillAnchors": [
+        "禁止先根据 Node.js 报错盲补"
+      ],
       "script": "check_env_prerequisites.js",
-      "args": ["--case-dir", "{caseDir}", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--markdown"
+      ],
       "files": {},
       "expectExit": 1,
-      "stdoutIncludes": ["不得开始补环境"]
+      "stdoutIncludes": [
+        "不得开始补环境"
+      ]
     },
     {
       "id": "RB-019",
       "title": "多进程 NDJSON 信号聚合：不同进程文件各命中一个 writer 信号时按聚合判定通过",
-      "skillAnchors": ["合并所有 tab/content 进程文件"],
+      "skillAnchors": [
+        "合并所有 tab/content 进程文件"
+      ],
       "script": "check_trace_gate.js",
-      "args": ["--case-dir", "{caseDir}", "--url", "https://api.example.com/v1/data", "--require-trace-signal", "Headers.set", "--require-trace-signal", "XMLHttpRequest.send", "--markdown"],
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--url",
+        "https://api.example.com/v1/data",
+        "--require-trace-signal",
+        "Headers.set",
+        "--require-trace-signal",
+        "XMLHttpRequest.send",
+        "--markdown"
+      ],
       "files": {
         "case/forensic/capture.json": "[{\"url\": \"https://api.example.com/v1/data\", \"method\": \"POST\", \"request_body\": \"x=1\", \"response_status\": 200}]",
         "case/ruyi-trace/logs/trace_process_1001.ndjson": "{\"api\": \"Headers.set\", \"t\": \"call\", \"args\": [\"x-sign\", \"abc\"], \"url\": \"https://api.example.com/v1/data\", \"stack\": [{\"file\": \"https://static.example.com/app.js\", \"line\": 10, \"col\": 5}]}\n",
         "case/ruyi-trace/logs/trace_process_1002.ndjson": "{\"api\": \"XMLHttpRequest.send\", \"t\": \"call\", \"args\": [\"body\"], \"url\": \"https://api.example.com/v1/data\", \"stack\": [{\"file\": \"https://static.example.com/app.js\", \"line\": 30, \"col\": 1}]}\n"
       },
       "expectExit": 0,
-      "stdoutIncludes": ["可进入 CASE_LOOKUP"]
+      "stdoutIncludes": [
+        "可进入 CASE_LOOKUP"
+      ]
     },
     {
       "id": "RB-020",
       "title": "验证码题型分类器自测可用（classify_verify 是验证码链路识别的门禁入口）",
-      "skillAnchors": ["classify_verify.py"],
+      "skillAnchors": [
+        "classify_verify.py"
+      ],
       "script": "classify_verify.py",
-      "args": ["--self-test"],
+      "args": [
+        "--self-test"
+      ],
       "files": {},
       "expectExit": 0,
-      "stdoutIncludes": ["passed"]
+      "stdoutIncludes": [
+        "passed"
+      ]
     },
     {
       "id": "RB-021",
       "title": "验证码答案层门禁：缺 captcha_type 的 answer JSON 必须 FAIL",
-      "skillAnchors": ["check_captcha_answer.js"],
+      "skillAnchors": [
+        "check_captcha_answer.js"
+      ],
       "script": "check_captcha_answer.js",
-      "args": ["--file", "{caseDir}/answer.json", "--markdown"],
+      "args": [
+        "--file",
+        "{caseDir}/answer.json",
+        "--markdown"
+      ],
       "files": {
         "answer.json": "{\"source_image_size\": [300, 150], \"offset\": {\"x\": 120}}"
       },
       "expectExit": 1,
-      "stdoutIncludes": ["FAIL"]
+      "stdoutIncludes": [
+        "FAIL"
+      ]
     },
     {
       "id": "RB-022",
       "title": "验证码答案层门禁：契约完整的 slider answer 放行（CLEAN）",
-      "skillAnchors": ["FAIL 不得进入参数化实现"],
+      "skillAnchors": [
+        "FAIL 不得进入参数化实现"
+      ],
       "script": "check_captcha_answer.js",
-      "args": ["--file", "{caseDir}/answer.json", "--markdown"],
+      "args": [
+        "--file",
+        "{caseDir}/answer.json",
+        "--markdown"
+      ],
       "files": {
         "answer.json": "{\"captcha_type\": \"slider\", \"provider\": \"geetest\", \"solver\": \"ddddocr-slide_match\", \"coordinate_space\": \"image-pixel\", \"source_image_size\": [300, 150], \"offset\": {\"x\": 120}}"
       },
       "expectExit": 0,
-      "stdoutIncludes": ["CLEAN"]
+      "stdoutIncludes": [
+        "CLEAN"
+      ]
     },
     {
       "id": "RB-023",
       "title": "identify_crypto：JWT 三段 base64url 结构识别",
-      "skillAnchors": ["identify_crypto.js"],
+      "skillAnchors": [
+        "identify_crypto.js"
+      ],
       "script": "identify_crypto.js",
-      "args": ["--value", "eyJhbGciOiJIUzI1NiJ9.eyJhIjoxfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c", "--markdown"],
+      "args": [
+        "--value",
+        "eyJhbGciOiJIUzI1NiJ9.eyJhIjoxfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+        "--markdown"
+      ],
       "files": {},
       "expectExit": 0,
-      "stdoutIncludes": ["JWT"]
+      "stdoutIncludes": [
+        "JWT"
+      ]
     },
     {
       "id": "RB-024",
       "title": "identify_crypto：base64 包装的 WASM magic bytes 识别（路由到路径 C 整包黑盒）",
-      "skillAnchors": ["先整包黑盒"],
+      "skillAnchors": [
+        "先整包黑盒"
+      ],
       "script": "identify_crypto.js",
-      "args": ["--value", "AGFzbQEAAAAIAAAAAAAAAA", "--markdown"],
+      "args": [
+        "--value",
+        "AGFzbQEAAAAIAAAAAAAAAA",
+        "--markdown"
+      ],
       "files": {},
       "expectExit": 0,
-      "stdoutIncludes": ["WASM"]
+      "stdoutIncludes": [
+        "WASM"
+      ]
     },
     {
       "id": "RB-025",
       "title": "identify_crypto：UUID v4 形态识别（随机 nonce 判定）",
-      "skillAnchors": ["identify_crypto.js"],
+      "skillAnchors": [
+        "identify_crypto.js"
+      ],
       "script": "identify_crypto.js",
-      "args": ["--value", "3f2504e0-4f89-41d3-9a0c-0305e82c3301", "--markdown"],
+      "args": [
+        "--value",
+        "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        "--markdown"
+      ],
       "files": {},
       "expectExit": 0,
-      "stdoutIncludes": ["UUID"]
+      "stdoutIncludes": [
+        "UUID"
+      ]
+    },
+    {
+      "id": "RB-026",
+      "title": "取证与识别硬约束锚点：终态过滤精确性 + 参数名存在≠参数生效不得被删",
+      "skillAnchors": [
+        "禁止用会误命中同号旁路接口的宽正则",
+        "参数名存在 ≠ 参数生效"
+      ],
+      "script": null,
+      "args": [],
+      "files": {},
+      "expectExit": 0
     }
   ]
 }

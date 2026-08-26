@@ -20,6 +20,7 @@
 | Storage 派生 Cookie | localStorage / sessionStorage / IndexedDB 参与 | 固化必要存储键，或在入口中先生成存储再生成 Cookie |
 | 指纹 / challenge Cookie | 依赖 navigator、canvas、WebGL、时间、随机数、server seed | 结合 RuyiTrace / Hook / Node trace 补齐环境和 seed 传递 |
 | 一次性服务端状态 | 与服务端临时状态、账号风控或设备校验强绑定 | 说明不可或不应复现，要求授权交互或离线样本 |
+| 服务端下发脚本 cookie | 业务请求前有一个同域接口返回**非 JSON 的 JS 文本**，页面 `eval(data)` 后 cookie 出现；值本身是服务端令牌，本地无算法 | 复现该前置请求 + 解码下发脚本取值；令牌通常一次性，禁止缓存复用 |
 
 ## 分析流程
 
@@ -214,6 +215,23 @@ function isCookieExpired(response) {
 
 **注意**：Cookie 失效重试与 IP 风控退避不冲突——先按 `ip-risk-control.md` 识别是否 IP 风控，若不是再走 Cookie 重试。
 
+## 服务端下发脚本型 cookie 的最短定位路径
+
+形态：业务请求前紧邻一个**同域、响应不是 JSON 的**接口，页面拿到响应后直接 `eval`，cookie 随即出现。挑战脚本不在任何静态 JS 文件里，靠关键词搜源码找不到。
+
+四步定位（每步都有对应证据文件，全程不超过 10 分钟）：
+
+1. **builder**：看 `case/ruyi-trace/logs/eval/` —— RuyiTrace 把每段 eval 编译的代码单独落盘为 `eval_<pid>_<seq>_eval-direct.js`，配套 `trace_eval_process_<pid>.ndjson` 的 `dynamicCode` 记录带 stack 顶帧，直接给出脚本全文 + 调用它的文件行号。
+2. **writer**：看 `case/ruyi-trace/logs/cookie/` 的 `cookieWrites`（`source=document.cookie`）确认 cookie 名与最终写入值；`cookieSetAttempts` 与 `cookieWrites` 成对出现。
+3. **source**：在 `capture.json` 里找业务请求**前紧邻的、响应非 JSON 的同域请求**，即下发脚本的来源接口。
+4. **entry**：回到 `case/forensic/document.html` 确认调用点（常见形态是分页/请求函数里的同步 `$.ajax({async:false, success:function(data){eval(data)}})`，意味着每次业务请求前都会重取一次）。
+
+实现纪律：
+
+- **不要执行下发脚本**。这类脚本的混淆原子通常有限且可穷举（如字符串加法 + `([] + ![])[i]`/`([] + !![])[i]`/`({} + "")[i]` 取字符），写几十行定向表达式求值器即可，比补 `document` 环境更简单，也避免执行服务端下发的任意代码。遇未知原子显式抛错，不要静默回退到 `eval`。
+- **令牌禁止缓存**（同经验法则规则 22）：值是一次性的，缺失或过期典型返回 `400 {"error":"token failed"}`。按浏览器行为在每次业务请求前重取。
+- **不要按固定长度校验**：服务端下发的随机串长度每次不同（match13 实测 50~203 字节），只有前缀时间戳格式稳定。
+
 ## 相关案例
 
 | 案例文件 | 关联点 |
@@ -221,4 +239,5 @@ function isCookieExpired(response) {
 | `cases/jsvmp-ruishu6-cookie-412-sdenv.md` | 瑞数6 412 挑战：`Set-Cookie` 下发 `acw_tc` + `XxxS`，JSVMP 生成 `XxxT` 写入 `document.cookie`，三 Cookie 组合通过验证 |
 | `cases/universal-vmp-source-instrumentation.md` | 通用 VMP cookie 生成方法论：覆盖 RS 412 / Akamai `_abck` / `ttwid` / `msToken` 等多场景的 source/entry/builder/writer 分析 |
 | `cases/jsvmp-xhr-interceptor-env-emulation.md` | `ttwid` Cookie 由浏览器 JS 生成后写入，纯协议无法直接获取，需补环境或调试浏览器导出 |
+| `cases/yuanrenxue-match13-eval-cookie.md` | 服务端下发脚本型：`/api2/13` 返回字符串加法混淆的 `document.cookie=` 语句，eval 落盘取 builder + 定向求值器解码，令牌一次性禁缓存 |
 | `cases/jsvmp-dual-sign-xhr-intercept-cacheOpts-jsdom-firefox.md` | `msToken` / `ttwid` 等 Cookie 字段作为 JSVMP 签名输入参与双签名生成 |

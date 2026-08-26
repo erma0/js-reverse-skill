@@ -12,6 +12,24 @@ description: >
 
 ## 0. 分析前硬门禁（不可跳过）
 
+### 0.0 状态机强制跟踪与动作守卫（不可跳过）
+
+激活 skill 后立即初始化执行状态，之后全程用脚本跟踪"当前在哪个步骤"，让动作边界成为技术约束而非口头约定：
+
+```powershell
+# 激活后立即初始化（写入 case/state.json，起点 INTENT_CONFIRM）
+node scripts/state_machine.js --case-dir <project-root> --init --markdown
+# 每次状态转换：--set 校验合法性，跳过必经节点（如直跳 IMPLEMENT）直接报错；--force 放行但留审计
+node scripts/state_machine.js --case-dir <project-root> --set <NODE> --note "<关键结论>" --markdown
+# 任何向目标接口发起重放/写请求的执行入口（临时脚本、最终实现验证），运行前必须过守卫：
+# 当前节点不在 REAL_VERIFY/DIAGNOSE 时拒绝执行（退出码 2），前置阶段越权重放从技术上被拦截
+node scripts/state_machine.js --case-dir <project-root> --guard replay
+# 进入每个节点前聚合跑该节点必验门禁；输出含 FAIL 或需参数缺失时停在当前节点
+node scripts/gate.js --case-dir <project-root> --at <NODE> --url <目标URL> --inputs <材料路径> --markdown
+```
+
+违反规则：任何"当前执行与 state.json 不一致"（未 init、非法跳转、越权重放）都是任务失败信号；先回读 state.json 自修，禁止口头宣称"已进入某节点"代替 `--set` 与门禁实际输出。门禁/守卫拒绝即停，不得用 `--force` 常态绕过（`--force` 用于显式声明例外，仍须在阶段报告与最终总结写明）。
+
 > 本节是最高优先级。激活 skill 后、第一次调用任何取证/分析工具前，必须按序完成 GATE-0~GATE-2 并逐项输出结果。GATE 逐项输出是执行流内动作：输出结果后立即执行下一步，不等用户回应。脚本退出码非 0，或输出含「缺失证据」「不可跳过」「未通过」时，停在当前节点自修复（补采证据 / 安装组件 / 重采）后复检；门禁失败是待办任务，不是向用户汇报并等待指示的理由，未通过不得推进。
 
 ```text
@@ -167,7 +185,7 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 
 **阶段动作边界（硬约束）**：状态机每个节点只允许该节点的取证/分析动作，**前置阶段不得发起外部重放/对照实验**。重放实验（判断参数可重放性、绑定关系、UA/cookie/TLS 因素）属 **DIAGNOSE** 范畴，TRACE_CAPTURE / CASE_LOOKUP / EXTERNAL_LOOKUP / IDENTIFY / TRACE_ANALYZE 阶段一律不得向目标接口发起重放请求——这些阶段只做取证（forensic_ruyipage.py / capture_ruyitrace_log.js）、本地证据分析（import_ruyitrace_log.js / search_trace.js / search_js.js）和案例/网络检索。需要判断参数可重放性/绑定关系时，先完成 TRACE_ANALYZE 定位 builder/writer，进入 IMPLEMENT 写出实现后再到 REAL_VERIFY/DIAGNOSE 做对照实验。前置阶段发起重放会：①消耗会话状态/触发风控污染后续取证；②在签名链未定位时归因错误（把会话/cookie 层问题误判为签名或连接层问题，因缺乏对照基础）。
 
-激活后立即建立以下 11 项 TODO 并随状态推进勾选：
+激活后立即运行 `node scripts/state_machine.js --case-dir <project-root> --init --markdown` 建立执行状态，并建立以下 11 项 TODO 随状态推进勾选：
 
 1. INTENT_CONFIRM
 2. ENV_READY（续接模式直接勾掉）
@@ -217,6 +235,8 @@ URL 不是证据。脚本确认文件真实存在并可归类，才允许跳过�
 # 自动保存入口页面 HTML 到 case/forensic/document.html（含 412/JS challenge 页内联脚本，是 acw_sc__v2 等 challenge cookie 的强制证据）。
 # 预算与落盘细则（--wait/--manual-pause/--target-settle、60包/100MB 关联预算、bodies/wasm 落盘、预览阈值与 saved_to/_complete 语义）
 # 见 scripts/README.md 与 references/workflow/trace-flow.md，此处不重复。
+# --targets 只写能唯一标识终态接口的完整路径子串（如 api/question/13）；禁止用会误命中同号旁路接口的宽正则
+# （topic_info?href=N / api2/N / a/N 都含同一数字，宽正则会让取证在目标接口之前提前收尾 → 目标响应体丢失，见反模式 22）。
 python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root> --targets <最终业务接口关键词> --markdown
 # 需预置登录态/会话的页面（取证入口在登录后或需先注入 Cookie）：
 #   加 --cookie "name=value; name2=value2"（可多条，分号分隔；缺省 domain 取 --url 主机）
@@ -330,6 +350,8 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 ## 7. IDENTIFY
 
 先比较至少两组请求（区分计数器递增与纯随机存疑时补第三组），把字段分为固定值、时间值、随机值、会话值、服务端下发值、加密值。对每个目标参数建立 `source → entry → builder → writer` 链。
+
+**参数名存在 ≠ 参数生效（比较前先核对真实请求）**：页面源码里出现的参数名可能是 hook 遗留、旧版残留或求值为 `undefined` 被请求库丢弃。分组比较字段前，先以 `case/forensic/target-hits.json` 的 `url` 或 trace `xhrNative` 的 `url` 为准确认参数**真实存在于请求中**，不要以 `document.html` 里的字面量为准（match13 实测：页面写 `m:window.match13`，hook 判断的却是另一个 URL，真实请求里没有 `m`，请求侧全明文）。
 
 下表为 T1 识别信号路由（识别指纹 → 初始路径；识别≠协议复现，协议细节以本 case 证据与厂商知识库为准）：
 

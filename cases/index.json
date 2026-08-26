@@ -591,6 +591,25 @@
       "strategy": "D 环境伪装：webpack4 兼容运行时黑盒执行 fbeZ SDK；服务端校验签名内嵌 Wt() 19 位环境检测，浏览器采样+沙箱逐位 diff 修 4 个差异位（Buffer 泄露/plugins/webdriver 原型/native toString）后纯 Node H1 请求 8/8 通过",
       "file": "pdd-anti-content-fbez-blackbox.md",
       "verifiedAt": "2026-08-23"
+    },
+    {
+      "title": "eval 下发的字符串加法混淆 cookie（猿人学第13题）",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match13",
+        "api2/13",
+        "yuanrenxue_cookie",
+        "eval-direct",
+        "document.cookie",
+        "([] + ![])[i]",
+        "token failed",
+        "入门级cookie"
+      ],
+      "strategy": "A 纯算还原：每页前 GET /api2/13，用定向表达式求值器（四类混淆原子查表，不执行 eval）解出 yuanrenxue_cookie=<ts>|<随机串> 写入 cookie jar；请求侧无签名参数，末页 UA=yuanrenxue，POST /a/13 表单编码提交",
+      "file": "yuanrenxue-match13-eval-cookie.md",
+      "verifiedAt": "2026-08-26"
     }
   ]
 }

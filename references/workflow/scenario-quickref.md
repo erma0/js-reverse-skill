@@ -11,6 +11,8 @@
 - **特征**：Cookie 中有频繁变化字段
 - **类型**：eval 首包 / 预热请求 / 指纹 Cookie
 - **ruyiPage**：`hook_function("Document.prototype.cookie", position='before')` + `inject_hook_preset("crypto")`
+- **两大子型判别**：cookie 值有本地算法（RSA/MD5/指纹）→ 补环境或纯算还原；cookie 值来自**前置接口下发的 JS 文本 + `eval`** → 复现前置请求并解码脚本取值，本地无算法。先看 `case/ruyi-trace/logs/eval/` 有无落盘脚本即可分型。
+- **定位路径**：`references/network/cookie-generation.md` 的「服务端下发脚本型 cookie 的最短定位路径」（eval 落盘取 builder → cookieWrites 确认 writer → capture 找 source → document.html 确认 entry）
 
 ## 场景 3：响应数据加密
 - **特征**：接口返回加密字符串非明文 JSON
@@ -89,4 +91,5 @@
 | `cases/jsvmp-xhr-interceptor-env-emulation.md` | 场景 8 实战（JSVMP + jsdom 环境伪装） |
 | `cases/jsvmp-dual-sign-xhr-intercept-cacheOpts-jsdom-firefox.md` | 场景 8 双签名变体 |
 | `cases/jsvmp-ruishu6-cookie-412-sdenv.md` | 场景 2 + 场景 7（瑞数 RS6 Cookie 生成 + 412 挑战） |
+| `cases/yuanrenxue-match13-eval-cookie.md` | 场景 2 下发脚本子型（`eval` 首包写 cookie，服务端令牌无本地算法） |
 | `cases/universal-vmp-source-instrumentation.md` | 场景 8 通用 VMP 方法论 |

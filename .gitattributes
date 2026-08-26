@@ -1,2 +1,5 @@
 # 统一行尾为 LF，避免 Windows 下 CRLF 导致 git diff --check 尾随空格误报
 *.py text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.js text eol=lf

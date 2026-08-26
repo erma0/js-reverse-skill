@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2.3.68 - 2026-08-26
+
+### 经验固化（match13 复盘：服务端下发脚本型 cookie 打法 + 终态过滤精确性）
+
+match13（入门级cookie：`/api2/13` 同步返回混淆脚本，`eval` 后写 `yuanrenxue_cookie`）实战复盘，一条实测反模式与一类新题型打法入库：
+
+- **新案例 `cases/yuanrenxue-match13-eval-cookie.md`** + `cases/index.json`（31 条）+ match 题号速查表第 13 行。技术指纹：`document.html:744` 同步 `$.ajax({async:false, success:eval(data)})`；混淆原子仅四类可穷举（字面量 / `([] + ![])[i]` / `([] + !![])[i]` / `({} + "")[i]`）；cookie 值是服务端一次性令牌无本地算法；答案 27121856。
+- **`references/network/cookie-generation.md` 新增「服务端下发脚本型 cookie 的最短定位路径」**：Cookie 分类表补该子型；四步定位（`logs/eval/` 取 builder → `logs/cookie/` 的 `cookieWrites` 确认 writer → capture 找 source → `document.html` 确认 entry）；三条实现纪律（不执行下发脚本、写定向求值器；令牌禁缓存；禁按固定长度校验，实测 50~203 字节波动）。
+- **`references/workflow/trace-flow.md`**：eval / Function 捕获从三种用途扩为**四种**，新增「服务端下发挑战脚本的全文与来源定位」——挑战脚本静态 JS 里不存在且响应体常因终态判定过早丢失，`dynamicCode` 记录一条即给出 builder 全文 + entry 行号，是 cookie 型题目最快的抓手。
+- **`references/workflow/scenario-quickref.md` 场景 2 补两大子型判别**：cookie 有本地算法（RSA/MD5/指纹）→ 补环境/纯算；cookie 来自前置接口下发脚本 + eval → 复现请求并解码。先看 `logs/eval/` 有无落盘即可分型。
+- **新增反模式 22（终态过滤用宽正则 → 取证在目标接口之前提前收尾）**：实测 `--targets-regex "api/[^/]*13"` 被 `/api/topic_info?href=13` 抢先命中，数据接口响应体未落盘。终态语义是"命中即结束"，覆盖越宽越容易被旁路接口提前触发；题号/ID 类站点 `topic_info?href=N`、`api2/N`、`a/N` 共享同一数字。同步在 SKILL.md 取证命令处加硬约束注释，判定测试为"取证后先看 target-hits.json 的 url"。
+- **SKILL.md IDENTIFY 新增「参数名存在 ≠ 参数生效」**：分组比较字段前先以 `target-hits.json` / trace `xhrNative` 的 `url` 确认参数真实存在于请求中，不以 `document.html` 字面量为准（match13 的 `m:window.match13` 是 hook 遗留，hook 判断的是另一个 URL，真实请求无 `m`）。
+
 ## 2.3.67 - 2026-08-26
 
 ### 精简（反模式清单收敛 + trace 豁免决策固化）

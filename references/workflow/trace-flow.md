@@ -261,13 +261,14 @@ node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-
    - `notes/entry-chain.md`
 6. 再进入 Node.js 缺失环境追踪和 fixtures 验证。
 
-### eval / Function 动态代码捕获的三种用途
+### eval / Function 动态代码捕获的四种用途
 
-混淆框架（瑞数 / JSVMP / 代码组装器）运行时 eval 出的内容是静态分析拿不到的一手证据，按价值排序三类用法：
+混淆框架（瑞数 / JSVMP / 代码组装器）运行时 eval 出的内容是静态分析拿不到的一手证据，按价值排序四类用法：
 
 1. **动态代码收集**：引导器流式解密拼出的核心代码、组装器动态构建的函数体，在静态下载的 JS 文件中**不存在**——eval 捕获是获取这类代码的唯一渠道。应把捕获内容保存为 JS 证据文件（进 `case/js/original/` 或 `case/js/extracted/`），作为后续算法分析输入（match10 实测：核心代码完整来自 eval 捕获，比任何静态文件都完整）。
 2. **运行时状态基准对照**：eval 出的完整配置对象与 sandbox 内同名状态做 diff（键数 / 键名 / 结构），直接定位补环境缺口——比 Proxy 探测盲找属性快得多（match10 实测：trace 捕获的完整配置应有 921 个键名，sandbox 内仅 30 个，一对照即锁定缺口）。
 3. **完整配置提取**：完整配置结构可能分散在多层混淆 / 多个下发文件中，eval 捕获的是运行时聚合后的最终形态，比静态逆向源码拼凑可靠。
+4. **服务端下发挑战脚本的全文与来源定位**：接口返回后立即 `eval` 的挑战脚本（cookie/token 型反爬常见形态）在静态 JS 文件中不存在，响应体也常因终态判定过早而未落盘。RuyiTrace 把每段 eval 编译的代码**单独落盘**为 `case/ruyi-trace/logs/eval/eval_<pid>_<seq>_eval-direct.js`，配套 `trace_eval_process_<pid>.ndjson` 的 `dynamicCode` 记录带 `sha256`、`length` 与 stack 顶帧（函数名 + 文件 + 行列）——一条记录同时给出 builder 全文与 entry 行号。**cookie 型题目的最短定位路径**：`logs/eval/` 拿 builder → `logs/cookie/` 的 `cookieWrites` 确认 writer → capture 找 source 请求 → `document.html` 确认 entry（match13 实测，四步不到 10 分钟）。
 
 遇到环境错误时的处理顺序：
 
