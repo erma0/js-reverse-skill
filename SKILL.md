@@ -10,6 +10,26 @@ description: >
 
 # 通用网页端 JS 逆向技能
 
+## 执行速查卡（上下文压缩/续接后先读这里重建主干）
+
+| 动作 | 命令 | 通过标准 |
+|---|---|---|
+| 启动 | `node scripts/state_machine.js --case-dir <project-root> --init --markdown` | state.json 生成 + 按输出 [TODO] 提示建 11 项清单 |
+| 状态推进 | `node scripts/state_machine.js --case-dir <project-root> --set <NODE> --note "<结论>"` | 合法转换 + 按输出 [TODO] 提示勾选 |
+| GATE-1 环境 | `node scripts/check_session_resume.js --case-dir <project-root> --project-dir <project-root> --markdown` | fresh 完整自检 / resume 续接 |
+| GATE-2 证据 | `node scripts/check_evidence.js --case-dir <project-root> --url <目标> --markdown` | 退出码 0，否则按路由补证 |
+| 取证前速查 | `node scripts/search_cases.js --domain <域名> --signal <信号>` | 提取终态接口/坑点/题型情报校准参数 |
+| Step 1 网络取证 | `python scripts/forensic_ruyipage.py --url <目标> --targets <终态接口> --markdown`（时间参数一律秒） | 终态 2xx 命中 + capture.json 落盘 |
+| Step 2 trace | `node scripts/capture_ruyitrace_log.js --url <目标> --evidence-signal <writer写入点> --import-after --markdown` | NDJSON 产出 + `check_trace_gate.js` 退出码 0 |
+| 证据检索 | `search_trace.js --keyword <kw>` / `search_js.js --file <js> --keyword <kw>` | 读输出头部 [WARN]/[STATE] 提示并执行 |
+| 运行混淆 JS | `node scripts/run_with_trace.js --target <js> --entry <fn> --timeout 5000` | 禁手写 vm runner |
+| 混淆反混淆 | `node assets/ast-patterns/scripts/detect-patterns.js <js>` → `run-pipeline.js` | 按 README 分层执行 |
+| IMPLEMENT 前 | `node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` | 退出码 0（entry-chain + missing-env 两文件达标） |
+| 重放/写请求前 | `node scripts/state_machine.js --case-dir <project-root> --guard replay` | 只在 REAL_VERIFY/DIAGNOSE 放行 |
+| 交付前 | `check_final_artifact.js` + `check_code_quality.js` | 退出码 0 |
+
+主线：INTENT_CONFIRM → ENV_READY → EVIDENCE_GATE →（FORENSIC_CAPTURE → TRACE_CAPTURE）→ CASE_LOOKUP → IDENTIFY → TRACE_ANALYZE → IMPLEMENT → REAL_VERIFY → DELIVER → CLEANUP → DONE。打转信号：检索输出 `[WARN] 重复检索` 或 `[STATE]` 提示即执行 §4.4 防耗尽检查点序列。
+
 ## 0. 分析前硬门禁（不可跳过）
 
 ### 0.0 状态机强制跟踪与动作守卫（不可跳过）
@@ -175,13 +195,7 @@ DIAGNOSE（403/风控码失败的首选入口；双对照细则见第 10 节分�
 DELIVER / SIGN_ONLY_DELIVER → CLEANUP → DONE
 ```
 
-**TRACE_CAPTURE / TRACE_RETRY 出口门禁（不可跳过）**：进入 CASE_LOOKUP 前必须复跑出口门禁脚本，确认 Step 2（RuyiTrace NDJSON）真实产出：
-
-```powershell
-node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --require-trace-signal <环境API/写入点> --markdown
-```
-
-退出码 0（Step 2 已具备且目标 writer 覆盖满足）才可进入 CASE_LOOKUP；NDJSON 已产出但 writer 信号未命中时，状态是“Step 2 已具备、目标链路覆盖不足”，进入 TRACE_RETRY，不得写成“没有 trace”。详见 4.2 节「TRACE_CAPTURE 出口门禁复检」。
+**TRACE_CAPTURE / TRACE_RETRY 出口门禁（不可跳过）**：进入 CASE_LOOKUP 前必须复跑 `node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --require-trace-signal <环境API/写入点> --markdown`，退出码 0（Step 2 已具备且目标 writer 覆盖满足）才放行；NDJSON 已产出但 writer 信号未命中时是「覆盖不足」不是「没有 trace」，进 TRACE_RETRY。完整判定规则、与 GATE-2 的区别、信号语义见 4.2 节「TRACE_CAPTURE 出口门禁复检」。
 
 **阶段动作边界（硬约束）**：状态机每个节点只允许该节点的取证/分析动作，**前置阶段不得发起外部重放/对照实验**。重放实验（判断参数可重放性、绑定关系、UA/cookie/TLS 因素）属 **DIAGNOSE** 范畴，TRACE_CAPTURE / CASE_LOOKUP / EXTERNAL_LOOKUP / IDENTIFY / TRACE_ANALYZE 阶段一律不得向目标接口发起重放请求——这些阶段只做取证（forensic_ruyipage.py / capture_ruyitrace_log.js）、本地证据分析（import_ruyitrace_log.js / search_trace.js / search_js.js）和案例/网络检索。需要判断参数可重放性/绑定关系时，先完成 TRACE_ANALYZE 定位 builder/writer，进入 IMPLEMENT 写出实现后再到 REAL_VERIFY/DIAGNOSE 做对照实验。前置阶段发起重放会：①消耗会话状态/触发风控污染后续取证；②在签名链未定位时归因错误（把会话/cookie 层问题误判为签名或连接层问题，因缺乏对照基础）。
 
