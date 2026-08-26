@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2.3.66 - 2026-08-26
+
+### 修复（交付模板与门禁的 mode 枚举不一致）
+
+match12 复盘追问时发现的模板 bug：`templates/python-request/final.py` 与 `templates/final-entry/final.js` 的验证记录写 `mode: "real-request"`，而 `check_final_artifact.js` 只认 `online|sign-only`（与总结文档的 `FINAL_ARTIFACT_NETWORK_MODE` 机器标记比对）——AI 按模板实现交付，验证记录 mode 必然不匹配，门禁必挂：
+
+- 两模板联网模式 mode 改为 `online`（sign-only 分支本就正确）。
+- Python 模板 `--sign-only` 分支补写验证记录（`mode: sign-only` + `signOnlyExempt: true` + `exemptionReason`）——此前该分支直接 return，漏掉门禁要求的 sign-only 豁免标记，对齐 Node 模板行为。
+- 验证记录 mode 的取值口径以 `references/quality/final-summary.md` 的结构契约（online|sign-only）为准。
+
 ## 2.3.65 - 2026-08-26
 
 ### 修复 + 经验固化（match12 复盘：入门级内联签名案例吸纳 + 三个工具级坑修复）

@@ -297,6 +297,13 @@ def main(argv=None) -> int:
         for i in range(args.verify):
             out = sign({}, {"userCookie": args.cookie})
             print(f"[第 {i + 1} 次] sign={out['signature']} params={json.dumps(out['params'], ensure_ascii=False)}")
+        # 门禁要求 sign-only 交付也必须落验证记录并显式标记豁免原因
+        _write_validation_record({
+            "mode": "sign-only",
+            "signOnlyExempt": True,
+            "exemptionReason": "用户明确指定 --sign-only，只输出参数不执行真实 HTTP 验证",
+            "attempts": [],
+        })
         return 0
 
     # ----- 创建请求 Session -----
@@ -381,7 +388,7 @@ def main(argv=None) -> int:
         if unverified:
             print(f"未判定: {unverified} / {args.verify}（未配置 responseValidation，拒绝宣称通过）")
         _write_validation_record({
-            "mode": "real-request",
+            "mode": "online",
             "responseValidation": CONFIG.get("responseValidation"),
             "summary": {"total": args.verify, "pass": success, "fail": fail, "unverified": unverified},
             "attempts": attempts,

@@ -381,7 +381,7 @@ async function main() {
       console.log(`未判定: ${unverifiedCount} / ${opts.verify}（未配置 responseValidation，拒绝宣称通过）`);
     }
     writeValidationRecord({
-      mode: 'real-request',
+      mode: 'online',
       responseValidation: CONFIG.responseValidation,
       summary: { total: opts.verify, pass: successCount, fail: failCount, unverified: unverifiedCount },
       attempts,
