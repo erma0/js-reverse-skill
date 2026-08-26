@@ -192,7 +192,7 @@ function buildPlan(args, trace) {
 // 递归扫描目录下 NDJSON（兼容新版分目录结构：domtrace/ 主日志 + cookie/descriptor/event/storage 分类；
 // 也兼容旧版顶层单文件）。优先返回 domtrace/ 下的主日志，其余按修改时间倒序。
 // sinceMs 容差 10s：新版内核启动较慢（Firefox 155 重 fork），日志文件可能晚于采集起点才创建/写入。
-function listNdjsonFiles(dir, sinceMs) {
+function walkNdjson(dir) {
   if (!isDir(dir)) return [];
   const out = [];
   const walk = (d) => {
@@ -205,6 +205,12 @@ function listNdjsonFiles(dir, sinceMs) {
     }
   };
   walk(dir);
+  return out;
+}
+
+function listNdjsonFiles(dir, sinceMs) {
+  const out = walkNdjson(dir);
+  if (!out.length) return [];
   const fresh = out.filter((file) => {
     try { return fs.statSync(file).mtimeMs >= sinceMs - 10000; } catch { return false; }
   });
@@ -221,24 +227,97 @@ function listNdjsonFiles(dir, sinceMs) {
   });
 }
 
-// 读 NDJSON 首行识别 process_type：parent=浏览器父进程/内核活动（不含页面 JS，参与 target-signal 必然误报），
-// tab/content=页面内容进程（真正的业务 JS 调用）。首行 parse 失败或缺失 process_type 返回空串。
+// 读 NDJSON 识别 process_type：parent=浏览器父进程/内核活动（不含页面 JS，参与 target-signal 必然误报），
+// tab/content=页面内容进程（真正的业务 JS 调用）。
+// 兜底策略（match14 教训：52615 行的 content 日志被整体排除，自动导入只剩 1 行 event 日志）：
+// 1) 单行可能超过 8KB（长 stack/args），只读 8KB 会截断导致 JSON.parse 失败 → 逐级放大到 1MB 重读；
+// 2) 首行可能是非 JSON 头部或写入中的残行 → 依次探测前若干完整行；
+// 3) 全部失败时正则兜底直接从文本里抓 "process_type":"xxx"。
 function readProcessType(file) {
+  for (const size of [8192, 262144, 1048576]) {
+    let text = '';
+    try {
+      const fd = fs.openSync(file, 'r');
+      try {
+        const buf = Buffer.alloc(size);
+        const n = fs.readSync(fd, buf, 0, size, 0);
+        text = buf.slice(0, n).toString('utf8');
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      return '';
+    }
+    if (!text) return '';
+    const lines = text.split('\n');
+    const complete = text.endsWith('\n') ? lines : lines.slice(0, -1);
+    for (const line of complete.slice(0, 20)) {
+      if (!line.trim()) continue;
+      try {
+        const evt = JSON.parse(line);
+        if (evt && evt.process_type) return String(evt.process_type);
+      } catch { /* 继续探测下一行 */ }
+    }
+    const m = /"process_type"\s*:\s*"([^"]+)"/.exec(text);
+    if (m) return m[1];
+    // 已读到完整行仍未识别：放大窗口也只是读到更后面的同类记录，直接判定未识别
+    if (complete.length) return '';
+  }
+  return '';
+}
+
+// 统计 NDJSON 行数（用于导入不足时的候选文件诊断）。大文件按块读，不整体载入内存。
+function countNdjsonLines(file) {
   try {
     const fd = fs.openSync(file, 'r');
-    let firstLine = '';
     try {
-      const buf = Buffer.alloc(8192);
-      const n = fs.readSync(fd, buf, 0, 8192, 0);
-      firstLine = buf.slice(0, n).toString('utf8').split('\n')[0];
+      const size = fs.fstatSync(fd).size;
+      const chunk = 1024 * 1024;
+      const buf = Buffer.alloc(chunk);
+      let cursor = 0;
+      let lines = 0;
+      let lastByte = 0;
+      while (cursor < size) {
+        const n = fs.readSync(fd, buf, 0, Math.min(chunk, size - cursor), cursor);
+        if (n <= 0) break;
+        for (let i = 0; i < n; i += 1) if (buf[i] === 10) lines += 1;
+        lastByte = buf[n - 1];
+        cursor += n;
+      }
+      if (size > 0 && lastByte !== 10) lines += 1;
+      return lines;
     } finally {
       fs.closeSync(fd);
     }
-    const evt = JSON.parse(firstLine);
-    return evt && evt.process_type ? String(evt.process_type) : '';
   } catch {
-    return '';
+    return -1;
   }
+}
+
+// 自动导入未覆盖主 DOM trace 时，枚举输出目录下全部 NDJSON 候选（行数 / process_type / 被排除原因），
+// 并给出可直接执行的手动导入命令，避免“静默只导入分类日志”让人误判为无日志可用。
+function describeTraceCandidates(outDir, sinceMs, picked) {
+  const pickedSet = new Set((picked || []).map((f) => path.resolve(f)));
+  const all = walkNdjson(outDir);
+  return all.map((file) => {
+    let mtimeMs = 0;
+    try { mtimeMs = fs.statSync(file).mtimeMs; } catch { mtimeMs = 0; }
+    const isDom = /[\\/]domtrace[\\/]/.test(file);
+    const processType = isDom ? readProcessType(file) : '';
+    const stale = mtimeMs < sinceMs - 10000;
+    const reasons = [];
+    if (!isDom) reasons.push('非 domtrace 分类日志（cookie/storage/event/descriptor 等，不含业务接口调用）');
+    if (stale) reasons.push(`早于本次采集起点（mtime ${new Date(mtimeMs).toISOString()}，采集起点 ${new Date(sinceMs).toISOString()}）`);
+    if (isDom && processType === 'parent') reasons.push('process_type=parent（浏览器父进程/内核活动，不含页面 JS）');
+    if (isDom && !processType) reasons.push('process_type 无法识别（首行非法/写入中）');
+    return {
+      file,
+      lines: countNdjsonLines(file),
+      processType: processType || (isDom ? '<未识别>' : '<分类日志>'),
+      imported: pickedSet.has(path.resolve(file)),
+      excludedReasons: reasons,
+    };
+  }).sort((a, b) => b.lines - a.lines);
 }
 
 function wait(ms) {
@@ -351,7 +430,27 @@ function runSelfTest() {
     fs.writeFileSync(file2, '{"type":"call","interface":"XMLHttpRequest","member":"open","args":["GET","/api"]}\n', 'utf8');
     const state2 = { offsets: new Map(), carry: new Map() };
     if (!scanSignalsIncremental([file2], ['XMLHttpRequest.open'], state2)) throw new Error('Interface.member 信号应命中分存字段记录');
-    return { clean: true, tests: 4 };
+    // process_type 识别兜底：首行超过 8KB（长 stack）时不得判定失败（match14：content 日志被整体排除）
+    const domDir = path.join(root, 'domtrace');
+    fs.mkdirSync(domDir, { recursive: true });
+    const bigFirst = path.join(domDir, 'trace_process_1.ndjson');
+    const longStack = 'x'.repeat(20000);
+    fs.writeFileSync(bigFirst, `${JSON.stringify({ process_type: 'tab', stack: longStack })}\n${JSON.stringify({ process_type: 'tab' })}\n`, 'utf8');
+    if (readProcessType(bigFirst) !== 'tab') throw new Error('首行超 8KB 时应仍能识别 process_type');
+    // 首行非法（写入中残行）时应探测后续行
+    const brokenFirst = path.join(domDir, 'trace_process_2.ndjson');
+    fs.writeFileSync(brokenFirst, `{"process_type":"pa\n${JSON.stringify({ process_type: 'content' })}\n`, 'utf8');
+    if (readProcessType(brokenFirst) !== 'content') throw new Error('首行残缺时应从后续行识别 process_type');
+    // 行数统计与候选诊断
+    if (countNdjsonLines(brokenFirst) !== 2) throw new Error('countNdjsonLines 应统计 2 行');
+    const cands = describeTraceCandidates(root, Date.now() - 60000, [bigFirst]);
+    const picked = cands.find((c) => path.resolve(c.file) === path.resolve(bigFirst));
+    const missed = cands.find((c) => path.resolve(c.file) === path.resolve(brokenFirst));
+    if (!picked || !picked.imported) throw new Error('已导入文件应标记 imported');
+    if (!missed || missed.imported) throw new Error('未导入文件应标记为未导入');
+    if (missed.processType !== 'content') throw new Error('候选诊断应带出 process_type');
+    if (cands.some((c) => c.lines < 0)) throw new Error('候选诊断行数不应为负');
+    return { clean: true, tests: 11 };
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -681,8 +780,18 @@ async function capture(args, plan) {
     // 必然误报）。分类日志（cookie/storage/event/descriptor/eval/wasm）不含业务目标接口路径，逐文件硬门禁必然误报，
     // 只导入做摘要（不带 --target-signal、不写 summary）。ruyitrace-summary.md 只反映主 DOM trace 合并结果。
     const isDomtrace = (f) => /[\\/]domtrace[\\/]/.test(f);
-    const domFiles = result.logs.filter(isDomtrace);
+    let domFiles = result.logs.filter(isDomtrace);
     const catFiles = result.logs.filter((f) => !isDomtrace(f));
+    // 抢救分支（match14 教训）：mtime 容差把真正的 content 进程日志过滤掉后，domFiles 为空，
+    // 原实现会静默只导入分类日志（event 1 行）而看不出问题。此处忽略 mtime，直接取输出目录下
+    // 全部 domtrace 文件重新参与选择，并记录抢救原因供摘要展示。
+    if (!domFiles.length) {
+      const rescued = walkNdjson(plan.outDir).filter(isDomtrace);
+      if (rescued.length) {
+        domFiles = rescued;
+        result.mainTraceRescued = `按采集起点（mtime 容差 10s）未发现 domtrace 主日志，已忽略时间过滤抢救 ${rescued.length} 个 domtrace 文件参与导入`;
+      }
+    }
     const mainFiles = domFiles.filter((f) => {
       const pt = readProcessType(f);
       return pt && pt !== 'parent';
@@ -706,6 +815,25 @@ async function capture(args, plan) {
     for (const file of catFiles) {
       result.importResults.push(importLog(plan.caseDir, file, args.markdown, [], false));
       result.logLabels.push(path.basename(file));
+    }
+    // 导入覆盖自查：主 trace 缺失、或输出目录里存在未导入且比已导入主 trace 更大的候选
+    //（说明真正的页面 JS 日志被漏掉），一律输出候选清单与手动导入命令，禁止静默降级为“只有分类日志”。
+    const candidates = describeTraceCandidates(plan.outDir, startedAt, effectiveMain.concat(catFiles));
+    const mainSet = new Set(effectiveMain.map((f) => path.resolve(f)));
+    const mainMaxLines = candidates
+      .filter((c) => mainSet.has(path.resolve(c.file)))
+      .reduce((m, c) => Math.max(m, c.lines), 0);
+    const missedBigger = candidates.filter((c) => !c.imported && c.lines > mainMaxLines);
+    if (!effectiveMain.length || result.mainTraceRescued || missedBigger.length) {
+      result.traceCandidates = candidates;
+      result.manualImportCommands = candidates
+        .filter((c) => !c.imported && c.lines > 1)
+        .map((c) => `node scripts/import_ruyitrace_log.js --case-dir ${path.resolve(plan.caseDir)} --input ${c.file} --markdown`);
+      result.importCoverageWarning = !effectiveMain.length
+        ? '未导入任何主 DOM trace（domtrace/ 下无可用文件），当前摘要只反映分类日志，不能作为 trace 证据；请按下方候选清单手动导入或重新采集。'
+        : (missedBigger.length
+          ? `存在未导入的更大候选日志（最大 ${missedBigger[0].lines} 行 > 已导入主 trace 最大 ${mainMaxLines} 行），可能漏掉真正的页面 JS trace；请核对候选清单并按需手动导入。`
+          : result.mainTraceRescued);
     }
   }
   return result;
@@ -772,6 +900,26 @@ function renderMarkdown(obj) {
       if (imp.stderr.trim()) lines.push('', '```text', imp.stderr.trim(), '```');
     });
   }
+  if (result.importCoverageWarning) {
+    lines.push('', '## [警告] 导入覆盖不足');
+    lines.push(`- ${result.importCoverageWarning}`);
+    if (result.mainTraceRescued) lines.push(`- 抢救记录：${result.mainTraceRescued}`);
+    if (result.traceCandidates && result.traceCandidates.length) {
+      lines.push('', '### 输出目录下全部 NDJSON 候选');
+      lines.push('', '| 行数 | process_type | 是否已导入 | 文件 | 未导入原因 |');
+      lines.push('| --- | --- | --- | --- | --- |');
+      for (const c of result.traceCandidates) {
+        const reason = c.imported ? '-' : (c.excludedReasons.length ? c.excludedReasons.join('；') : '未被选为主 trace');
+        lines.push(`| ${c.lines} | ${c.processType} | ${c.imported ? '是' : '否'} | ${c.file} | ${reason} |`);
+      }
+    }
+    if (result.manualImportCommands && result.manualImportCommands.length) {
+      lines.push('', '### 手动导入命令（PowerShell，按需逐条执行）', '', '```powershell');
+      for (const cmd of result.manualImportCommands) lines.push(cmd);
+      lines.push('```');
+    }
+    lines.push('', '> 行数最大的 domtrace 文件通常才是页面内容进程（业务 JS）日志；若它未被导入，必须手动导入后再判定 trace 质量，不得直接进入分析。');
+  }
   return lines.join('\n') + '\n';
 }
 
@@ -837,10 +985,19 @@ async function main() {
   }
   if (args.json) process.stdout.write(JSON.stringify(obj, null, 2) + '\n');
   if (args.markdown) process.stdout.write(renderMarkdown(obj));
+  if (result.importCoverageWarning) {
+    console.error(`[警告] 导入覆盖不足：${result.importCoverageWarning}`);
+    for (const cmd of result.manualImportCommands || []) console.error(`[手动导入] ${cmd}`);
+  }
   if (!result.logs.length) process.exitCode = 3;
   // 目标信号硬门禁只针对主 DOM trace 日志（importResults[0]）：分类日志无业务接口路径，
   // 逐文件判定必然误报；主日志命中即覆盖、未命中才退出 4。
   if (result.importResults && result.importResults.length && !result.importResults[0].ok) process.exitCode = 4;
+  // 主 DOM trace 完全未导入时，importResults[0] 是分类日志（不带信号判定，恒 ok），
+  // 不能让它把“没有页面 JS 证据”伪装成成功；直接按覆盖不足退出 4。
+  if (args.importAfter && result.logs.length && !(result.logLabels || []).some((l) => l.startsWith('主 DOM trace'))) {
+    process.exitCode = 4;
+  }
 }
 
 main().catch((err) => {
