@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 2.3.65 - 2026-08-26
+
+### 修复 + 经验固化（match12 复盘：入门级内联签名案例吸纳 + 三个工具级坑修复）
+
+用户复盘 match12（入门级 js，m=base64("yuanrenxue"+page) 内联在 document.html）全流程日志与成果，三处工具级坑直接修脚本，通用经验固化文档，案例入库：
+
+- **trace 信号支持 Interface.member 结构化匹配**：RuyiTrace 把 XHR 类调用记录为 `{"interface":"XMLHttpRequest","member":"open"}` 分存字段，信号 `XMLHttpRequest.open` 作为整行 JSON 子串永不命中（match12 实测 ×0，被迫退化为宽信号 `XMLHttpRequest`）。`lib/trace-signal-policy.js` 新增 `matchesTraceSignal`（子串 + 结构化双匹配）与 `traceSignalNeedleGroups`（流式扫描 needle 组：组内 AND、组间 OR），check_evidence.js / import_ruyitrace_log.js / capture_ruyitrace_log.js（含采集期监控）三处统一接入；capture 自测新增结构化匹配用例，match12 真实 trace 端到端验证 `XMLHttpRequest.open×1` 命中。
+- **check_code_quality.js 修复 Python 缩进误判**：原实现把括号内续行的对齐空格算进嵌套深度（前导空格/2），match12 的 final.py 因 `record["submit"] = {...}` 续行对齐 28 空格被误报"嵌套 14"，重构两轮仍 12。重写为括号感知扫描（开放括号内/反斜杠续行/三引号字符串内容行不计缩进）+ 4 空格标准；修复后同一文件实测最大嵌套 3，直接通过。同时：Python 中文 docstring 认可为文件头职责注释与中文注释（模块 docstring 是 Python 职责说明惯例）；"中文注释包含问号"收紧为连续问号（URL query 的单 `?` 不再误报）。
+- **trace-flow.md 固化三个实测经验**：①「摘要仅 1 行/未覆盖页面 JS」诊断顺序——先 LS domtrace/ 确认多进程文件再手动合并重导，禁止把"摘要 1 行"当"trace 只有 1 行"进重采（match12 自动导入只反映 1 行内核记录，实际 4 个内容进程文件）；②新增「trace 信号的记录形态与匹配规则」小节（Interface.member 结构化匹配 + **xhrNative 记录含完整请求 URL**，是签名生成值↔实际请求值逐字符比对的第一手证据）；③SKILL.md 4.2 信号说明同步。
+- **final-summary.md 固化交付门禁契约**（match12 靠读门禁源码才发现的两点）：①模板头部加 `FINAL_ARTIFACT_NETWORK_MODE` / `FINAL_ARTIFACT_TLS_FINGERPRINT` 机器标记；②新增「验证记录.json 结构契约」——mode + attempts 五字段（timestamp/httpStatus/parameterSummary/sessionStage/responseValid）逐字段校验要求与 sign-only 豁免字段，推荐入口脚本实时写入 attempts 而非事后回填。
+- **案例吸纳**：cases/yuanrenxue-match12-inline-btoa.md（A 纯算还原；7 条踩坑含"先读 document.html 内联 script 再进 JS 文件级分析"、末页 UA 红线、jQuery 表单编码提交、验证记录结构返工；7 条可验证事实含同 sessionid 数据恒定复验技巧）；match-index.md 速查表 + index.json 同步。
+
 ## 2.3.64 - 2026-08-26
 
 ### 经验固化（match10 复盘：TRACE_ANALYZE 双轨分析 + eval 捕获三用途）

@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { assertTraceSignals } = require('./lib/trace-signal-policy');
+const { assertTraceSignals, matchesTraceSignal } = require('./lib/trace-signal-policy');
 
 function parseArgs(argv) {
   const args = {
@@ -368,9 +368,8 @@ function inspectNdjson(p, target, signals) {
         recordCount += 1;
         if (!targetMatched && valueMatchesTarget(record, target)) targetMatched = true;
         if (sigHits.length) {
-          const text = JSON.stringify(record).toLowerCase();
           for (const sig of sigHits) {
-            if (sig.hits > 0 || !text.includes(sig.signal.toLowerCase())) continue;
+            if (sig.hits > 0 || !matchesTraceSignal(record, sig.signal)) continue;
             sig.hits += 1;
             sig.sampleLine = lineNo;
           }

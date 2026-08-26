@@ -235,7 +235,8 @@ Windows 下若 Python 脚本输出仍现编码异常，用 `PYTHONUTF8=1` 前缀
 
 ```powershell
 node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-root> --evidence-signal <环境API或签名写入点关键词> --end-signal <明确完成事件> --import-after --markdown
-# --trace-signal / --evidence-signal 只匹配 RuyiTrace 记录的环境 API / 写入点（如 Headers.set(<参数>)、参数名、JSONP callback 注册），
+# --trace-signal / --evidence-signal 只匹配 RuyiTrace 记录的环境 API / 写入点（如 Headers.set(<参数>)、参数名、JSONP callback 注册；
+# XHR 类调用记录为 {"interface":"XMLHttpRequest","member":"open"} 分存字段，信号写 XMLHttpRequest.open 即可结构化命中），
 # 不传目标接口 URL——trace 记录的是 API 调用，不记录请求 URL，传 URL 字面量必然未命中。
 # 不得使用裸 createElement、appendChild、querySelector、JSON.stringify、Date.now 等泛化 API 作为 writer 信号；
 # 它们只能证明页面运行过，不能证明目标参数写入请求。门禁脚本会拒绝这些信号。

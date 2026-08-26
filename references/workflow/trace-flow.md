@@ -137,6 +137,14 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 阈值用建议值，AI 可按目标站点复杂度自主判断上调或下调，但「无 stack.file」是硬性重度不足信号，不得自行放宽。
 
 > **多进程与跨域 trace 合并**：RuyiTrace 一次采集会按进程写多个 `domtrace/trace_process_<pid>.ndjson`——`process_type` 为 `tab`/`content` 的内容进程才是业务 JS，`parent` 是浏览器父进程/内核活动（`resource://gre/modules/*`、`builtin-addons/*` 等，不含页面 JS，参与 trace-signal 必然误报）。`capture_ruyitrace_log.js` 会把所有非 parent 的 domtrace 文件合并导入，`ruyitrace-summary.md` 反映合并全量；手动导入多文件用 `import_ruyitrace_log.js --input a --input b ...` 合并统计。只取单个进程文件（尤其 mtime 最新的那个）会漏掉真正的业务 JS 调用，把有效 trace 误判为空。验证码/支付 SDK 常运行在第三方 iframe：日志未出现业务站点 hostname，但明确的 writer/API 信号在有效内容进程中全部命中时，仍可确认 Step 2；没有明确信号时不得用任意跨域日志替代目标证据。
+>
+> **摘要仅 1 行 / 「未覆盖页面 JS」时的诊断顺序**（match12 实测：自动导入后摘要只反映 1 行内核记录，实际 domtrace/ 下有 4 个内容进程文件未纳入）：① `LS case/ruyi-trace/logs/domtrace/` 确认是否存在多个 `trace_process_*.ndjson`；② 存在但摘要未覆盖 → 手动 `import_ruyitrace_log.js --input <每个内容进程文件>` 合并重导（`--no-summary-write` 可避免分类日志覆盖主摘要）；③ 合并后仍不足才按 TRACE_RETRY 重采。禁止把"摘要 1 行"直接当成"trace 只有 1 行"进入重采。
+
+#### trace 信号的记录形态与匹配规则
+
+- RuyiTrace 把 XHR/fetch 等对象调用记录为**分存字段** `{"type":"call","interface":"XMLHttpRequest","member":"open",...}`——不存在 `XMLHttpRequest.open` 连续子串。门禁与摘要脚本（check_evidence / check_trace_gate / import_ruyitrace_log / capture_ruyitrace_log）已支持 `Interface.member` 形态的结构化匹配，信号直接写 `XMLHttpRequest.open`、`Headers.set` 即可命中分存字段记录；旧 case 中"退化为只写 `XMLHttpRequest`"的做法不再必要（宽信号仍可用，但优先带 member 的精确形态）。
+- **xhrNative 记录含完整请求 URL**（`{"type":"xhrNative","method":"GET","url":"https://...完整 query...","headers":[...]}`）：定位参数写入链后，用 `search_trace --keyword xhrNative` 或按 URL 关键词过滤可直接核对请求侧参数（含编码形态，如 `m=eXVhbnJlbnh1ZTE%3D`），是"签名生成值 ↔ 实际请求值"逐字符比对的第一手证据。
+- 信号仍不得传目标接口 URL 字面量（网络 URL 由 Step 1 的 `--require-network-signal` 承担）、密钥/常量名；泛化 API（createElement 等）会被 `lib/trace-signal-policy.js` 拒绝。
 
 #### TRACE_RETRY 处理顺序（按序降级，不回退）
 

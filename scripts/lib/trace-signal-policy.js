@@ -20,6 +20,42 @@ function validateTraceSignals(signals) {
   return issues;
 }
 
+// RuyiTrace 记录 XHR/fetch 等调用为 {"type":"call","interface":"XMLHttpRequest","member":"open",...}，
+// interface 与 member 是分存字段：信号 "XMLHttpRequest.open" 作为整行 JSON 子串永不命中
+// （match12 实测 XMLHttpRequest.open ×0，改 XMLHttpRequest 才命中）。本函数除子串匹配外，
+// 同时支持 Interface.member 形态的结构化匹配。
+function matchesTraceSignal(record, signal) {
+  const needle = String(signal || '').trim().toLowerCase();
+  if (!needle) return false;
+  const dot = needle.indexOf('.');
+  if (dot > 0 && dot < needle.length - 1 && record && typeof record === 'object') {
+    const iface = needle.slice(0, dot);
+    const member = needle.slice(dot + 1);
+    if (String(record.interface || '').toLowerCase() === iface
+      && String(record.member || '').toLowerCase() === member) {
+      return true;
+    }
+  }
+  try {
+    return JSON.stringify(record).toLowerCase().includes(needle);
+  } catch {
+    return false;
+  }
+}
+
+// 流式扫描（无法逐行 JSON.parse）用的 needle 组：任一组内全部 needle 出现即该信号命中。
+// Interface.member 信号除原子串组外，增加 interface/member 分存字段组（RuyiTrace 序列化无空格）。
+function traceSignalNeedleGroups(signal) {
+  const s = String(signal || '').trim().toLowerCase();
+  if (!s) return [];
+  const groups = [[s]];
+  const dot = s.indexOf('.');
+  if (dot > 0 && dot < s.length - 1) {
+    groups.push([`"interface":"${s.slice(0, dot)}"`, `"member":"${s.slice(dot + 1)}"`]);
+  }
+  return groups;
+}
+
 function assertTraceSignals(signals, label = 'trace/evidence signal') {
   const issues = validateTraceSignals(signals);
   if (!issues.length) return;
@@ -27,4 +63,4 @@ function assertTraceSignals(signals, label = 'trace/evidence signal') {
   throw new Error(`${label} 不合格：${detail}`);
 }
 
-module.exports = { validateTraceSignals, assertTraceSignals };
+module.exports = { validateTraceSignals, assertTraceSignals, matchesTraceSignal, traceSignalNeedleGroups };

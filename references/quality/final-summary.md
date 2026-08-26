@@ -17,6 +17,9 @@
 ```markdown
 # 项目总结
 
+FINAL_ARTIFACT_NETWORK_MODE=online
+FINAL_ARTIFACT_TLS_FINGERPRINT=not-required
+
 生成时间：
 任务范围：网页端 JS 逆向
 
@@ -99,3 +102,38 @@
 - 代码质量与中文注释
 - 清理结果
 - 阶段报告索引
+
+## 机器声明标记（check_final_artifact.js 按此识别）
+
+在 `result/`（或 `case/`）的 Markdown / JSON / TXT 文档中写以下两行标记，联网模式与 TLS 判定按机器标记识别（自然语言声明仅旧文档兼容）：
+
+```text
+FINAL_ARTIFACT_NETWORK_MODE=online        # 或 sign-only
+FINAL_ARTIFACT_TLS_FINGERPRINT=not-required  # 或 required
+```
+
+match12 实测教训：总结缺这两行标记时，门禁会报"网络模式未声明"并要求返工重写文档——写总结时直接按模板头部带上。
+
+## 验证记录.json 结构契约（联网模式）
+
+`check_final_artifact.js` 对联网模式的 `result/验证记录.json` 逐字段校验，缺结构会被判不合格（match12 实测曾先写成自由结构后返工）：
+
+```json
+{
+  "mode": "online",
+  "attempts": [
+    {
+      "timestamp": "2026-08-26T14:05:01+08:00",
+      "httpStatus": 200,
+      "parameterSummary": { "page": 1, "m": "eXVhbnJlbnh1ZTE=" },
+      "sessionStage": "page-1",
+      "responseValid": true
+    }
+  ]
+}
+```
+
+- `attempts` ≥ 5 条；每条 `timestamp` 必须是可解析的时间字符串（真实请求时刻，不要事后伪造）、`httpStatus` 2xx 整数、`parameterSummary` 非空字符串或非空对象（目标参数摘要）、`sessionStage` 非空字符串、`responseValid` 严格 `true`。
+- 顶层可附加 `total`、`submit` 等字段记录业务结果；敏感值（sessionid 等）脱敏后再写入。
+- sign-only 模式：顶层 `signOnlyExempt: true` + 非空 `exemptionReason`，无 attempts 要求。
+- 最稳妥做法是入口脚本在每次请求时实时写入 attempts（带真实 timestamp），而不是交付后手工回填。

@@ -99,7 +99,28 @@ function extractPyComments(text) {
   const lineRe = /^\s*#(.*)$/gm;
   let m;
   while ((m = lineRe.exec(text))) comments.push((m[1] || '').trim());
+  comments.push(...extractPyDocstrings(text));
   return comments.filter(Boolean);
+}
+
+// 提取 Python docstring（模块/函数/类定义后的三引号块）作为职责说明注释。
+// 模块 docstring 是 Python 描述职责的惯例，含中文时计入中文注释（match12 实测：
+// 中文 docstring 不被识别导致"文件开头缺少中文职责注释"误报）。
+function extractPyDocstrings(text) {
+  const out = [];
+  const re = /("""|''')(?:\\[\s\S]|(?!\1)[\s\S])*?\1/g;
+  let m;
+  while ((m = re.exec(text))) {
+    const before = text.slice(0, m.index).split(/\r?\n/).filter((l) => l.trim() && !l.trim().startsWith('#'));
+    const prev = before.length ? before[before.length - 1].trim() : '';
+    const atDocPos = !prev || /:$/.test(prev) || /^[)\]}]/.test(prev);
+    if (!atDocPos) continue;
+    for (const line of m[0].slice(3, -3).split(/\r?\n/)) {
+      const t = line.trim();
+      if (t) out.push(t);
+    }
+  }
+  return out;
 }
 
 function extractComments(file, text) {
@@ -175,12 +196,65 @@ function maxJsBraceDepth(lines) {
   return maxDepth;
 }
 
+// Python 逻辑嵌套深度：只统计括号外代码行的行首缩进（4 空格 = 1 层）。
+// 括号内的悬挂缩进/参数对齐是续行不是嵌套；三引号字符串与注释内容行不是代码
+// （match12 实测：续行对齐空格被计入导致 14 层误报，返工两轮）。
 function maxPyIndentDepth(lines) {
   let maxDepth = 0;
+  let paren = 0;
+  let triple = null;
+  let cont = false;
   for (const raw of lines) {
-    if (!raw.trim() || raw.trim().startsWith('#')) continue;
-    const spaces = raw.match(/^\s*/)[0].replace(/\t/g, '    ').length;
-    maxDepth = Math.max(maxDepth, Math.floor(spaces / 2));
+    if (triple) {
+      const close = raw.indexOf(triple);
+      if (close >= 0) {
+        triple = null;
+        const rest = raw.slice(close + 3);
+        for (const ch of rest) {
+          if (ch === '(' || ch === '[' || ch === '{') paren += 1;
+          else if (ch === ')' || ch === ']' || ch === '}') paren = Math.max(0, paren - 1);
+        }
+      }
+      continue;
+    }
+    if (cont && !raw.trim()) continue;
+    let code = '';
+    let i = 0;
+    const n = raw.length;
+    while (i < n) {
+      const c = raw[i];
+      if (c === '#') break;
+      if (c === '"' || c === "'") {
+        const t = raw.substr(i, 3);
+        if (t === '"""' || t === "'''") {
+          const end = raw.indexOf(t, i + 3);
+          if (end >= 0) { i = end + 3; continue; }
+          triple = t;
+          i = n;
+          break;
+        }
+        i += 1;
+        while (i < n) {
+          if (raw[i] === '\\') { i += 2; continue; }
+          if (raw[i] === c) { i += 1; break; }
+          i += 1;
+        }
+        continue;
+      }
+      code += c;
+      i += 1;
+    }
+    const lineCont = /\\\s*$/.test(raw);
+    const isContinuation = paren > 0 || cont;
+    if (!isContinuation && code.trim()) {
+      const spaces = raw.match(/^\s*/)[0].replace(/\t/g, '    ').length;
+      maxDepth = Math.max(maxDepth, Math.floor(spaces / 4));
+    }
+    for (const ch of code) {
+      if (ch === '(' || ch === '[' || ch === '{') paren += 1;
+      else if (ch === ')' || ch === ']' || ch === '}') paren = Math.max(0, paren - 1);
+    }
+    cont = lineCont;
   }
   return maxDepth;
 }
@@ -397,12 +471,14 @@ function inspectFile(root, file, args) {
 
   for (let i = 0; i < comments.length; i++) {
     const c = comments[i];
-    if (hasChinese(c) && /[?？]/.test(c)) problems.push(`中文注释包含问号：第 ${i + 1} 条注释“${c.slice(0, 60)}”。`);
+    if (hasChinese(c) && /\?{2,}/.test(c)) problems.push(`中文注释包含连续问号（疑似乱码或 URL 截断）：第 ${i + 1} 条注释“${c.slice(0, 60)}”。`);
     if (/\uFFFD|\?{3,}/.test(c)) problems.push(`注释疑似乱码：第 ${i + 1} 条注释“${c.slice(0, 60)}”。`);
   }
 
   const header = firstNonEmptyLines(text, 8).join('\n');
-  if (!hasChinese(header) || !/^\s*(\/\/|\/\*|\*|#)/m.test(header)) {
+  // Python 的中文 docstring 同样是合格的文件头职责说明
+  const headerCommentRe = ext(file) === '.py' ? /^\s*(#|"""|''')/m : /^\s*(\/\/|\/\*|\*|#)/m;
+  if (!hasChinese(header) || !headerCommentRe.test(header)) {
     warnings.push('文件开头缺少中文职责注释，建议在文件顶部说明模块用途。');
   }
 
@@ -545,7 +621,7 @@ function renderMarkdown(result) {
     `- 单行长度上限：${result.limits.maxLineLength}`,
     `- 单文件行数上限：${result.limits.maxFileLines}`,
     `- 单函数行数上限：${result.limits.maxFunctionLines}`,
-    '- 建议有中文职责注释，中文注释不得包含问号、连续问号或乱码。',
+    '- 建议有中文职责注释（# 注释或 docstring），中文注释不得包含连续问号或乱码。',
     '- 禁止压缩代码、过度堆叠语句、调试断点和临时测试标记。',
     '- signer / probe / runtime 入口不得承载 navigator、document、canvas、webgl、performance 等多域 WebAPI 补环境主体。',
     '- 补环境不得以大段 String.raw / *_SCRIPT 字符串作为主要交付形态，必须拆成真实文件模块并通过 runFile/runFiles 注入。',

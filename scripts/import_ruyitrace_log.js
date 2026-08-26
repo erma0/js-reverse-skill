@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const crypto = require('crypto');
-const { assertTraceSignals } = require('./lib/trace-signal-policy');
+const { assertTraceSignals, matchesTraceSignal } = require('./lib/trace-signal-policy');
 
 function parseArgs(argv) {
   const args = {
@@ -223,9 +223,8 @@ async function summarizeNdjson(files, options) {
       let evt;
       try { evt = JSON.parse(line); parsed++; } catch { invalid++; continue; }
       if (targetHits.length) {
-        const text = JSON.stringify(evt).toLowerCase();
         for (const t of targetHits) {
-          if (text.includes(t.signal.toLowerCase())) {
+          if (matchesTraceSignal(evt, t.signal)) {
             t.hits++;
             if (!t.sampleLine) t.sampleLine = lines;
           }

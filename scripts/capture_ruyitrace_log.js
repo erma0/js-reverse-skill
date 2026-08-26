@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const paths = require('./lib/paths');
-const { assertTraceSignals } = require('./lib/trace-signal-policy');
+const { assertTraceSignals, traceSignalNeedleGroups } = require('./lib/trace-signal-policy');
 
 function parseArgs(argv) {
   const args = {
@@ -287,13 +287,23 @@ function waitForExit(child, timeoutMs) {
 
 // 增量扫描新写入的 NDJSON。旧实现只扫描文件尾部 1MB，早先命中的 signal
 // 在日志继续增长后会被漏掉；同时记录每个文件的 offset，避免反复读取大日志。
+// 每个信号展开为 needle 组（组内 AND、组间 OR）：Interface.member 形态的信号除原子串外，
+// 增加 interface/member 分存字段组——RuyiTrace 记录 {"interface":"X","member":"y"}，
+// 原子串永不命中（match12 实测 XMLHttpRequest.open ×0）。
 function scanSignalsIncremental(files, signals, state) {
   if (!signals || !signals.length || !files.length) return false;
   state.offsets = state.offsets || new Map();
   state.carry = state.carry || new Map();
-  const needles = signals.map((s) => String(s).toLowerCase());
-  const observed = state.observed || new Set();
-  state.observed = observed;
+  const sameSignals = state.signalSource && state.signalSource.length === signals.length
+    && state.signalSource.every((s, i) => String(s) === String(signals[i]));
+  if (!sameSignals) {
+    state.signalSource = signals.slice();
+    state.signalGroups = signals.map((s) => traceSignalNeedleGroups(s));
+    state.observed = new Set();
+  }
+  const observed = state.observed;
+  const allNeedles = state.signalGroups.flat(2);
+  const maxNeedleLen = allNeedles.reduce((m, n) => Math.max(m, n.length), 1);
   for (const file of files) {
     try {
       const st = fs.statSync(file);
@@ -310,10 +320,11 @@ function scanSignalsIncremental(files, signals, state) {
         const buf = Buffer.alloc(size);
         fs.readSync(fd, buf, 0, size, cursor);
         const text = `${carry}${buf.toString('utf8')}`.toLowerCase();
-        needles.forEach((needle, index) => {
-          if (text.includes(needle)) observed.add(index);
+        state.signalGroups.forEach((groups, index) => {
+          if (observed.has(index)) return;
+          if (groups.some((group) => group.every((needle) => text.includes(needle)))) observed.add(index);
         });
-        carry = text.slice(-Math.max(0, Math.max(...needles.map((n) => n.length)) - 1));
+        carry = text.slice(-Math.max(0, maxNeedleLen - 1));
         cursor += size;
       }
       fs.closeSync(fd);
@@ -321,7 +332,7 @@ function scanSignalsIncremental(files, signals, state) {
       state.carry.set(file, carry);
     } catch { /* file may still be rotating */ }
   }
-  return observed.size === needles.length;
+  return observed.size === signals.length;
 }
 
 function runSelfTest() {
@@ -335,7 +346,12 @@ function runSelfTest() {
     if (!scanSignalsIncremental([file], ['handshake'], state)) throw new Error('跨写入边界的信号应被命中');
     fs.appendFileSync(file, 'x'.repeat(1024 * 1024 + 128), 'utf8');
     if (!scanSignalsIncremental([file], ['handshake'], state)) throw new Error('日志继续增长后应记住已命中的信号');
-    return { clean: true, tests: 3 };
+    // Interface.member 分存字段匹配：记录无 "XMLHttpRequest.open" 连续子串，也应命中
+    const file2 = path.join(root, 'trace2.ndjson');
+    fs.writeFileSync(file2, '{"type":"call","interface":"XMLHttpRequest","member":"open","args":["GET","/api"]}\n', 'utf8');
+    const state2 = { offsets: new Map(), carry: new Map() };
+    if (!scanSignalsIncremental([file2], ['XMLHttpRequest.open'], state2)) throw new Error('Interface.member 信号应命中分存字段记录');
+    return { clean: true, tests: 4 };
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

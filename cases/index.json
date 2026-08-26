@@ -314,6 +314,26 @@
       "verifiedAt": "2026-08-24"
     },
     {
+      "title": "页面内联明文 btoa 签名 + 末页 UA 校验（猿人学第12题）",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match12",
+        "btoa",
+        "base64(\"yuanrenxue\"",
+        "inline script",
+        "document.html 内联",
+        "question/12",
+        "入门级 js",
+        "末页 UA=yuanrenxue",
+        "sessionid 数据绑定"
+      ],
+      "strategy": "A 纯算还原：m=base64(\"yuanrenxue\"+page) 直接读 document.html 内联脚本（先读文档流再进 JS 文件级分析）；末页 UA=yuanrenxue；POST /a/12 表单编码提交；同 sessionid 数据恒定可复验",
+      "file": "yuanrenxue-match12-inline-btoa.md",
+      "verifiedAt": "2026-08-26"
+    },
+    {
       "title": "快手 __NS_hxfalcon + kww 双轨签名",
       "domains": [
         "kuaishou.com"
