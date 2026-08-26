@@ -390,7 +390,12 @@ function main() {
       syncTodo(state);
       writeState(caseDir, state);
     }
-    console.log(args.markdown ? `**${kind} 守卫通过**：当前节点 ${state.node}` : `${kind} 守卫通过：当前节点 ${state.node}`);
+    if (args.markdown) {
+      console.log(renderMarkdown(state, ['', `> **${kind} 守卫通过**：当前节点 ${state.node}`]));
+    } else {
+      console.log(`${kind} 守卫通过：当前节点 ${state.node}`);
+      console.log(renderTodo(state.todo && state.todo.length ? state.todo : computeTodo(state)).join('\n'));
+    }
     return 0;
   }
 
