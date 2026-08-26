@@ -70,4 +70,34 @@ function recordQueries(tool, entries) {
   return warnings;
 }
 
-module.exports = { inferQueryLogPath, recordQueries };
+// 取证类节点：只允许采集/重采动作，深度源码检索属 TRACE_ANALYZE 动作。
+// match14 教训：状态机停在 TRACE_CAPTURE，实际已做深度源码分析 + 手写实现脚本 3000+ 行，
+// 状态与行为完全脱节，阶段动作边界守卫失去意义。
+const FORENSIC_NODES = ['EVIDENCE_GATE', 'FORENSIC_CAPTURE', 'TRACE_CAPTURE', 'TRACE_RETRY'];
+
+// 从目标路径推断 case 目录并读 state.json，返回节点活性提示列表（无状态文件/推断失败返回空）。
+function stateHint(targetPath) {
+  let cur = path.resolve(path.dirname(targetPath));
+  for (let i = 0; i < 8; i++) {
+    if (path.basename(cur).toLowerCase() === 'case') {
+      try {
+        const state = JSON.parse(fs.readFileSync(path.join(cur, 'state.json'), 'utf8'));
+        const out = [];
+        if (FORENSIC_NODES.includes(state.node)) {
+          out.push(`[STATE] 状态机当前节点 ${state.node}：本节点动作边界是取证/采集，深度源码检索属于 TRACE_ANALYZE 动作——trace 质量不足应先重采（TRACE_RETRY），重采一次仍不足才允许降级做落盘 JS 静态分析（SKILL.md 4.2）；禁止跳过重采直接静态分析。`);
+        }
+        const ageMin = state.updatedAt ? Math.round((Date.now() - Date.parse(state.updatedAt)) / 60000) : null;
+        if (ageMin && !Number.isNaN(ageMin) && ageMin >= 60) {
+          out.push(`[STATE] 状态机已在 ${state.node} 停留约 ${ageMin} 分钟未更新；若当前阶段动作已完成，请用 state_machine.js --set 推进，避免状态与实际行为脱节（match14 教训）。`);
+        }
+        return out;
+      } catch { return []; }
+    }
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return [];
+}
+
+module.exports = { inferQueryLogPath, recordQueries, stateHint };

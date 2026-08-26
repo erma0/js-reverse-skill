@@ -14,7 +14,7 @@
  */
 
 const fs = require('fs');
-const { recordQueries } = require('./lib/query_log');
+const { recordQueries, stateHint } = require('./lib/query_log');
 
 function parseArgs(argv) {
   const args = {
@@ -119,7 +119,10 @@ function main() {
   }
 
   const ctx = Math.max(0, Math.min(args.context, 2000));
-  const warnings = recordQueries('search_js', args.files.flatMap((f) => args.keywords.concat(args.regexes).map((q) => ({ target: f, query: q }))));
+  const warnings = [
+    ...stateHint(args.files[0]),
+    ...recordQueries('search_js', args.files.flatMap((f) => args.keywords.concat(args.regexes).map((q) => ({ target: f, query: q })))),
+  ];
   const results = [];
   for (const file of args.files) {
     if (!fs.existsSync(file)) {

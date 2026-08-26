@@ -10,7 +10,7 @@
 
 const fs = require('fs');
 const readline = require('readline');
-const { recordQueries } = require('./lib/query_log');
+const { recordQueries, stateHint } = require('./lib/query_log');
 
 function parseArgs(argv) {
   const args = {
@@ -192,7 +192,7 @@ async function main() {
 
   const queries = args.keywords.concat(args.regexes).map((q) => ({ target: files[0], query: q }));
   if (args.url) queries.push({ target: files[0], query: `url:${args.url}` });
-  const warnings = recordQueries('search_trace', queries);
+  const warnings = [...stateHint(files[0]), ...recordQueries('search_trace', queries)];
 
   const matches = [];
   const ctx = args.json ? 0 : Math.max(0, Math.min(args.context, 20));
