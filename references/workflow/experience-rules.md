@@ -113,6 +113,6 @@ match10 实测：sandbox 预填"看起来完整"的运行时状态快照后，�
 | `cases/yidun-jigsaw.md` | 规则 20 实战验证（m 空串陷阱 + 全字段解密 + 逐点统计） |
 | `cases/yidun-intellisense-vm-env.md` | 规则 20 实战验证（成功样本链路字段核对） |
 | `cases/yuanrenxue-match4-sprite-pixelsort.md` | 规则 21 + 图片像素判定（base64 唯一 ≠ 像素唯一）实战验证 |
-| `cases/yuanrenxue-match6-aarcsa-honeymoon-risk.md` | 会话状态类风控（蜜月期/频率/惩罚层）+ 反模式 13/14/15 实战验证 |
+| `cases/yuanrenxue-match6-aarcsa-honeymoon-risk.md` | 会话状态类风控（蜜月期/频率/惩罚层）+ 反模式 13/14 实战验证 |
 | `cases/yuanrenxue-match9-dynamic-cookie2.md` | 规则 22 实战验证（RSA 循环加密禁缓存）+ 规则 23 实战验证（随机边缘拒绝需大样本判别）+ 数据绑定会话（反模式 19）+ 黑盒 SDK 定期更新（dynamic-resource.md 专节） |
-| `cases/yuanrenxue-match10-ruishu3-replay-defense.md` | 规则 24 实战验证（预填状态快照致引导脚本走旁路）+ 反模式 16/20/21 实战验证（插桩 while(1) 禁令 / VM 卡死转投浏览器 / 外部失败误归因通道层）+ 会话配套资源（dynamic-resource.md 专节）+ 元素语义真实化（env-object-model.md） |
+| `cases/yuanrenxue-match10-ruishu3-replay-defense.md` | 规则 24 实战验证（预填状态快照致引导脚本走旁路）+ 反模式 16/20/11 实战验证（插桩 while(1) 禁令 / VM 卡死转投浏览器 / 外部失败误归因通道层）+ 会话配套资源（dynamic-resource.md 专节）+ 元素语义真实化（env-object-model.md） |

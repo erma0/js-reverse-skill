@@ -32,4 +32,4 @@
 - `references/env/env-object-model.md`：元素语义真实化（`<a>` href 真实 URL 解析 + meta content 真实值回填，match10 实测）。
 - `references/hooks/anti-debug.md`：沙箱执行侧输出劫持（jsjiami 覆写 console.log，match/9 实测）。
 - `references/workflow/experience-rules.md`：规则 21（DOM ground truth）+ 规则 10（签名哈希常量篡改降级信号）+ 规则 22（黑盒执行禁止缓存复用）+ 规则 24（黑盒执行禁止预填状态快照，match10 实测）。
-- `references/workflow/common-pitfalls.md`：反模式 16（补环境死循环诊断，含插桩 while(1) 禁令，match10 实测）+ 反模式 19（数据差异未先验 session 基线，match9/10 实测）+ 反模式 20（VM 卡死后转投浏览器黑盒取数，match10 为主体，含终局修正后记）+ 反模式 21（外部失败未验证签名内容就归因 TLS/会话强绑定，match10 为主体）。
+- `references/workflow/common-pitfalls.md`：反模式 16（补环境死循环诊断，含插桩 while(1) 禁令，match10 实测）+ 反模式 19（数据差异未先验 session 基线，match9/10 实测）+ 反模式 20（VM 卡死后转投浏览器黑盒取数，match10 为主体，含终局修正后记）+ 反模式 11（外部失败未验证签名内容就归因 TLS/会话强绑定，match10 为主体）。

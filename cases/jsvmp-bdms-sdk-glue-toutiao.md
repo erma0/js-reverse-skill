@@ -200,4 +200,4 @@ XHR patch 无效？
 | `cases/jsvmp-xhr-interceptor-env-emulation.md` | 字节系 jsdom 方案对比 |
 | `references/workflow/trace-flow.md` | 标准两步取证流程 |
 | `references/env/env-debug-loop.md` | RuyiTrace 优先诊断门禁（本案例教训：补环境前必须先看 trace） |
-| `references/workflow/common-pitfalls.md` | 反模式 5（环境补丁没让 SDK 激活不等于方案不可行） |
+| `references/workflow/common-pitfalls.md` | 反模式 20（环境补丁没让 SDK 激活不等于方案不可行） |
