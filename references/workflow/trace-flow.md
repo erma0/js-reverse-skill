@@ -231,8 +231,8 @@ node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-
 
 日志导入后按以下顺序分析。所有 case 必须先完成 Step 1（ruyipage 网络包）+ Step 2（RuyiTrace NDJSON），再进入 Node.js 缺失环境追踪：
 
-1. 统计 `api` 调用频率，优先处理高频或和目标参数生成邻近的 API。
-2. 按 `stack.file / line / col` 聚合，定位具体 JS 文件和函数。
+1. 统计 `api` 调用频率，优先处理高频或和目标参数生成邻近的 API。**统计前先按调用栈 `stack.file` 过滤出目标站来源**——页面引入的第三方脚本（反指纹库/统计 SDK，如 airgap.js）会产生海量日志，直接统计会得出错误的环境画像（match10 实测：某进程日志全是 airgap.js 记录，未过滤时环境访问画像完全失真）。
+2. 按 `stack.file / line / col` 聚合，定位具体 JS 文件和函数。**优先翻查 eval/Function 动态代码捕获记录**——混淆框架（瑞数/JSVMP）运行时 eval 出的完整配置对象（如 238KB `$_ts={...}`）是运行时真实状态的第一手证据，可直接对照出 sandbox 内状态残缺（match10：trace 捕获 $_ts 应有 921 键名，sandbox 内仅 30 键，直接指明补环境缺口）。
 3. 分类到环境模块：
    - Navigator / Screen / Location / Storage。
    - Canvas / WebGL / Audio / WebRTC。

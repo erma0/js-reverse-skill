@@ -186,6 +186,15 @@ DOM 方法如 `createElement`、`querySelector`、`querySelectorAll`、`getEleme
 
 同时验证 `constructor.name`、`instanceof`、`Object.prototype.toString.call(element)`、`Symbol.toStringTag`、`Object.getPrototypeOf` walk、跨原型方法 brand check。
 
+### 元素语义不能只是"形状正确"
+
+原型链补对只是及格线；目标代码实际**读取/调用**的元素行为必须有真实语义，两个实测案例（match10 瑞数 v3）：
+
+- **`<a>` 的 href 必须有真实 URL 解析**：瑞数 core 用 `createElement('a').href` 规范化 URL 并判定协议，stub 元素读 href 返回 undefined → 协议判定失败 → 签名函数原样返回 URL 不注入参数。`href` 要做成 accessor，setter 接 Node `URL` 解析后回填 `protocol/hostname/port/pathname/search/hash`，getter 返回解析结果。
+- **被读取的 DOM 属性必须回填真实值**：瑞数 `_yrxnhf()` 取最后一个 `meta` 的 `content` 解码字符串表，stub 空串 → 表长 1 → 查表全 miss → 下游全崩。`meta.content`、`document.title`、`input.value` 这类值型属性，凡被目标代码读取，一律回填抓包/trace 的真实值，不得用空 stub 顶替。
+
+判定方法：trace（RuyiTrace NDJSON）里出现的 `createElement`/`getElementsByTagName` 调用，其返回元素上被 GET 的属性清单就是"必须有真实语义"的最小集合。
+
 ## `document.all`
 
 `document.all` 是 HTMLDDA / 不可检测特殊对象，不得用普通对象、普通 Proxy 或 `undefined` 声称完整实现。

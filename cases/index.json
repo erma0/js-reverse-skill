@@ -262,7 +262,7 @@
       "verifiedAt": "2026-08-25"
     },
     {
-      "title": "瑞数 v3 变种 + 重放攻击对抗（猿人学第10题）—— 反例案例",
+      "title": "瑞数 v3 变种 boot+api2 配套解密 + XHR 劫持自动签名 vm 沙箱纯协议还原（猿人学第10题）",
       "domains": [
         "match.yuanrenxue.cn"
       ],
@@ -272,6 +272,8 @@
         "rs.js",
         "api2/10",
         "$_ts 字符串表",
+        "dfe1675",
+        "dfe1683",
         "代码组装器",
         "重放攻击对抗",
         "obfuscator.io 控制流平坦化",
@@ -280,12 +282,14 @@
         "offset 动态随机数",
         "Function debugger 循环",
         "eval.toString 检测",
-        "m 参数 RSA 分块",
-        "反例案例"
+        "m 动态段零值",
+        "qqq 填充",
+        "k.k 动态回写",
+        "boot 会话绑定"
       ],
-      "strategy": "⚠️ 反例：违规用 ruyipage 浏览器黑盒取数（应走 B vm 沙箱补环境 + 对齐探针法，未完成）。技术指纹与可验证事实可作 CASE_LOOKUP 参考：rs.js + api2/10 + 内联组装链 + offset 动态随机数 + meta challenge 拼装 m；m 由瑞数 hook XHR.open 自动注入，实时生成绑定 page；数据绑定 sessionid；末页 UA=yuanrenxue；提交接口表单编码",
+      "strategy": "B vm 沙箱执行 + D 环境伪装：黑盒复刻浏览器加载链（新鲜 GET HTML 提取同次渲染 boot → sandbox 顺序 eval rs.js/api2/boot → core 劫持 XHR.open 自动注 m → 每页回写 k.k 动态变量），Node 原生 https 直连（无 TLS 指纹校验）。关键：boot 与 api2 必须同次渲染配套；m 出现 qqq 零值填充段 = 补环境不完整信号，先修签名再归因通道层（本案例曾误判 TLS 封死，终局推翻）",
       "file": "yuanrenxue-match10-ruishu3-replay-defense.md",
-      "verifiedAt": "2026-08-25"
+      "verifiedAt": "2026-08-26"
     },
     {
       "title": "猿人学 match 题号速查索引",
