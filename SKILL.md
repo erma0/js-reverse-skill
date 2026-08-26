@@ -14,19 +14,19 @@ description: >
 
 | 动作 | 命令 | 通过标准 |
 |---|---|---|
-| 启动 | `node scripts/state_machine.js --case-dir <project-root> --init --markdown` | state.json 生成 + 输出的「执行 TODO 清单」11 项原样同步到 TODO 工具 |
-| 状态推进 | `node scripts/state_machine.js --case-dir <project-root> --set <NODE> --note "<结论>"` | 合法转换 + 按输出勾选表同步 TODO 状态 |
+| 启动 | `node scripts/state_machine.js --case-dir <project-root> --init --markdown` | state.json 生成 + 11 项 TODO 同步 |
+| 状态推进 | `node scripts/state_machine.js --case-dir <project-root> --set <NODE> --note "<结论>"` | 合法转换 + TODO 勾选同步 |
 | GATE-1 环境 | `node scripts/check_session_resume.js --case-dir <project-root> --project-dir <project-root> --markdown` | fresh 完整自检 / resume 续接 |
-| GATE-2 证据 | `node scripts/check_evidence.js --case-dir <project-root> --url <目标> --markdown` | 退出码 0，否则按路由补证 |
-| 取证前速查 | `node scripts/search_cases.js --domain <域名> --signal <信号>` | 提取终态接口/坑点/题型情报校准参数 |
-| Step 1 网络取证 | `python scripts/forensic_ruyipage.py --url <目标> --targets <终态接口> --markdown`（时间参数一律秒） | 终态 2xx 命中 + capture.json 落盘 |
-| Step 2 trace | `node scripts/capture_ruyitrace_log.js --url <目标> --evidence-signal <writer写入点> --import-after --markdown` | NDJSON 产出 + `check_trace_gate.js` 退出码 0 |
-| 证据检索 | `search_trace.js --keyword <kw>` / `search_js.js --file <js> --keyword <kw>` | 读输出头部 [WARN]/[STATE] 提示并执行 |
+| GATE-2 证据 | `node scripts/check_evidence.js --case-dir <project-root> --url <目标> --markdown` | 退出码 0 |
+| 取证前速查 | `node scripts/search_cases.js --domain <域名> --signal <信号>` | 提取终态接口/坑点校准参数 |
+| Step 1 网络取证 | `python scripts/forensic_ruyipage.py --url <目标> --targets <终态接口> --markdown`（时间参数一律秒） | 终态 2xx + capture.json 落盘 |
+| Step 2 trace | `node scripts/capture_ruyitrace_log.js --url <目标> --evidence-signal <writer写入点> --import-after --markdown` | NDJSON + trace 门禁退出码 0 |
+| 证据检索 | `search_trace.js --keyword <kw>` / `search_js.js --file <js> --keyword <kw>` | 执行输出的 [WARN]/[STATE] 提示 |
 | 运行混淆 JS | `node scripts/run_with_trace.js --target <js> --entry <fn> --timeout 5000` | 禁手写 vm runner |
 | 混淆反混淆 | `node assets/ast-patterns/scripts/detect-patterns.js <js>` → `run-pipeline.js` | 按 README 分层执行 |
-| IMPLEMENT 前 | `node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` | 退出码 0（entry-chain + missing-env 两文件达标） |
+| IMPLEMENT 前 | `node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` | 退出码 0（两文件达标） |
 | 重放/写请求前 | `node scripts/state_machine.js --case-dir <project-root> --guard replay` | 只在 REAL_VERIFY/DIAGNOSE 放行 |
-| 外部题解检索前 | `node scripts/state_machine.js --case-dir <project-root> --guard external` | 只在 CASE_LOOKUP/EXTERNAL_LOOKUP/DIAGNOSE 放行（取证前外查会被过期文章带偏） |
+| 外部题解检索前 | `node scripts/state_machine.js --case-dir <project-root> --guard external` | 只在 CASE_LOOKUP/EXTERNAL_LOOKUP/DIAGNOSE 放行 |
 | 交付前 | `check_final_artifact.js` + `check_code_quality.js` | 退出码 0 |
 
 主线：INTENT_CONFIRM → ENV_READY → EVIDENCE_GATE →（FORENSIC_CAPTURE → TRACE_CAPTURE）→ CASE_LOOKUP → IDENTIFY → TRACE_ANALYZE → IMPLEMENT → REAL_VERIFY → DELIVER → CLEANUP → DONE。打转信号：检索输出 `[WARN] 重复检索` 或 `[STATE]` 提示即执行 §4.4 防耗尽检查点序列。
@@ -50,7 +50,21 @@ node scripts/state_machine.js --case-dir <project-root> --guard external
 node scripts/gate.js --case-dir <project-root> --at <NODE> --url <目标URL> --inputs <材料路径> --markdown
 ```
 
-**TODO 硬门禁（不可跳过）**：`--init` / `--set` / `--guard` 的输出都会渲染「执行 TODO 清单」勾选表（`[x]` 已完成 / `[~]` 进行中 / `[ ]` 待办），同时落盘到 `state.json.todo`。收到输出后必须立即把该清单**逐项同名同序**同步到宿主 TODO 工具（首次为创建，后续为更新状态），不新建子任务、不改写条目名；宿主无 TODO 工具时把清单原样输出给用户。判定标准：任何一次状态推进后的回复里看不到 11 项清单及其勾选状态，即视为流程违规，须立即补跑 `--set`（同节点重复设置合法）并输出清单。清单 11 项内容见 4 节。
+**TODO 硬门禁（不可跳过）**：`--init` / `--set` / `--guard` 的输出都会渲染「执行 TODO 清单」勾选表（`[x]` 已完成 / `[~]` 进行中 / `[ ]` 待办），同时落盘到 `state.json.todo`。收到输出后必须立即把该清单**逐项同名同序**同步到宿主 TODO 工具（首次为创建，后续为更新状态），不新建子任务、不改写条目名；宿主无 TODO 工具时把清单原样输出给用户。判定标准：任何一次状态推进后的回复里看不到 11 项清单及其勾选状态，即视为流程违规，须立即补跑 `--set`（同节点重复设置合法）并输出清单。
+
+清单 11 项（随状态推进勾选；每进入一个状态立即勾选对应项，回退时把对应项重新置为进行中，不新建子任务）：
+
+1. INTENT_CONFIRM
+2. ENV_READY（续接模式直接勾掉）
+3. EVIDENCE_GATE
+4. FORENSIC_CAPTURE / TRACE_CAPTURE（发起取证前先完成经验库速查定向，见 4.2 节）
+5. CASE_LOOKUP（本地 search_cases + EXTERNAL_LOOKUP）
+6. IDENTIFY
+7. TRACE_ANALYZE
+8. IMPLEMENT
+9. REAL_VERIFY（含 DIAGNOSE：403/风控码先分层定位双对照，见第 10 节）
+10. DELIVER / SIGN_ONLY_DELIVER
+11. CLEANUP
 
 违反规则：任何"当前执行与 state.json 不一致"（未 init、非法跳转、越权重放）都是任务失败信号；先回读 state.json 自修，禁止口头宣称"已进入某节点"代替 `--set` 与门禁实际输出。门禁/守卫拒绝即停，不得用 `--force` 常态绕过（`--force` 用于显式声明例外，仍须在阶段报告与最终总结写明）。
 
@@ -122,7 +136,7 @@ Windows 下后续手动运行 Python 脚本一律用环境检查选定的解释�
 ## 3. 纯协议红线
 
 - 不交付 Playwright、Puppeteer、Selenium、浏览器扩展、浏览器 MCP 或 ruyipage/RuyiTrace 自动化代码。
-- 不以 jsdom / happy-dom / domino 等 DOM 模拟库联网加载目标页（`JSDOM.fromURL`、`resources: 'usable'`）作为参数生成方式：交付物里出现"运行时去请求目标页面再执行其脚本"即违线。允许的边界是——把已落盘的目标 JS 放进最小 JS 沙箱离线执行，脚本与 fixture 都来自本 case 取证产物，不在运行时联网拉取页面或脚本。
+- 交付物不得在运行时联网加载目标页再执行其脚本来生成参数（jsdom / happy-dom / domino 类 DOM 模拟库的联网禁令与离线允许边界见绝对规则 8）：脚本与 fixture 都必须来自本 case 取证产物。
 - 不以自动化浏览器完成反爬挑战，不把浏览器抓到的关键 Cookie 作为固定常量。
 - 不把目标网页作为最终签名服务，不通过打开网页、执行页面脚本或读取浏览器状态生成参数。
 - 允许取证阶段使用 ruyipage 定制 Firefox 和 RuyiTrace；允许把取证得到的算法、静态资源、必要 fixture 转化为纯协议实现。
@@ -207,29 +221,15 @@ DELIVER / SIGN_ONLY_DELIVER → CLEANUP → DONE
 - 允许范围：TRACE_CAPTURE / CASE_LOOKUP / EXTERNAL_LOOKUP / IDENTIFY / TRACE_ANALYZE 只做取证（`forensic_ruyipage.py` / `capture_ruyitrace_log.js`）、本地证据分析（`import_ruyitrace_log.js` / `search_trace.js` / `search_js.js`）与案例/网络检索。
 - 重放归属：判断参数可重放性、绑定关系、UA/cookie/TLS 因素属 **DIAGNOSE**。需要这类判断时，先 TRACE_ANALYZE 定位 builder/writer，IMPLEMENT 写出实现，再到 REAL_VERIFY/DIAGNOSE 做对照实验。
 - 越权代价：①消耗会话状态、触发风控污染后续取证；②签名链未定位时缺乏对照基础，会把会话/cookie 层问题误判为签名或连接层问题。
-- 技术入口：任何向目标接口发真实请求（含"只发一次看看返回什么"的诊断性请求）前必须先跑 `node scripts/state_machine.js --case-dir <project-root> --guard replay`，退出码 0 才允许发。自我判断"我现在做的算 DIAGNOSE"不构成放行依据——守卫读的是 `state.json` 里的实际节点。
+- 技术入口：任何向目标接口发真实请求（含"只发一次看看返回什么"的诊断性请求）前必须先过 `--guard replay`（命令见 0.0 节），退出码 0 才允许发。自我判断"我现在做的算 DIAGNOSE"不构成放行依据——守卫读的是 `state.json` 里的实际节点。
 
-**外部检索时序（硬约束）**：外部题解/文章检索（WebSearch/WebFetch 搜"XX 网站 JS 逆向"）只允许在 CASE_LOOKUP / EXTERNAL_LOOKUP / DIAGNOSE 节点进行，执行前必须过 `node scripts/state_machine.js --case-dir <project-root> --guard external`（退出码 0 放行，越权退出 2 并写 `blocks` 审计）。EVIDENCE_GATE 及更早阶段一律不得外查——取证前外查的期望收益远低于被过期情报带偏的成本。情报到手后按以下规则处置：
+**外部检索时序（硬约束）**：外部题解/文章检索（WebSearch/WebFetch 搜"XX 网站 JS 逆向"）只允许在 CASE_LOOKUP / EXTERNAL_LOOKUP / DIAGNOSE 节点进行，执行前必须过 `--guard external`（命令见 0.0 节；退出码 0 放行，越权退出 2 并写 `blocks` 审计）。EVIDENCE_GATE 及更早阶段一律不得外查——取证前外查的期望收益远低于被过期情报带偏的成本。情报到手后按以下规则处置：
 
 1. 外部结论一律标记为**假设**，必须用本次 trace/capture 逐条验证签名字段名、接口路径、写入点后才能升级为结论。
 2. 与本次证据冲突时无条件以本次证据为准（绝对规则 2），并在案例沉淀里记下"外部情报已过期/不适用"及差异点。
 3. 不得因外部文章描述的方案更"完整"而回头修改本次证据的解读，也不得据此跳过取证。
 
-激活后立即运行 `node scripts/state_machine.js --case-dir <project-root> --init --markdown` 建立执行状态，并建立以下 11 项 TODO 随状态推进勾选：
-
-1. INTENT_CONFIRM
-2. ENV_READY（续接模式直接勾掉）
-3. EVIDENCE_GATE
-4. FORENSIC_CAPTURE / TRACE_CAPTURE（发起取证前先完成经验库速查定向，见 4.2 节）
-5. CASE_LOOKUP（本地 search_cases + EXTERNAL_LOOKUP）
-6. IDENTIFY
-7. TRACE_ANALYZE
-8. IMPLEMENT
-9. REAL_VERIFY（含 DIAGNOSE：403/风控码先分层定位双对照，见第 10 节）
-10. DELIVER / SIGN_ONLY_DELIVER
-11. CLEANUP
-
-每进入一个状态立即勾选对应项；回退时把对应项重新置为进行中，不新建子任务。同步规则与判定标准见 0.0 节「TODO 硬门禁」。
+激活后立即运行 `node scripts/state_machine.js --case-dir <project-root> --init --markdown` 建立执行状态；随状态推进勾选的 11 项 TODO 清单、同步规则与判定标准见 0.0 节「TODO 硬门禁」。
 
 ### 4.1 路径、意图与环境
 
@@ -245,11 +245,7 @@ DELIVER / SIGN_ONLY_DELIVER → CLEANUP → DONE
 
 ### 4.2 取证与证据门禁
 
-EVIDENCE_GATE 运行：
-
-```powershell
-node scripts/check_evidence.js --case-dir <project-root> --url <target-url> --inputs <材料路径> --markdown
-```
+EVIDENCE_GATE 运行 GATE-2 的 `check_evidence.js`（命令与信号参数见 0 节 GATE-2）。
 
 URL 不是证据。脚本确认文件真实存在并可归类，才允许跳过对应步骤。退出码非 0 或输出含「缺失证据」「不可跳过」时，停在 EVIDENCE_GATE 补证并复检，禁止进入 IDENTIFY/TRACE_ANALYZE/IMPLEMENT。
 
