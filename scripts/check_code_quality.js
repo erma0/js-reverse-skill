@@ -420,6 +420,72 @@ function inspectWebApiModuleBoundary(relFile, text, lines, args) {
   return { problems, warnings };
 }
 
+// 浏览器/DOM 模拟依赖红线（SKILL.md 绝对规则 8 与第 3 节纯协议红线）：
+// 交付代码不得依赖浏览器自动化框架，也不得用 jsdom/happy-dom 等 DOM 模拟库联网加载目标页执行其脚本。
+// 允许的边界是把已落盘的目标 JS 放进最小 JS 沙箱（vm/vm2/isolated-vm/node:vm）离线执行。
+const BROWSER_AUTOMATION_PATTERNS = [
+  ['puppeteer', /\b(?:require\(\s*['"]puppeteer(?:-core|-extra)?['"]|from\s+['"]puppeteer(?:-core|-extra)?['"]|import\s+puppeteer\b|\bpyppeteer\b)/],
+  ['playwright', /\b(?:require\(\s*['"]playwright(?:-core|-extra)?['"]|from\s+['"]playwright(?:-core|-extra)?['"]|from\s+playwright|import\s+playwright\b)/],
+  ['selenium', /\b(?:require\(\s*['"]selenium-webdriver['"]|from\s+selenium|import\s+selenium\b|undetected_chromedriver|DrissionPage)\b/],
+];
+
+// DOM 模拟库本身不违规：离线用法（本地 HTML 字符串 + 落盘脚本）是允许边界，
+// 只有联网加载目标页才越线，所以这里只用来判断"是否需要检查联网迹象"。
+const DOM_EMULATION_PATTERNS = [
+  ['jsdom', /\b(?:require\(\s*['"]jsdom['"]|from\s+['"]jsdom['"]|import\s+['"]jsdom['"])/],
+  ['happy-dom', /\b(?:require\(\s*['"]happy-dom['"]|from\s+['"]happy-dom['"])/],
+  ['domino', /\brequire\(\s*['"]domino['"]/],
+];
+
+// 联网加载目标页并执行页面脚本的硬证据：命中即违规，与是否离线无关
+const REMOTE_DOM_LOAD_PATTERNS = [
+  ['JSDOM.fromURL', /\bJSDOM\s*\.\s*fromURL\s*\(/],
+  ["resources: 'usable'", /\bresources\s*:\s*['"]usable['"]/],
+  ['url: http(s) 目标页', /\burl\s*:\s*(?:['"]https?:\/\/|[A-Za-z_$][\w$.]*\s*\|\|\s*['"]https?:\/\/)/],
+];
+
+function inspectBrowserDependency(relFile, text) {
+  const problems = [];
+  const warnings = [];
+  const automation = BROWSER_AUTOMATION_PATTERNS.filter(([, p]) => p.test(text)).map(([name]) => name);
+  if (automation.length) {
+    problems.push('引入浏览器自动化依赖：' + automation.join('、') + '。违反 SKILL.md 绝对规则 8 与纯协议红线：交付物必须在无浏览器、无显示器、无 X11 环境独立运行。请改为把已落盘的目标 JS 放进最小 JS 沙箱（node:vm / vm2 / isolated-vm）离线执行。');
+  }
+  const emulation = DOM_EMULATION_PATTERNS.filter(([, p]) => p.test(text)).map(([name]) => name);
+  const remoteHits = REMOTE_DOM_LOAD_PATTERNS.filter(([, p]) => p.test(text)).map(([name]) => name);
+  const remoteLoad = emulation.length ? remoteHits : remoteHits.filter(name => name !== 'url: http(s) 目标页');
+  if (remoteLoad.length) {
+    problems.push('发现联网加载目标页并执行页面脚本的写法：' + remoteLoad.join('、') + '。这等于把目标网页当签名服务，拿到的是页面自己算出的值而非可审计算法，且会暴露 DOM 模拟库 UA 与残缺指纹被检测。请用取证落盘的 JS 做离线复现。');
+  } else if (emulation.length) {
+    warnings.push('使用 DOM 模拟库 ' + emulation.join('、') + '：仅允许离线用法——HTML 由本地字符串构造、脚本来自本 case 取证落盘产物，不开 `resources: usable`、不传目标站 `url`。请确认运行时不会联网拉取页面或脚本。');
+  }
+  return { problems, warnings, automation, emulation };
+}
+
+function inspectPackageBrowserDeps(root) {
+  const problems = [];
+  const warnings = [];
+  // result/ 与其上一级（project-root）都可能放 package.json
+  const candidates = [path.join(root, 'package.json'), path.join(path.dirname(root), 'package.json')];
+  for (const file of candidates) {
+    if (!exists(file)) continue;
+    let pkg = null;
+    try { pkg = JSON.parse(readUtf8Strict(file).text); } catch { continue; }
+    const deps = Object.assign({}, pkg.dependencies, pkg.devDependencies, pkg.optionalDependencies);
+    const names = Object.keys(deps);
+    const format = list => list.map(n => `${n}@${deps[n]}`).join('、');
+    const automation = names.filter(n => /^(?:puppeteer|puppeteer-core|puppeteer-extra|playwright|playwright-core|playwright-extra|selenium-webdriver)$/i.test(n));
+    const emulation = names.filter(n => /^(?:jsdom|happy-dom|domino)$/i.test(n));
+    if (automation.length) {
+      problems.push(`${rel(root, file)}: 依赖清单包含浏览器自动化库 ${format(automation)}。交付物必须在无浏览器、无显示器、无 X11 环境独立运行，请从依赖契约中移除。`);
+    }
+    if (emulation.length) {
+      warnings.push(`${rel(root, file)}: 依赖清单包含 DOM 模拟库 ${format(emulation)}。只允许离线用法（本地 HTML 字符串 + 本 case 落盘脚本），若只是执行落盘 JS，优先改用 node:vm 最小沙箱。`);
+    }
+  }
+  return { problems, warnings };
+}
+
 function inspectProjectStructure(root, files) {
   const problems = [];
   const warnings = [];
@@ -464,6 +530,9 @@ function inspectFile(root, file, args) {
   const webApiBoundaryCheck = inspectWebApiModuleBoundary(relFile, text, lines, args);
   problems.push(...webApiBoundaryCheck.problems);
   warnings.push(...webApiBoundaryCheck.warnings);
+  const browserDepCheck = inspectBrowserDependency(relFile, text);
+  problems.push(...browserDepCheck.problems);
+  warnings.push(...browserDepCheck.warnings);
 
   if (hasBom) problems.push('文件带 UTF-8 BOM，建议使用无 BOM UTF-8。');
   if (/\uFFFD/.test(text)) problems.push('文件包含替换字符，疑似 UTF-8 解码或写入异常。');
@@ -591,6 +660,9 @@ function check(args) {
   const structure = inspectProjectStructure(root, files);
   for (const p of structure.problems) problems.push(p);
   for (const w of structure.warnings) warnings.push(w);
+  const pkgBrowserDeps = inspectPackageBrowserDeps(root);
+  for (const p of pkgBrowserDeps.problems) problems.push(p);
+  for (const w of pkgBrowserDeps.warnings) warnings.push(w);
   return {
     root,
     clean: problems.length === 0,
@@ -625,6 +697,7 @@ function renderMarkdown(result) {
     '- 禁止压缩代码、过度堆叠语句、调试断点和临时测试标记。',
     '- signer / probe / runtime 入口不得承载 navigator、document、canvas、webgl、performance 等多域 WebAPI 补环境主体。',
     '- 补环境不得以大段 String.raw / *_SCRIPT 字符串作为主要交付形态，必须拆成真实文件模块并通过 runFile/runFiles 注入。',
+    '- 交付代码与依赖清单不得包含 Puppeteer / Playwright / Selenium；jsdom / happy-dom / domino 仅允许离线用法，出现 JSDOM.fromURL、resources: usable 或指向目标站的 url 即视为联网加载目标页，属违规。',
     '',
   ];
   if (result.problems.length) {

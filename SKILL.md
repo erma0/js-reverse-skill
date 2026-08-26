@@ -119,7 +119,7 @@ Windows 下后续手动运行 Python 脚本一律用环境检查选定的解释�
 5. 最终交付必须能在无浏览器、无显示器、无 X11 的环境中独立运行。
 6. 默认完成真实 API 验证；只有用户明确要求“只输出参数”“不发真实请求”时才允许 sign-only 模式。
 7. 不记录、提交或硬编码用户密钥、完整登录 Cookie、Authorization、验证码答案或其他秘密材料。
-8. 取证只允许三个来源：① ruyipage 定制 Firefox（经 `scripts/forensic_ruyipage.py`）② RuyiTrace（经 `scripts/capture_ruyitrace_log.js`）③ 用户手动提供材料。任何阶段不得手写 fetch/curl/requests 抓取目标页面或下载目标 JS，不得使用系统 Chrome/Edge/Firefox、Playwright/Puppeteer/Selenium 或浏览器 MCP 取证。也不得安装 jsdom / happy-dom / domino 等 DOM 模拟库，通过 `JSDOM.fromURL()`、`resources: 'usable'`、`runScripts: 'dangerously'` 之类接口联网加载目标页并执行页面脚本——这既是绕过本条的第四种取证通道（拿到的还是"页面自己算出来的值"，不是可审计的算法），又必然暴露 `jsdom/x.y.z` UA 与残缺 DOM 指纹被检测。补环境只允许在**已落盘的目标 JS** 上做离线最小环境复现，输入必须来自 ①②③ 三个来源。
+8. 取证只允许三个来源：① ruyipage 定制 Firefox（经 `scripts/forensic_ruyipage.py`）② RuyiTrace（经 `scripts/capture_ruyitrace_log.js`）③ 用户手动提供材料。任何阶段不得手写 fetch/curl/requests 抓取目标页面或下载目标 JS，不得使用系统 Chrome/Edge/Firefox、Playwright/Puppeteer/Selenium 或浏览器 MCP 取证。也不得用 jsdom / happy-dom / domino 等 DOM 模拟库**联网加载目标页**取证（`JSDOM.fromURL()`、`new JSDOM(..., { url, resources: 'usable' })` 会真去拉取页面与子资源）：这是绕过本条的第四种取证通道，拿到的是"页面自己算出的值"而非可审计算法，且必然暴露 `jsdom/x.y.z` UA 与残缺 DOM 指纹被检测。边界：DOM 模拟库只允许**离线**使用——HTML 由本地字符串构造、脚本来自 ①②③ 落盘产物、不开 `resources: 'usable'`、不传目标站 `url` 触发网络加载（`runScripts: 'dangerously'` 在纯离线输入下不受限）。
 
 ## 3. 纯协议红线
 
