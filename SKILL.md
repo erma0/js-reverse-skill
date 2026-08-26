@@ -369,7 +369,7 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 | 信号 | 初始路径 |
 |---|---|
 | md5、sha、aes、hmac、SM2/SM4/SM3 | 定位入口后优先纯算法还原 |
-| `_0x`、obfuscator.io、控制流平坦化 | AST 识别和最小化反混淆，再判断是否可纯算 |
+| `_0x`、obfuscator.io、控制流平坦化 | AST 反混淆工具链处理（命令入口见下方），再判断是否可纯算 |
 | 200KB+、while-switch、dispatcher、字节码数组 | JSVMP 黑盒执行或最小环境复现，不反编译 |
 | WebAssembly、wasm base64、webpack 内嵌 wasm | 先整包黑盒，不默认补完整浏览器、禁止先手撕字节码 |
 | 412 循环、sdenv、挑战 Cookie | 先还原挑战链，再确认业务签名链 |
@@ -387,7 +387,14 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 node scripts/identify_crypto.js --value <密文样本> --label <参数名> --markdown
 # Cookie 归因：capture.json Set-Cookie（服务端）× trace cookie 写入（JS）融合，判定每个 Cookie 生成方
 node scripts/analyze_cookie_attribution.js --case-dir <project-root> [--cookie <名称>] --markdown
+# 混淆 JS 反混淆（命中 _0x / obfuscator / 控制流平坦化时；babel 依赖安装见 assets/ast-patterns/README.md）：
+node assets/ast-patterns/scripts/detect-patterns.js <input.js> [hint]        # 1) 先检测混淆家族
+node assets/ast-patterns/scripts/run-pipeline.js <input.js> <output-dir> [hint]  # 2) 执行反混淆流水线（分层、可回退）
+# 需要运行混淆 JS 验证行为（解码字符串表、观察全局写入）时，一律用带超时保护的沙箱工具：
+node scripts/run_with_trace.js --target case/js/original/<资源名>.js --entry <入口函数> --timeout 5000
 ```
+
+**运行混淆 JS 禁止手写 vm runner（硬约束）**：`run_with_trace.js` 内置 vm 超时保护与环境访问日志，手写 `vm.runInContext` runner 无超时——混淆脚本普遍含反调试死循环（`while(!![])`、debuggerProtection、setInterval 干扰），卡死后无法区分"挂起"与"静默失败"，且重写解码器/runner 会反复踩转义与括号平衡坑（match14 实证：手写 runner 空跑 8 次、解码器重写 4 次均无结论，全部浪费在工具问题上）。混淆 JS 的字符串数组解码优先走 ast-patterns 流水线（含 RC4/base64 变形的标准 obfuscator 处理），只在流水线不适配时才写最小提取脚本，且写前必须过 `node --check`。
 
 `identify_crypto.js` 只做族级指纹（同长度的 SHA-256/SM3 无法仅凭密文区分），实现仍以 trace 定位的 builder/writer 为准。`analyze_cookie_attribution.js` 回答"这个 Cookie 是谁写的"：server → 复现请求链、禁止硬编码；js → 按写入点 stack 还原挑战/签名算法；both → 按请求顺序拆分串联链。
 
@@ -399,7 +406,7 @@ node scripts/analyze_cookie_attribution.js --case-dir <project-root> [--cookie <
 
 **先 trace、后读源码（硬约束）**：进入本节后先跑 `import_ruyitrace_log` 生成摘要，再用 `search_trace --url <target-signal>` 直接定位请求链和 `stack.file:line:col`，最后才按行号/字符偏移切源码片段。禁止在拿到 trace 前先读 8MB 大 bundle 手工猜 webpack module id 或写 probe1~N 静态解析——那会耗尽上下文且命中率低。定位大文件 JS 关键词必须用 `search_js.js`；禁止 grep 单行超 64KB 的压缩 JS、禁止现场手搓 `node -e`（PowerShell 转义翻车）。**响应体非明文（`code` 非 0、`data` 二进制/乱码）时同理**：先查 trace 的 xhrNative 响应记录确认响应形态，再按响应方向四层（response→reader→decoder→parser，见 `references/crypto/crypto-entry.md`）追响应处理链；禁止先搜源码里的密钥串猜解密算法——密钥可能作用于别的字段。
 
-**Windows 写临时脚本规范（探针/runner/补环境脚本一律遵守）**：优先用编辑工具直接写文件；必须用 PowerShell 时一律单引号 here-string `@'...'@`（内部 `$` 不插值）配合 `[IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))` 落盘。禁止双引号 here-string（`$` 插值破坏 JS 语法）、禁止 base64 编码绕路（多一轮转译仍会翻车）、禁止 `node -e` / `python -c` 内联长脚本。写完先跑一次语法检查（`node --check` / `py -3 -m py_compile`）再执行，避免把转义错误误判成目标 JS 的行为。
+**Windows 写临时脚本规范（探针/runner/补环境脚本一律遵守）**：优先用编辑工具直接写文件；必须用 PowerShell 时一律单引号 here-string `@'...'@`（内部 `$` 不插值）配合 `[IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))` 落盘。禁止双引号 here-string（`$` 插值破坏 JS 语法）、禁止 base64 编码绕路（多一轮转译仍会翻车）、禁止 `node -e` / `python -c` 内联长脚本。写完先跑一次语法检查（`node --check` / `py -3 -m py_compile`）再执行，避免把转义错误误判成目标 JS 的行为。运行混淆 JS 的沙箱需求一律走 `run_with_trace.js`（vm 超时保护 + 环境访问日志），不得手写 vm runner（硬约束见第 7 节）。
 
 **依赖 JS 版本校验（硬约束）**：被挑战代码引用的黑盒 SDK（如 udc.js 类"动态工具 JS"）可能**定期更新**（公钥/算法随版本变化），用旧副本实现会导致签名"格式全对但服务端全拒"且极难排查（match9 最耗时根因）。进入实现前校验关键依赖 JS 与站点当前版本一致（`curl -s <url> | md5sum` 对比本地副本）；抓取 JS **一律二进制**（`urlopen(url).read()` + `wb` 写回），**禁止** `decode('utf-8', errors='ignore')` 后文本写回——会静默丢字节损坏文件（md5 变化、无报错）。交付脚本对关键依赖内置"启动自动抓取 + hash 对比"。详见 `references/network/dynamic-resource.md` 专节。
 
@@ -415,6 +422,8 @@ node scripts/search_trace.js --trace <project-root>/case/ruyi-trace/logs/trace.n
 node scripts/search_js.js --file <project-root>/case/js/original/<资源名>.js --keyword <关键词> --context 200 --markdown
 node scripts/analyze_trace.js --trace <project-root>/case/tmp/env-trace.jsonl --summary <project-root>/case/tmp/missing-env.json --markdown
 node scripts/check_trace_api_coverage.js --case-dir <project-root> --markdown
+# 4) 需要运行混淆 JS 观察行为/补环境探测时（禁手写 vm runner，见第 7 节硬约束）
+node scripts/run_with_trace.js --target <project-root>/case/js/original/<资源名>.js --entry <入口函数> --timeout 5000
 ```
 
 不要在命令行手搓 `python -c` 或引号嵌套 grep NDJSON。默认只观察不修改；仅当 NDJSON 缺失、截断或无法覆盖关键入口时，才使用 Hook 模板，并只注入 ruyipage 定制 Firefox。Hook 必须在目标 SDK 加载前安装，命中后及时移除。
@@ -526,6 +535,8 @@ node scripts/check_final_artifact.js --case-dir <project-root> --production --ma
 |---|---|
 | 状态机细则、常见坑、经验法则 | `references/workflow/phase-flow.md`、`decision-tree.md`、`common-pitfalls.md`、`experience-rules.md` |
 | 取证、trace 质量与重试、工具安装 | `references/workflow/trace-flow.md`、`references/tooling/ruyi-tooling.md`、`browser-acquisition.md` |
+| 混淆 JS 反混淆（`_0x`/字符串表/控制流平坦化，AST 改写） | `assets/ast-patterns/README.md` 入口：`detect-patterns.js` 检测家族 → `run-pipeline.js` 执行流水线 |
+| 运行混淆 JS 验证行为（vm 沙箱 + 超时 + 环境访问日志） | `node scripts/run_with_trace.js --help`（禁止手写 vm runner） |
 | 加密、混淆、环境、WASM、网络、指纹、验证码、交付 | 按场景细分见 `references/workflow/reference-map.md` |
 
 完整目录和场景索引在 `references/workflow/reference-map.md`。目录、脚本和模板的具体参数以实际脚本 `--help` 输出为准。若 reference 与本文件冲突，以本文件的状态机、真实 API 验证规则和纯协议红线为准。
