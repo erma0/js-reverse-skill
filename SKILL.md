@@ -42,17 +42,15 @@ description: >
 node scripts/state_machine.js --case-dir <project-root> --init --markdown
 # 每次状态转换：--set 校验合法性，跳过必经节点（如直跳 IMPLEMENT）直接报错；--force 放行但留审计
 node scripts/state_machine.js --case-dir <project-root> --set <NODE> --note "<关键结论>" --markdown
-# 任何向目标接口发起重放/写请求的执行入口（临时脚本、最终实现验证），运行前必须过守卫：
-# 当前节点不在 REAL_VERIFY/DIAGNOSE 时拒绝执行（退出码 2），前置阶段越权重放从技术上被拦截
+# 向目标接口发起重放/写请求前必过（细则见 4 节「阶段动作边界」）
 node scripts/state_machine.js --case-dir <project-root> --guard replay
-# 任何外部题解/文章检索（WebSearch/WebFetch 找"XX 网站 JS 逆向"），运行前必须过守卫：
-# 当前节点不在 CASE_LOOKUP/EXTERNAL_LOOKUP/DIAGNOSE 时拒绝执行（退出码 2）
+# 外部题解/文章检索前必过（细则见 4 节「外部检索时序」）
 node scripts/state_machine.js --case-dir <project-root> --guard external
 # 进入每个节点前聚合跑该节点必验门禁；输出含 FAIL 或需参数缺失时停在当前节点
 node scripts/gate.js --case-dir <project-root> --at <NODE> --url <目标URL> --inputs <材料路径> --markdown
 ```
 
-**TODO 硬门禁（不可跳过）**：`--init` / `--set` / `--guard` 的输出都会渲染「执行 TODO 清单」勾选表（`[x]` 已完成 / `[~]` 进行中 / `[ ]` 待办），同时落盘到 `state.json.todo`。收到输出后必须立即把该清单**逐项同名同序**同步到宿主 TODO 工具（首次为创建，后续为更新状态），不新建子任务、不改写条目名；宿主无 TODO 工具时把清单原样输出给用户。判定标准：任何一次状态推进后的回复里看不到 11 项清单及其勾选状态，即视为流程违规，须立即补跑 `--set`（同节点重复设置合法）并输出清单。实测教训（match14）：清单只写在文档里而不由脚本产出，长会话中 AI 全程未建 TODO，静态分析打转数十轮无进度信号可察觉。
+**TODO 硬门禁（不可跳过）**：`--init` / `--set` / `--guard` 的输出都会渲染「执行 TODO 清单」勾选表（`[x]` 已完成 / `[~]` 进行中 / `[ ]` 待办），同时落盘到 `state.json.todo`。收到输出后必须立即把该清单**逐项同名同序**同步到宿主 TODO 工具（首次为创建，后续为更新状态），不新建子任务、不改写条目名；宿主无 TODO 工具时把清单原样输出给用户。判定标准：任何一次状态推进后的回复里看不到 11 项清单及其勾选状态，即视为流程违规，须立即补跑 `--set`（同节点重复设置合法）并输出清单。清单 11 项内容见 4 节。
 
 违反规则：任何"当前执行与 state.json 不一致"（未 init、非法跳转、越权重放）都是任务失败信号；先回读 state.json 自修，禁止口头宣称"已进入某节点"代替 `--set` 与门禁实际输出。门禁/守卫拒绝即停，不得用 `--force` 常态绕过（`--force` 用于显式声明例外，仍须在阶段报告与最终总结写明）。
 
@@ -204,9 +202,18 @@ DELIVER / SIGN_ONLY_DELIVER → CLEANUP → DONE
 
 **TRACE_CAPTURE / TRACE_RETRY 出口门禁（不可跳过）**：进入 CASE_LOOKUP 前必须复跑 `node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --require-trace-signal <环境API/写入点> --markdown`，退出码 0（Step 2 已具备且目标 writer 覆盖满足）才放行；NDJSON 已产出但 writer 信号未命中时是「覆盖不足」不是「没有 trace」，进 TRACE_RETRY。完整判定规则、与 GATE-2 的区别、信号语义见 4.2 节「TRACE_CAPTURE 出口门禁复检」。
 
-**阶段动作边界（硬约束）**：状态机每个节点只允许该节点的取证/分析动作，**前置阶段不得发起外部重放/对照实验**。重放实验（判断参数可重放性、绑定关系、UA/cookie/TLS 因素）属 **DIAGNOSE** 范畴，TRACE_CAPTURE / CASE_LOOKUP / EXTERNAL_LOOKUP / IDENTIFY / TRACE_ANALYZE 阶段一律不得向目标接口发起重放请求——这些阶段只做取证（forensic_ruyipage.py / capture_ruyitrace_log.js）、本地证据分析（import_ruyitrace_log.js / search_trace.js / search_js.js）和案例/网络检索。需要判断参数可重放性/绑定关系时，先完成 TRACE_ANALYZE 定位 builder/writer，进入 IMPLEMENT 写出实现后再到 REAL_VERIFY/DIAGNOSE 做对照实验。前置阶段发起重放会：①消耗会话状态/触发风控污染后续取证；②在签名链未定位时归因错误（把会话/cookie 层问题误判为签名或连接层问题，因缺乏对照基础）。技术入口：任何向目标接口发真实请求（含"只发一次看看返回什么"的诊断性请求）之前，必须先跑 `node scripts/state_machine.js --case-dir <project-root> --guard replay`，退出码 0 才允许发。自我判断"我现在做的算 DIAGNOSE"不构成放行依据——守卫读的是 `state.json` 里的实际节点。实测教训（match14）：AI 在 TRACE 阶段自称"REAL_VERIFY/DIAGNOSE 允许重放"，直接对目标接口发对照请求，既越权又在签名链未定位时得出无效结论。
+**阶段动作边界（硬约束）**：状态机每个节点只允许该节点的取证/分析动作，**前置阶段不得发起外部重放/对照实验**。
 
-**外部检索时序（硬约束）**：外部题解/文章检索（WebSearch/WebFetch 搜"XX 网站 JS 逆向"）只允许在 CASE_LOOKUP / EXTERNAL_LOOKUP / DIAGNOSE 节点进行，执行前必须过 `node scripts/state_machine.js --case-dir <project-root> --guard external`（退出码 0 放行，越权退出 2 并写 `blocks` 审计）。EVIDENCE_GATE 及更早阶段一律不得外查。外部情报到手后按以下规则处置：①外部结论一律标记为**假设**，必须用本次 trace/capture 逐条验证签名字段名、接口路径、写入点后才能升级为结论；②与本次证据冲突时无条件以本次证据为准（绝对规则 2），并在案例沉淀里记下"外部情报已过期/不适用"及差异点；③不得因外部文章描述的方案更"完整"而回头修改本次证据的解读，也不得据此跳过取证。实测教训（match14）：在 EVIDENCE_GATE 阶段就外查，得到"瑞数 V5 防护""接口是 `/api/match/14/m`"等全错情报，随后花了大量轮次在错误方向上打转，直到自己发现"当前版本与网上旧文章完全不同"才纠偏——取证前外查的期望收益远低于被过期情报带偏的成本。
+- 允许范围：TRACE_CAPTURE / CASE_LOOKUP / EXTERNAL_LOOKUP / IDENTIFY / TRACE_ANALYZE 只做取证（`forensic_ruyipage.py` / `capture_ruyitrace_log.js`）、本地证据分析（`import_ruyitrace_log.js` / `search_trace.js` / `search_js.js`）与案例/网络检索。
+- 重放归属：判断参数可重放性、绑定关系、UA/cookie/TLS 因素属 **DIAGNOSE**。需要这类判断时，先 TRACE_ANALYZE 定位 builder/writer，IMPLEMENT 写出实现，再到 REAL_VERIFY/DIAGNOSE 做对照实验。
+- 越权代价：①消耗会话状态、触发风控污染后续取证；②签名链未定位时缺乏对照基础，会把会话/cookie 层问题误判为签名或连接层问题。
+- 技术入口：任何向目标接口发真实请求（含"只发一次看看返回什么"的诊断性请求）前必须先跑 `node scripts/state_machine.js --case-dir <project-root> --guard replay`，退出码 0 才允许发。自我判断"我现在做的算 DIAGNOSE"不构成放行依据——守卫读的是 `state.json` 里的实际节点。
+
+**外部检索时序（硬约束）**：外部题解/文章检索（WebSearch/WebFetch 搜"XX 网站 JS 逆向"）只允许在 CASE_LOOKUP / EXTERNAL_LOOKUP / DIAGNOSE 节点进行，执行前必须过 `node scripts/state_machine.js --case-dir <project-root> --guard external`（退出码 0 放行，越权退出 2 并写 `blocks` 审计）。EVIDENCE_GATE 及更早阶段一律不得外查——取证前外查的期望收益远低于被过期情报带偏的成本。情报到手后按以下规则处置：
+
+1. 外部结论一律标记为**假设**，必须用本次 trace/capture 逐条验证签名字段名、接口路径、写入点后才能升级为结论。
+2. 与本次证据冲突时无条件以本次证据为准（绝对规则 2），并在案例沉淀里记下"外部情报已过期/不适用"及差异点。
+3. 不得因外部文章描述的方案更"完整"而回头修改本次证据的解读，也不得据此跳过取证。
 
 激活后立即运行 `node scripts/state_machine.js --case-dir <project-root> --init --markdown` 建立执行状态，并建立以下 11 项 TODO 随状态推进勾选：
 
@@ -222,7 +229,7 @@ DELIVER / SIGN_ONLY_DELIVER → CLEANUP → DONE
 10. DELIVER / SIGN_ONLY_DELIVER
 11. CLEANUP
 
-每进入一个状态立即勾选对应项；回退时把对应项重新置为进行中，不新建子任务。TODO 创建与勾选不是可选项：`--init` / `--set` / `--guard` 的输出都会渲染「执行 TODO 清单」勾选表（`[x]` 已完成 / `[~]` 进行中 / `[ ]` 未开始）并落盘到 `state.json.todo`，同名同序同步到宿主 TODO 工具即可，不改条目名、不新建子任务；宿主环境无 TODO 工具时把清单原样输出给用户。判定标准：任何一次状态推进后的回复里看不到这 11 项及其勾选状态，即视为流程违规，立即补跑一次 `--set`（设置为当前同一节点是合法转换）。实测教训（match14）：只依赖文档指令不建 TODO，长会话中状态推进完全失去进度跟踪，AI 在静态分析中打转数十轮无进度信号可察觉。
+每进入一个状态立即勾选对应项；回退时把对应项重新置为进行中，不新建子任务。同步规则与判定标准见 0.0 节「TODO 硬门禁」。
 
 ### 4.1 路径、意图与环境
 
@@ -266,22 +273,25 @@ node scripts/search_cases.js --domain <目标域名> --signal <参数名或SDK�
 # --targets = 本次流程的终态接口（如最终登录/业务提交接口）；任一目标 URL 的非 OPTIONS 2xx 响应命中后进入短暂收尾窗口并结束取证，
 # 抓包从页面打开前覆盖到终态，不要求用户预先列全验证码 load/verify 等中间接口。
 # 自动保存入口页面 HTML 到 case/forensic/document.html（含 412/JS challenge 页内联脚本，是 acw_sc__v2 等 challenge cookie 的强制证据）。
-# 预算与落盘细则（--wait/--manual-pause/--target-settle、60包/100MB 关联预算、bodies/wasm 落盘、预览阈值与 saved_to/_complete 语义）
-# 见 scripts/README.md 与 references/workflow/trace-flow.md，此处不重复。
-# 时间参数一律「秒」：--wait 默认 120（上限 600）、--target-settle 默认 3（上限 120）；传毫秒数值会被脚本拒绝。
 # --targets 只写能唯一标识终态接口的完整路径子串（如 api/question/13）；禁止用会误命中同号旁路接口的宽正则
 # （topic_info?href=N / api2/N / a/N 都含同一数字，宽正则会让取证在目标接口之前提前收尾 → 目标响应体丢失，见反模式 22）。
+# 全部参数细则（时间参数一律「秒」、--wait/--target-settle 上限、--cookie/--cookie-domain 会话注入、--ua 覆盖、
+# 60包/100MB 关联预算、bodies/wasm 落盘、预览阈值与 saved_to/_complete 语义）见 scripts/README.md
+# 与 references/workflow/trace-flow.md，此处不重复。
+# --ua 只覆盖 UA 字符串；eval.toString() 等内核级检测覆盖无效，命中此类检测按状态机 BLOCKED_FORENSIC 处理
+# （见 references/env/env-detect-bypass.md 内核级差异检测），禁止为改 UA 手写取证探针。
+# RED LINE：--cookie 仅用于"注入到取证浏览器以还原真实会话过程"，不替代最终交付的协议实现。
 python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root> --targets <最终业务接口关键词> --markdown
-# 需预置登录态/会话的页面（取证入口在登录后或需先注入 Cookie）：
-#   加 --cookie "name=value; name2=value2"（可多条，分号分隔；缺省 domain 取 --url 主机）
-#   显式指定域名可用 --cookie-domain ".example.com"。注入发生在导航前，页面与抓包均携带该会话。
-#   RED LINE 提示：--cookie 仅用于"注入到取证浏览器以还原真实会话过程"，不替代最终交付的协议实现。
-# 目标站校验 UA 为特定浏览器时：加 --ua "<UA字符串>" 覆盖取证浏览器 UA（在智能指纹之后应用）。
-#   只覆盖 UA 字符串；eval.toString() 等内核级检测覆盖无效，命中此类检测按状态机 BLOCKED_FORENSIC 处理
-#   （见 references/env/env-detect-bypass.md 内核级差异检测），禁止为改 UA 手写取证探针。
 ```
 
-终态目标请求未命中 = Step 1 缺失，禁止转源码搜索继续：`PARTIAL`（仅 OPTIONS/非 2xx）与 `NO_TARGET`（完全未命中）均退出码非 0；任一非 OPTIONS 2xx 命中即 `PASS` 退出码 0。HTTP 2xx 只表示目标请求已取证，不表示业务成功（通用脚本不猜业务码）。登录可能因验证码/校验失败重试时调大 `--target-settle`（单位秒，默认 3；验证码/登录重试建议 10~30，上限 120），保证重试仍在同一会话内；关联材料以最后一次有效终态向前回溯，验证码中间接口不是额外终态门禁（load → verify 由分析阶段从同一会话回溯）。终态命中后的正常收尾耗时 ≈ target-settle 秒数 + 落盘时间（通常 1 分钟内）；等待取证收尾远超该预期（如超 5 分钟）时，先核对时间参数是否把毫秒当秒传入，不要无限轮询干等。body 超过 JSON 内联预览阈值时必须读取对应 `saved_to` 完整文件，`*_complete=false` 不能拿预览替代原始证据。需要用户交互时提示其在窗口完成操作——**操作完成后用户直接关闭浏览器窗口即视为手动结束抓包，脚本会立即收尾落盘（报告 endReason=browser-closed），不是失败**；浏览器已关/日志出现 WebSocket 断连时脚本仍在收尾分类，禁止 kill 进程，等 `FORENSIC DONE` 或 JSON 输出；万一进程被强杀，`case/forensic/partial-steps.jsonl` 保留了全部包元数据兜底（该文件残留即说明未正常收尾）。用户也可提供 cURL/HAR/原始请求文本；终态命中并落盘后再回 EVIDENCE_GATE。JS 源码关键词定位只能作辅助假设。
+终态目标请求未命中 = Step 1 缺失，禁止转源码搜索继续。JS 源码关键词定位只能作辅助假设；用户也可提供 cURL/HAR/原始请求文本；终态命中并落盘后再回 EVIDENCE_GATE。
+
+- **退出码语义**：`PARTIAL`（仅 OPTIONS/非 2xx）与 `NO_TARGET`（完全未命中）均非 0；任一非 OPTIONS 2xx 命中即 `PASS`、退出码 0。HTTP 2xx 只表示目标请求已取证，不表示业务成功（通用脚本不猜业务码）。
+- **重试型场景**：登录可能因验证码/校验失败重试时调大 `--target-settle`（单位秒，默认 3；建议 10~30，上限 120），保证重试仍在同一会话内。关联材料以最后一次有效终态向前回溯，验证码中间接口不是额外终态门禁（load → verify 由分析阶段从同一会话回溯）。
+- **收尾耗时预期**：≈ `--target-settle` 秒数 + 落盘时间（通常 1 分钟内）。等待远超预期（如超 5 分钟）时先核对时间参数是否把毫秒当秒传入，不要无限轮询干等。
+- **证据完整性**：body 超过 JSON 内联预览阈值时必须读取对应 `saved_to` 完整文件，`*_complete=false` 不能拿预览替代原始证据。
+- **手动结束**：需要用户交互时提示其在窗口完成操作——**操作完成后用户直接关闭浏览器窗口即视为手动结束抓包，脚本会立即收尾落盘（报告 endReason=browser-closed），不是失败**。
+- **禁止 kill 进程**：浏览器已关/日志出现 WebSocket 断连时脚本仍在收尾分类，等 `FORENSIC DONE` 或 JSON 输出。万一进程被强杀，`case/forensic/partial-steps.jsonl` 保留全部包元数据兜底（该文件残留即说明未正常收尾）。
 
 Windows 下若 Python 脚本输出仍现编码异常，用 `PYTHONUTF8=1` 前缀兜底（PowerShell：`$env:PYTHONUTF8="1"`）；仓库脚本已内置 UTF-8 强制与 emoji 安全化，正常无需手动加。
 
@@ -290,29 +300,24 @@ Windows 下若 Python 脚本输出仍现编码异常，用 `PYTHONUTF8=1` 前缀
 ```powershell
 node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-root> --evidence-signal <环境API或签名写入点关键词> --end-signal <明确完成事件> --import-after --markdown
 # --trace-signal / --evidence-signal 只匹配 RuyiTrace 记录的环境 API / 写入点（如 Headers.set(<参数>)、参数名、JSONP callback 注册；
-# XHR 类调用记录为 {"interface":"XMLHttpRequest","member":"open"} 分存字段，信号写 XMLHttpRequest.open 即可结构化命中），
-# 不传目标接口 URL——trace 记录的是 API 调用，不记录请求 URL，传 URL 字面量必然未命中。
-# 不得使用裸 createElement、appendChild、querySelector、JSON.stringify、Date.now 等泛化 API 作为 writer 信号；
-# 它们只能证明页面运行过，不能证明目标参数写入请求。门禁脚本会拒绝这些信号。
-# 也不传密钥/常量名（如 appSignKey、bl、secret）——trace 记录运行时值与写入点，不记录密钥字面量，
-# 传密钥名必然未命中并误触发硬阻断；应选参数写入点/参数名（如 noncestr、x-zse-96、Headers.set(...)）。
-# --end-signal 只控制自动采集何时提前关闭；不传时仅用户关闭或 duration 到期结束。
-# evidence-signal 与 end-signal 不再混用；JSONP/验证码优先使用网络终态或 callback/参数写入的具体信号。
-# 目标接口 URL 的命中证据由 Step 1 取证承担：forensic_ruyipage.py --targets <URL> + check_evidence.js --require-network-signal <URL>。
+# XHR 类调用记录为 {"interface":"XMLHttpRequest","member":"open"} 分存字段，信号写 XMLHttpRequest.open 即可结构化命中）。
+# 三类必然未命中的信号，一律不传：①目标接口 URL（trace 记录 API 调用不记录请求 URL）；
+# ②裸 createElement/appendChild/querySelector/JSON.stringify/Date.now 等泛化 API（门禁脚本会拒绝）；
+# ③密钥/常量名（如 appSignKey、bl、secret；trace 记录运行时值与写入点，不记录密钥字面量，会误触发硬阻断）。
+# 应选参数写入点/参数名（如 noncestr、x-zse-96、Headers.set(...)）。
+# 目标接口 URL 的命中证据由 Step 1 承担：forensic_ruyipage.py --targets <URL> + check_evidence.js --require-network-signal <URL>。
+# --end-signal 只控制自动采集何时提前关闭，与 evidence-signal 不再混用；不传时仅用户关闭或 duration 到期结束。
 # --target-signal 仅为兼容旧调用，同时作为 evidence-signal 和 end-signal；新流程不要使用。
-# --signal-policy advisory 可用于人工结束或信号尚未确定的采集：日志仍会导入并报告覆盖不足，不误报为“没有 trace”。
-# 自动 trace 默认采集窗口 --duration 120 秒；达到 end-signal 时自动收尾并关闭浏览器；用户提前关闭也会记录 endReason。
-# 窗口结束后仍需关闭进程、等待 NDJSON 完整刷盘并导入，命令总耗时可略超过 120 秒，但浏览器不应继续留存。
-# 需预置登录态/会话时加 --cookie "sessionid=abc"（可多次或分号分隔）与 --cookie-domain ".example.com"：
-#   启动前写入 trace profile 的 cookies.sqlite（firefox 未启动时注入），页面与 trace 均携带该会话。
-#   仅自动 trace 生效；--input 手动 trace 导入已有日志时忽略 --cookie。
+# 其余参数细则（--duration 默认 120 秒与收尾刷盘、--signal-policy advisory、--cookie/--cookie-domain 写入 trace profile
+# cookies.sqlite 且 --input 导入时忽略、endReason 语义）见 scripts/README.md 与
+# references/workflow/trace-flow.md，此处不重复。
 ```
 
 用户已提供 NDJSON 时用 `--input <ndjson>` 导入并生成摘要，不重复采集；多个进程日志用 `import_ruyitrace_log.js --input a --input b`，复制到 case 时会按来源摘要命名，避免同名文件覆盖。取证结果只进入 `case/`，原始 JS 放入 `case/js/original/`，临时材料放入 `case/tmp/`。
 
 目标请求需手动触发时，必须提示用户在 trace 浏览器中完成操作；用户确认“已触发”前不得结束采集。不得把“没触发目标路径”当成“采集完成”。
 
-**TRACE_CAPTURE 质量判定与 TRACE_RETRY**：采集到 NDJSON 不等于达标。摘要显示「未发现 stack.file」、成功解析极低、topApis 找不到目标参数 writer、质量判定「未覆盖页面 JS」（stack.file 全为浏览器内核路径，无 http/https 页面脚本）或「有效 API 调用占比过低」（api 字段几乎全空），均按重度不足处理并进入 TRACE_RETRY。**判定重度不足后必须先执行重采动作（TRACE_RETRY，可调整信号/duration/手动触发方式），重采一次仍不足才允许降级做落盘 JS 静态分析**；禁止跳过重采直接进入源码静态分析——缺 trace 时静态分析极易在「参数来源靠猜」上打转空耗（match14 实证：trace event 进程未覆盖后未重采，静态分析反复纠结同一参数来源数十轮无进展）。RuyiTrace 一次采集按进程写多个 `domtrace/trace_process_<pid>.ndjson`，主日志须合并所有 tab/content 进程文件（排除 parent 内核进程），只取单个文件（尤其 mtime 最新的）会把有效 trace 误判为空。完整降级顺序与验证码特化判定见 `references/workflow/trace-flow.md`。
+**TRACE_CAPTURE 质量判定与 TRACE_RETRY**：采集到 NDJSON 不等于达标。摘要显示「未发现 stack.file」、成功解析极低、topApis 找不到目标参数 writer、质量判定「未覆盖页面 JS」（stack.file 全为浏览器内核路径，无 http/https 页面脚本）或「有效 API 调用占比过低」（api 字段几乎全空），均按重度不足处理并进入 TRACE_RETRY。**判定重度不足后必须先执行重采动作（TRACE_RETRY，可调整信号/duration/手动触发方式），重采一次仍不足才允许降级做落盘 JS 静态分析**；禁止跳过重采直接进入源码静态分析——缺 trace 时静态分析极易在「参数来源靠猜」上打转空耗。RuyiTrace 一次采集按进程写多个 `domtrace/trace_process_<pid>.ndjson`，主日志须合并所有 tab/content 进程文件（排除 parent 内核进程），只取单个文件（尤其 mtime 最新的）会把有效 trace 误判为空。完整降级顺序与验证码特化判定见 `references/workflow/trace-flow.md`。
 
 **TRACE_CAPTURE 出口门禁复检（不可跳过）**：采集声明完成、进入 CASE_LOOKUP 前必须复跑出口门禁脚本，确认 Step 2（RuyiTrace NDJSON）真实产出。这是状态机内复检，不是 GATE-2 入口门禁的重复——GATE-2 判定初始证据路由到 TRACE_CAPTURE，出口门禁确认 TRACE_CAPTURE 是否真把 Step 2 补上了：
 
@@ -362,9 +367,30 @@ node scripts/write_stage_report.js --case-dir <project-root> --stage <阶段> --
 2. **门禁脚本复核**：`node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` 退出码非 0 不得开始补环境（详见 `references/env/env-debug-loop.md` 的「RuyiTrace 优先诊断门禁」）。
 3. **Step 2 前置**：`node scripts/check_trace_gate.js` 退出码 0（Step 2 已具备且目标 writer 覆盖满足）。Step 2 缺失不得进入 IMPLEMENT，例外见下方「IMPLEMENT 硬前置条件」。
 
-**上下文防耗尽检查点（硬约束）**：本检查点按硬计数触发（20+ 步未推进或上下文接近耗尽），不得以「预防性落盘」「提前对齐用户」为由提前触发。TRACE_ANALYZE / IMPLEMENT / REAL_VERIFY 任一阶段触发时，按固定动作序列执行：①回看上条两份文件是否已覆盖当前崩溃点——未覆盖先补全再继续；②已覆盖仍打转 → 落阶段报告（当前状态、已证实事实、缺失证据、下一步输入），落盘后立即按报告中的下一步输入继续，不等用户；③落报告后仍无新进展 → 输出卡点、已证实事实、缺失证据与默认方向（继续攻坚；仅当证据已证伪当前方向才换路径），输出后按默认方向继续执行，用户打断才改道，不得在无进展输出后空等回复。判定标准：trace 已定位到关键资源/入口，或当前节点已消耗 20+ 步仍未推进（TRACE_ANALYZE 未进 IMPLEMENT、IMPLEMENT 黑盒调试打转、REAL_VERIFY 反复排查未定位根因）。「想问用户 vs 再试一轮」的摇摆本身就是在消耗步骤——触发本检查点后摇摆超过 2 轮即视为已触发，必须执行上述序列。**纯思考的决策循环同样触发**：同一决策（方案/库选择、是否执行、档位判定）重新权衡 ≥2 次、或重复查询已查过的索引/重新判断已有结论，即视为已触发——取首个决策立即执行，由验证结果而非思考内再确认判定对错；连续两段思考之间没有任何工具调用的，说明正在打转，立即执行上述序列。**打转检测已脚本化**：`search_js.js` / `search_trace.js` 把每次查询记入 `case/tmp/query-log.jsonl`，同一（文件、关键词）第 2 次检索即在输出头部输出 WARN、第 3 次起输出「打转实证」强提示；收到该 WARN 必须执行上述序列并换检索词/换方法，不得无视提示继续同一路线重复检索（match14 实证：同一疑问重复推导 20 次耗尽上下文零交付）。**收尾保底**：无论预算消耗到什么程度，进入 Phase 5 收尾时交付物清单不得缩水——`最终项目总结.md`、`经验沉淀-<站点>.md`、`验证记录.json` 与 `check_final_artifact.js` 门禁一项不可省（决策循环烧掉预算后只写总结就收场 = 任务未完成，match7 实证教训）。
+**上下文防耗尽检查点（硬约束）**：按硬计数触发，不得以「预防性落盘」「提前对齐用户」为由提前触发。触发条件（TRACE_ANALYZE / IMPLEMENT / REAL_VERIFY 任一阶段满足其一即视为已触发）：
 
-**IMPLEMENT 硬前置条件**：必须满足「trace 质量达标（含目标信号命中）」或「用户明确确认轻量路径」。两条均不满足时停在 TRACE_ANALYZE，不得以 mock、猜测或实验性实现替代证据。EXTERNAL_LOOKUP 的假设若与本次 trace 定位的 builder/writer 冲突，以 trace 为准，禁止先去测未被 trace 证明的 SDK 导出接口。**Step 2 缺失（check_trace_gate.js 退出码 1）时不得进入 IMPLEMENT**：不得以 EXTERNAL_LOOKUP 网络方案、边界声明、同族算法替代或 mock 填补 Step 2 证据缺口；轻量路径豁免的前提是 Step 1 + Step 2 齐备（见 4.3），Step 2 未产出不构成豁免条件。例外共三个：①②均为用户显式确认的降级且 REAL_VERIFY 不可豁免、必须在经验沉淀与最终总结写明取证偏差——①状态机中的 MATERIALS_FALLBACK 节点（RuyiTrace 工具不可用且自动安装失败 + 用户材料经 check_evidence.js 校验通过），以「Node 直连真实接口、服务端响应反证」替代 Step 2；②BLOCKED_FORENSIC 节点用户确认降级（内核级检测使 RuyiTrace 无法触发目标路径，有检测证据且用户已知情），以 Step 1 网络证据 + 落盘 JS 源码分析替代 Step 2；③**内容还原型豁免（无需用户确认）**：请求侧参数全部为明文（page/pageSize/kw 等，无任何待还原的签名/token/指纹参数），难点在响应解密/内容还原（字体映射、图片拼装等），且 Step 1 已捕获完整响应证据——此时 Step 2（运行时 trace）无证据价值，可在 EVIDENCE_GATE 判定「只有 Step 1」时声明「Step 2 豁免：内容还原型，无运行时签名链路」后跳过 TRACE_CAPTURE 直接 CASE_LOOKUP，并在经验沉淀与最终总结写明判定依据（请求侧明文参数清单 + 响应自包含证据）。请求侧存在任何待还原参数的 case 不得使用本豁免。**AI 自行判定「trace 采集不到/太难」不构成降级理由**——没有用户确认的 Step 2 缺失一律停在状态机对应节点。
+- 当前节点已消耗 20+ 步仍未推进（TRACE_ANALYZE 未进 IMPLEMENT、IMPLEMENT 黑盒调试打转、REAL_VERIFY 反复排查未定位根因），或上下文接近耗尽；trace 已定位到关键资源/入口同样计入。
+- 「想问用户 vs 再试一轮」摇摆超过 2 轮——摇摆本身就在消耗步骤。
+- 纯思考的决策循环：同一决策（方案/库选择、是否执行、档位判定）重新权衡 ≥2 次，或重复查询已查过的索引、重新判断已有结论。取首个决策立即执行，由验证结果而非思考内再确认判定对错；连续两段思考之间没有任何工具调用即说明正在打转。
+- 脚本 WARN：`search_js.js` / `search_trace.js` 把每次查询记入 `case/tmp/query-log.jsonl`，同一（文件、关键词）第 2 次检索即在输出头部输出 WARN、第 3 次起输出「打转实证」强提示。收到 WARN 必须换检索词/换方法，不得无视提示继续同一路线重复检索。
+
+触发后按固定动作序列执行：
+
+1. 回看 IMPLEMENT 准入三件套第 1 条的两份文件是否已覆盖当前崩溃点——未覆盖先补全再继续。
+2. 已覆盖仍打转 → 落阶段报告（当前状态、已证实事实、缺失证据、下一步输入），落盘后立即按报告中的下一步输入继续，不等用户。
+3. 落报告后仍无新进展 → 输出卡点、已证实事实、缺失证据与默认方向（继续攻坚；仅当证据已证伪当前方向才换路径），输出后按默认方向继续执行，用户打断才改道，不得空等回复。
+
+**收尾保底**：无论预算消耗到什么程度，进入 Phase 5 收尾时交付物清单不得缩水——`最终项目总结.md`、`经验沉淀-<站点>.md`、`验证记录.json` 与 `check_final_artifact.js` 门禁一项不可省；只写总结就收场 = 任务未完成。
+
+**IMPLEMENT 硬前置条件**：必须满足「trace 质量达标（含目标信号命中）」或「用户明确确认轻量路径」。两条均不满足时停在 TRACE_ANALYZE，不得以 mock、猜测或实验性实现替代证据。EXTERNAL_LOOKUP 的假设若与本次 trace 定位的 builder/writer 冲突，以 trace 为准，禁止先去测未被 trace 证明的 SDK 导出接口。
+
+**Step 2 缺失（check_trace_gate.js 退出码 1）时不得进入 IMPLEMENT**：不得以 EXTERNAL_LOOKUP 网络方案、边界声明、同族算法替代或 mock 填补 Step 2 证据缺口；轻量路径豁免的前提是 Step 1 + Step 2 齐备（见 4.3），Step 2 未产出不构成豁免条件。**AI 自行判定「trace 采集不到/太难」不构成降级理由**——没有用户确认的 Step 2 缺失一律停在状态机对应节点。例外共三个：
+
+1. **MATERIALS_FALLBACK 节点**（需用户显式确认）：RuyiTrace 工具不可用且自动安装失败 + 用户材料经 check_evidence.js 校验通过，以「Node 直连真实接口、服务端响应反证」替代 Step 2。
+2. **BLOCKED_FORENSIC 节点**（需用户显式确认）：内核级检测使 RuyiTrace 无法触发目标路径，有检测证据且用户已知情，以 Step 1 网络证据 + 落盘 JS 源码分析替代 Step 2。
+3. **内容还原型豁免（无需用户确认）**：请求侧参数全部为明文（page/pageSize/kw 等，无任何待还原的签名/token/指纹参数），难点在响应解密/内容还原（字体映射、图片拼装等），且 Step 1 已捕获完整响应证据——此时 Step 2 无证据价值，可在 EVIDENCE_GATE 判定「只有 Step 1」时声明「Step 2 豁免：内容还原型，无运行时签名链路」后跳过 TRACE_CAPTURE 直接 CASE_LOOKUP。请求侧存在任何待还原参数的 case 不得使用本豁免。
+
+例外 1、2 的 REAL_VERIFY 不可豁免；三个例外都必须在经验沉淀与最终总结写明取证偏差或判定依据（例外 3 写请求侧明文参数清单 + 响应自包含证据）。
 
 ## 5. CASE_LOOKUP
 
@@ -385,7 +411,7 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 
 先比较至少两组请求（区分计数器递增与纯随机存疑时补第三组），把字段分为固定值、时间值、随机值、会话值、服务端下发值、加密值。对每个目标参数建立 `source → entry → builder → writer` 链。
 
-**参数名存在 ≠ 参数生效（比较前先核对真实请求）**：页面源码里出现的参数名可能是 hook 遗留、旧版残留或求值为 `undefined` 被请求库丢弃。分组比较字段前，先以 `case/forensic/target-hits.json` 的 `url` 或 trace `xhrNative` 的 `url` 为准确认参数**真实存在于请求中**，不要以 `document.html` 里的字面量为准（match13 实测：页面写 `m:window.match13`，hook 判断的却是另一个 URL，真实请求里没有 `m`，请求侧全明文）。
+**参数名存在 ≠ 参数生效（比较前先核对真实请求）**：页面源码里出现的参数名可能是 hook 遗留、旧版残留或求值为 `undefined` 被请求库丢弃。分组比较字段前，先以 `case/forensic/target-hits.json` 的 `url` 或 trace `xhrNative` 的 `url` 为准确认参数**真实存在于请求中**，不要以 `document.html` 里的字面量为准。
 
 下表为 T1 识别信号路由（识别指纹 → 初始路径；识别≠协议复现，协议细节以本 case 证据与厂商知识库为准）：
 
@@ -417,7 +443,7 @@ node assets/ast-patterns/scripts/run-pipeline.js <input.js> <output-dir> [hint] 
 node scripts/run_with_trace.js --target case/js/original/<资源名>.js --entry <入口函数> --timeout 5000
 ```
 
-**运行混淆 JS 禁止手写 vm runner（硬约束）**：`run_with_trace.js` 内置 vm 超时保护与环境访问日志，手写 `vm.runInContext` runner 无超时——混淆脚本普遍含反调试死循环（`while(!![])`、debuggerProtection、setInterval 干扰），卡死后无法区分"挂起"与"静默失败"，且重写解码器/runner 会反复踩转义与括号平衡坑（match14 实证：手写 runner 空跑 8 次、解码器重写 4 次均无结论，全部浪费在工具问题上）。混淆 JS 的字符串数组解码优先走 ast-patterns 流水线（含 RC4/base64 变形的标准 obfuscator 处理），只在流水线不适配时才写最小提取脚本，且写前必须过 `node --check`。
+**运行混淆 JS 禁止手写 vm runner（硬约束）**：`run_with_trace.js` 内置 vm 超时保护与环境访问日志，手写 `vm.runInContext` runner 无超时——混淆脚本普遍含反调试死循环（`while(!![])`、debuggerProtection、setInterval 干扰），卡死后无法区分"挂起"与"静默失败"，且重写解码器/runner 会反复踩转义与括号平衡坑。混淆 JS 的字符串数组解码优先走 ast-patterns 流水线（含 RC4/base64 变形的标准 obfuscator 处理），只在流水线不适配时才写最小提取脚本，且写前必须过 `node --check`。
 
 `identify_crypto.js` 只做族级指纹（同长度的 SHA-256/SM3 无法仅凭密文区分），实现仍以 trace 定位的 builder/writer 为准。`analyze_cookie_attribution.js` 回答"这个 Cookie 是谁写的"：server → 复现请求链、禁止硬编码；js → 按写入点 stack 还原挑战/签名算法；both → 按请求顺序拆分串联链。
 
@@ -431,7 +457,7 @@ node scripts/run_with_trace.js --target case/js/original/<资源名>.js --entry 
 
 **Windows 写临时脚本规范（探针/runner/补环境脚本一律遵守）**：优先用编辑工具直接写文件；必须用 PowerShell 时一律单引号 here-string `@'...'@`（内部 `$` 不插值）配合 `[IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))` 落盘。禁止双引号 here-string（`$` 插值破坏 JS 语法）、禁止 base64 编码绕路（多一轮转译仍会翻车）、禁止 `node -e` / `python -c` 内联长脚本。写完先跑一次语法检查（`node --check` / `py -3 -m py_compile`）再执行，避免把转义错误误判成目标 JS 的行为。运行混淆 JS 的沙箱需求一律走 `run_with_trace.js`（vm 超时保护 + 环境访问日志），不得手写 vm runner（硬约束见第 7 节）。
 
-**依赖 JS 版本校验（硬约束）**：被挑战代码引用的黑盒 SDK（如 udc.js 类"动态工具 JS"）可能**定期更新**（公钥/算法随版本变化），用旧副本实现会导致签名"格式全对但服务端全拒"且极难排查（match9 最耗时根因）。进入实现前校验关键依赖 JS 与站点当前版本一致（`curl -s <url> | md5sum` 对比本地副本）；抓取 JS **一律二进制**（`urlopen(url).read()` + `wb` 写回），**禁止** `decode('utf-8', errors='ignore')` 后文本写回——会静默丢字节损坏文件（md5 变化、无报错）。交付脚本对关键依赖内置"启动自动抓取 + hash 对比"。详见 `references/network/dynamic-resource.md` 专节。
+**依赖 JS 版本校验（硬约束）**：被挑战代码引用的黑盒 SDK（如 udc.js 类"动态工具 JS"）可能**定期更新**（公钥/算法随版本变化），用旧副本实现会导致签名"格式全对但服务端全拒"且极难排查。进入实现前校验关键依赖 JS 与站点当前版本一致（`curl -s <url> | md5sum` 对比本地副本）；抓取 JS **一律二进制**（`urlopen(url).read()` + `wb` 写回），**禁止** `decode('utf-8', errors='ignore')` 后文本写回——会静默丢字节损坏文件（md5 变化、无报错）。交付脚本对关键依赖内置"启动自动抓取 + hash 对比"。详见 `references/network/dynamic-resource.md` 专节。
 
 读取 NDJSON 的 API、时间、stack、文件、行列号和参数摘要，按调用频率与网络写入时间定位热路径。分析时按定位顺序使用：
 
