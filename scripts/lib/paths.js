@@ -175,6 +175,29 @@ function resolveCaseDir(input) {
   return p;
 }
 
+// 归一化 result 目录：标准布局下 result/ 与 case/ 平级（<project-root>/{case,result}）。
+// 输入可为项目根或 case 目录，统一返回同一个 result 目录，消除各脚本 `caseDir/result` 与
+// `caseDir/../result` 两套写法并存导致的定位分歧；两处候选都不存在时按标准布局返回应有路径，
+// 让缺目录的报错信息指向正确位置。
+function resolveResultDir(input) {
+  const caseDir = resolveCaseDir(input);
+  const sibling = path.join(path.dirname(caseDir), 'result');
+  const child = path.join(caseDir, 'result');
+  const standard = path.basename(caseDir).toLowerCase() === 'case' ? sibling : child;
+  if (isDir(standard)) return standard;
+  const fallback = standard === sibling ? child : sibling;
+  if (isDir(fallback)) return fallback;
+  return standard;
+}
+
+// 归一化 notes 目录：notes/ 是 case/ 的子目录（<project-root>/case/notes/），不与 result/ 平级。
+function resolveNotesDir(input) {
+  return path.join(resolveCaseDir(input), 'notes');
+}
+
+// case/ 下的标准证据子目录（result/ 不在其中，需用 resolveResultDir 单独取）。
+const CASE_EVIDENCE_SUBDIRS = ['阶段报告', 'notes', 'tmp', 'fixtures', 'ruyi-trace', 'js', 'forensic', 'requests'];
+
 module.exports = {
   findProjectRoot,
   normalizeTraceHome,
@@ -182,4 +205,7 @@ module.exports = {
   resolveProjectDirFromCaseDir,
   normalizeProjectDir,
   resolveCaseDir,
+  resolveResultDir,
+  resolveNotesDir,
+  CASE_EVIDENCE_SUBDIRS,
 };

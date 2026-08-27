@@ -76,13 +76,9 @@ function usage() {
 
 function exists(p) { try { return !!p && fs.existsSync(p); } catch { return false; } }
 
-// 归一化 --case-dir：兼容"项目根"与"case 目录"两种输入，统一返回 case 目录。
-// 项目根（其下含 case/）→ 返回 <root>/case；否则视为 case 目录原样返回。
+// 归一化 --case-dir：统一走 scripts/lib/paths.js，兼容"项目根"与"case 目录"两种输入。
 function resolveCaseDir(input) {
-  const p = path.resolve(input || '.');
-  const caseSub = path.join(p, 'case');
-  try { if (fs.statSync(caseSub).isDirectory()) return caseSub; } catch {}
-  return p;
+  return paths.resolveCaseDir(input || '.');
 }
 
 function readJson(file) {
@@ -182,7 +178,7 @@ function findLatestStageReport(caseDir) {
 }
 
 function findResultProgress(caseDir) {
-  const resultDir = path.join(path.dirname(caseDir), 'result');
+  const resultDir = paths.resolveResultDir(caseDir);
   if (!exists(resultDir)) return null;
   const out = { dir: resultDir, hasFinalJs: false, hasFinalSummary: false, hasExperience: false, srcFiles: 0 };
   if (exists(path.join(resultDir, 'final.js')) || exists(path.join(resultDir, 'final.py'))) out.hasFinalJs = true;
@@ -257,7 +253,7 @@ function main() {
   // tools/ 所在工程根：显式 --project-dir 优先；未传时从 --case-dir 自动推断（多 case 项目向上查找 tools/）。
   // 快照的 projectRoot 字段记录真实工程根而非 skill 安装根，避免 junction / 目录布局变更后续接失败。
   const toolsBase = args.projectDir ? path.resolve(args.projectDir) : paths.resolveProjectDirFromCaseDir(caseDir);
-  const notesDir = path.join(caseDir, 'notes');
+  const notesDir = paths.resolveNotesDir(caseDir);
   const snapshotPath = path.join(notesDir, 'env-snapshot.json');
   const snapshotExists = exists(snapshotPath);
   const storedSnapshot = snapshotExists ? normalizeStoredSnapshot(readJson(snapshotPath)) : null;

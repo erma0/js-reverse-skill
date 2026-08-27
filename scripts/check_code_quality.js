@@ -3,6 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const paths = require('./lib/paths');
 
 function parseArgs(argv) {
   const args = {
@@ -626,7 +627,7 @@ function check(args) {
     ? path.resolve(path.dirname(args.file))
     : args.dir
       ? path.resolve(args.dir)
-      : path.join(path.resolve(args.caseDir || '.'), 'result');
+      : paths.resolveResultDir(args.caseDir || '.');
   const files = args.file ? [path.resolve(args.file)] : walk(root).filter(p => isCodeFile(p) && !shouldSkipFile(root, p));
   const problems = [];
   const warnings = [];

@@ -152,7 +152,7 @@ function normalizeTimeline(raw, observations) {
 
 function runAudit(args) {
   const caseDir = paths.resolveCaseDir(args.caseDir || 'case');
-  const resultDir = path.join(caseDir, '..', 'result');
+  const resultDir = paths.resolveResultDir(caseDir);
   const entry = path.resolve(args.entry || path.join(resultDir, 'final.js'));
   const contractPath = path.resolve(args.contract || path.join(caseDir, 'notes', 'trace-runtime-contract.json'));
   const out = path.resolve(args.out || path.join(caseDir, 'tmp', 'node-trace-runtime-audit.json'));

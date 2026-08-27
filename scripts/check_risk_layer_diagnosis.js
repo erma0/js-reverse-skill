@@ -21,6 +21,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const paths = require('./lib/paths');
 
 function usage() {
   return [
@@ -77,10 +78,11 @@ const ALLOWED_CONCLUSIONS = new Set(['signature-content', 'connection', 'session
 const CONNECTION_CLAIM_RE = /(连接层|TLS\s*指纹拦截|TLS\s*风控|JA3?\s*指纹被|无法绕过|不可绕过|纯协议不可|纯协议无法)/;
 
 function collectDocText(caseDir) {
+  const evidenceDir = paths.resolveCaseDir(caseDir);
   const roots = [
-    path.join(caseDir, 'result'),
-    path.join(caseDir, 'case', 'notes'),
-    path.join(caseDir, 'case', '阶段报告'),
+    paths.resolveResultDir(caseDir),
+    path.join(evidenceDir, 'notes'),
+    path.join(evidenceDir, '阶段报告'),
   ];
   const files = [];
   for (const r of roots) {
@@ -163,7 +165,7 @@ function validateDiagnosis(diag) {
 
 function check(args) {
   const caseDir = path.resolve(args.caseDir);
-  const resultDir = path.join(caseDir, 'result');
+  const resultDir = paths.resolveResultDir(caseDir);
   const problems = [];
   const warnings = [];
   const result = { caseDir, triggered: false, diagnosisPresent: false, conclusion: '', connectionClaim: false, problems, warnings };

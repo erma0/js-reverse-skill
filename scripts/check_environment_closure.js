@@ -80,10 +80,10 @@ function hasTraceEvidence(caseDir) {
 }
 
 function evidenceFiles(caseDir) {
-  const roots = ['阶段报告', 'notes', 'tmp', 'fixtures', 'ruyi-trace', 'result'];
+  const roots = [...paths.CASE_EVIDENCE_SUBDIRS.map(d => path.join(caseDir, d)), paths.resolveResultDir(caseDir)];
   const files = [];
   for (const root of roots) {
-    for (const file of walk(path.join(caseDir, root))) {
+    for (const file of walk(root)) {
       const relative = (path.relative(caseDir, file) || '.').replace(/\\/g, '/');
       if (/(^|\/)(node_modules|dist|build|coverage|vendor|third_party|third-party)(\/|$)/i.test(relative)) continue;
       if (!/\.(?:md|txt|log|json|jsonl|ndjson|js|mjs|cjs|ts|py|html)$/i.test(file)) continue;
@@ -95,7 +95,7 @@ function evidenceFiles(caseDir) {
 }
 
 function scanCaseEvidence(caseDir) {
-  const resultDir = path.join(caseDir, '..', 'result');
+  const resultDir = paths.resolveResultDir(caseDir);
   let hasBrowserEnv = false;
   let hasNetworkImpl = false;
   let networkEvidence = false;

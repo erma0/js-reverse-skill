@@ -3,6 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const paths = require('./lib/paths');
 
 function parseArgs(argv) {
   const args = { caseDir: '', fixture: '', envFile: '', require: '', json: false, markdown: false };
@@ -35,10 +36,7 @@ function stat(p) { try { return fs.statSync(p); } catch { return null; } }
 
 // 归一化 --case-dir：兼容"项目根"与"case 目录"，统一返回 case 目录。
 function resolveCaseDir(input) {
-  const p = path.resolve(input || '.');
-  const caseSub = path.join(p, 'case');
-  const st = stat(caseSub);
-  return st && st.isDirectory() ? caseSub : p;
+  return paths.resolveCaseDir(input || '.');
 }
 function readText(p) { return fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, ''); }
 function readJson(p) { return JSON.parse(readText(p)); }
@@ -414,7 +412,7 @@ function defaultFixture(caseDir) {
 }
 
 function defaultEnvFiles(caseDir) {
-  const result = path.join(caseDir, '..', 'result');
+  const result = paths.resolveResultDir(caseDir);
   return walk(result).filter(p => ['.js', '.mjs', '.cjs'].includes(ext(p)));
 }
 

@@ -180,7 +180,7 @@ function inspectFingerprint(caseDir, files, args) {
 function check(args) {
   if (!args.caseDir && !args.file) throw new Error('必须提供 --case-dir 或 --file');
   const caseDir = args.caseDir ? paths.resolveCaseDir(args.caseDir) : path.resolve(path.dirname(args.file), '..', '..');
-  const root = args.file ? path.dirname(path.resolve(args.file)) : path.join(caseDir, '..', 'result');
+  const root = args.file ? path.dirname(path.resolve(args.file)) : paths.resolveResultDir(caseDir);
   const files = args.file ? [path.resolve(args.file)] : codeFiles(root);
   const allText = files.map(f => readText(f)).join('\n');
   const problems = [];

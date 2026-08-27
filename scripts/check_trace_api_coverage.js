@@ -3,6 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const paths = require('./lib/paths');
 
 const ALLOWED_STATUSES = new Set([
   'planned-first-pass',
@@ -55,12 +56,9 @@ function exists(p) {
   try { return fs.existsSync(p); } catch { return false; }
 }
 
-// 归一化 --case-dir：兼容"项目根"与"case 目录"，统一返回 case 目录。
+// 归一化 --case-dir：统一走 scripts/lib/paths.js，兼容"项目根"与"case 目录"。
 function resolveCaseDir(input) {
-  const p = path.resolve(input || '.');
-  const caseSub = path.join(p, 'case');
-  try { if (fs.statSync(caseSub).isDirectory()) return caseSub; } catch {}
-  return p;
+  return paths.resolveCaseDir(input || '.');
 }
 
 function readText(p) {
@@ -151,7 +149,7 @@ function auditStageReports(caseDir) {
 
 function check(args) {
   const caseDir = resolveCaseDir(args.caseDir || '.');
-  const notesDir = path.join(caseDir, 'notes');
+  const notesDir = paths.resolveNotesDir(caseDir);
   const inventoryPath = path.resolve(args.inventory || path.join(notesDir, 'trace-api-inventory.json'));
   const matrixPath = path.resolve(args.matrix || path.join(notesDir, 'env-coverage-matrix.md'));
   const problems = [];

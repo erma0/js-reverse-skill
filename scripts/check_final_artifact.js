@@ -4,6 +4,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const paths = require('./lib/paths');
 
 function parseArgs(argv) {
   const args = {
@@ -786,8 +787,8 @@ function inspectCaptchaAnswerLayer(resultDir, resultFiles) {
 function check(args) {
   if (!args.caseDir && !args.file) throw new Error('必须提供 --case-dir 或 --file');
   const caseDir = args.caseDir ? path.resolve(args.caseDir) : path.resolve(path.dirname(args.file), '..');
-  const caseSubdir = path.join(caseDir, 'case');
-  const resultDir = path.join(caseDir, 'result');
+  const caseSubdir = paths.resolveCaseDir(caseDir);
+  const resultDir = paths.resolveResultDir(caseDir);
   const problems = [];
   const warnings = [];
 

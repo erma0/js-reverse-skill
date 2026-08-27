@@ -202,10 +202,9 @@ function walk(root, out = []) {
 }
 
 function listCandidateFiles(caseDir) {
-  const dirs = ['阶段报告', 'notes', 'tmp', 'ruyi-trace', 'result'];
+  const dirs = [...paths.CASE_EVIDENCE_SUBDIRS.map(d => path.join(caseDir, d)), paths.resolveResultDir(caseDir)];
   const files = [];
-  for (const dir of dirs) {
-    const full = path.join(caseDir, dir);
+  for (const full of dirs) {
     for (const file of walk(full)) {
       const relative = rel(caseDir, file);
       if (/(^|\/)(node_modules|dist|build|coverage)(\/|$)/i.test(relative)) continue;

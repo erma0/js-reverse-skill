@@ -101,7 +101,7 @@ function resolveCasePath(caseDir, maybePath) {
     path.join(parent, normalized),
     path.join(caseDir, withoutCase),
   ];
-  if (!/^result\//i.test(normalized)) candidates.push(path.join(caseDir, 'result', normalized));
+  if (!/^result\//i.test(normalized)) candidates.push(path.join(paths.resolveResultDir(caseDir), normalized));
   return [...new Set(candidates.map(p => path.normalize(p)))];
 }
 
@@ -134,7 +134,7 @@ function inspect(caseDir, args) {
   const problems = [];
   const warnings = [];
   const manifestPath = args.manifest ? path.resolve(args.manifest) : path.join(caseDir, 'notes', 'resource-manifest.json');
-  const resultDir = path.join(caseDir, '..', 'result');
+  const resultDir = paths.resolveResultDir(caseDir);
   const snapshotsDir = path.join(caseDir, 'js', 'snapshots');
 
   const report = {

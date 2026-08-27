@@ -179,7 +179,7 @@ function isCurlCffiClient(tlsClient) {
 
 function check(args) {
   const caseDir = paths.resolveCaseDir(args.caseDir || 'case');
-  const root = path.resolve(args.dir || path.join(caseDir, '..', 'result'));
+  const root = path.resolve(args.dir || paths.resolveResultDir(caseDir));
   const files = walk(root).filter(file => stat(file) && stat(file).isFile() && isCodeFile(file) && !shouldSkip(file));
   const problems = [];
   const warnings = [];
