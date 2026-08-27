@@ -27,6 +27,7 @@ description: >
 | IMPLEMENT 前 | `node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` | 退出码 0（两文件达标） |
 | 重放/写请求前 | `node scripts/state_machine.js --case-dir <project-root> --guard replay` | 只在 REAL_VERIFY/DIAGNOSE 放行 |
 | 外部题解检索前 | `node scripts/state_machine.js --case-dir <project-root> --guard external` | 只在 CASE_LOOKUP/EXTERNAL_LOOKUP/DIAGNOSE 放行 |
+| 浏览器 MCP 兜底取证前 | `node scripts/state_machine.js --case-dir <project-root> --guard mcp` | 只在 BLOCKED_FORENSIC 放行（须用户确认） |
 | 交付前 | `check_final_artifact.js` + `check_code_quality.js` | 退出码 0 |
 
 主线：INTENT_CONFIRM → ENV_READY → EVIDENCE_GATE →（FORENSIC_CAPTURE → TRACE_CAPTURE）→ CASE_LOOKUP → IDENTIFY → TRACE_ANALYZE → IMPLEMENT → REAL_VERIFY → DELIVER → CLEANUP → DONE。打转信号：检索输出 `[WARN] 重复检索` 或 `[STATE]` 提示即执行 §4.4 防耗尽检查点序列。
@@ -46,6 +47,8 @@ node scripts/state_machine.js --case-dir <project-root> --set <NODE> --note "<�
 node scripts/state_machine.js --case-dir <project-root> --guard replay
 # 外部题解/文章检索前必过（细则见 4 节「外部检索时序」）
 node scripts/state_machine.js --case-dir <project-root> --guard external
+# 浏览器 MCP 连接用户真实浏览器兜底取证前必过（细则见 4 节 BLOCKED_FORENSIC；须用户确认）
+node scripts/state_machine.js --case-dir <project-root> --guard mcp
 # 进入每个节点前聚合跑该节点必验门禁；输出含 FAIL 或需参数缺失时停在当前节点
 node scripts/gate.js --case-dir <project-root> --at <NODE> --url <目标URL> --inputs <材料路径> --markdown
 ```
@@ -131,7 +134,7 @@ Windows 下后续手动运行 Python 脚本一律用环境检查选定的解释�
 5. 最终交付必须能在无浏览器、无显示器、无 X11 的环境中独立运行。
 6. 默认完成真实 API 验证；只有用户明确要求“只输出参数”“不发真实请求”时才允许 sign-only 模式。
 7. 不记录、提交或硬编码用户密钥、完整登录 Cookie、Authorization、验证码答案或其他秘密材料。
-8. 取证只允许三个来源：① ruyipage 定制 Firefox（经 `scripts/forensic_ruyipage.py`）② RuyiTrace（经 `scripts/capture_ruyitrace_log.js`）③ 用户手动提供材料。任何阶段不得手写 fetch/curl/requests 抓取目标页面或下载目标 JS，不得使用系统 Chrome/Edge/Firefox、Playwright/Puppeteer/Selenium 或浏览器 MCP 取证。也不得用 jsdom / happy-dom / domino 等 DOM 模拟库**联网加载目标页**取证（`JSDOM.fromURL()`、`new JSDOM(..., { url, resources: 'usable' })` 会真去拉取页面与子资源）：这是绕过本条的第四种取证通道，拿到的是"页面自己算出的值"而非可审计算法，且必然暴露 `jsdom/x.y.z` UA 与残缺 DOM 指纹被检测。边界：DOM 模拟库只允许**离线**使用——HTML 由本地字符串构造、脚本来自 ①②③ 落盘产物、不开 `resources: 'usable'`、不传目标站 `url` 触发网络加载（`runScripts: 'dangerously'` 在纯离线输入下不受限）。
+8. 取证只允许四个来源：① ruyipage 定制 Firefox（经 `scripts/forensic_ruyipage.py`）② RuyiTrace（经 `scripts/capture_ruyitrace_log.js`）③ 用户手动提供材料 ④ 浏览器 MCP 连接用户真实浏览器（**仅 BLOCKED_FORENSIC 降级兜底**：取证浏览器被引擎级检测拒绝且 `--ua` 覆盖无效时，经用户确认并过 `--guard mcp` 后放行；Chrome 等非 Firefox 内核与定制 Firefox 互补，match14 实证引擎检测不拦真实浏览器。产物必须落盘 `case/`——成功样本 Cookie/指纹/JS/网络记录，后续分析只认落盘产物；只取证不交付，纯协议红线不变）。常规取证不得手写 fetch/curl/requests 抓取目标页面或下载目标 JS，不得使用系统 Chrome/Edge/Firefox、Playwright/Puppeteer/Selenium 或浏览器 MCP 取证（④ 不满足前置条件时同样禁止）。也不得用 jsdom / happy-dom / domino 等 DOM 模拟库**联网加载目标页**取证（`JSDOM.fromURL()`、`new JSDOM(..., { url, resources: 'usable' })` 会真去拉取页面与子资源）：这是绕过本条的第五种取证通道，拿到的是"页面自己算出的值"而非可审计算法，且必然暴露 `jsdom/x.y.z` UA 与残缺 DOM 指纹被检测。边界：DOM 模拟库只允许**离线**使用——HTML 由本地字符串构造、脚本来自 ①②③④ 落盘产物、不开 `resources: 'usable'`、不传目标站 `url` 触发网络加载（`runScripts: 'dangerously'` 在纯离线输入下不受限）。
 
 ## 3. 纯协议红线
 
@@ -166,7 +169,8 @@ EVIDENCE_GATE
   ├─ 只有 Step 2 → STEP2_ONLY
   └─ 两步均缺失 → FORENSIC_CAPTURE
 MATERIALS_FALLBACK（工具不可用降级，细则见 decision-tree.md 阻塞点#5）
-  ├─ 用户材料（JS/cURL/HAR）经 check_evidence.js 内容校验通过 → CASE_LOOKUP
+  ├─ 用户材料（JS/cURL/HAR，含经用户确认的浏览器 MCP 代采落盘产物）经 check_evidence.js
+  │   内容校验通过 → CASE_LOOKUP
   │   （强制声明：经验沉淀与最终总结写明未走 ruyipage/RuyiTrace、证据为手动材料 + 真实请求反证）
   └─ 仅 URL 或材料校验不通过 → FORENSIC_CAPTURE（先修复工具）
 STEP2_ONLY → CASE_LOOKUP
@@ -175,10 +179,13 @@ FORENSIC_CAPTURE
   └─ 目标请求持续被拒且定位到内核级/环境检测阻断 → BLOCKED_FORENSIC
 BLOCKED_FORENSIC（取证被目标站检测阻断，与工具缺失不同）
   ├─ UA 类检测 → 用 forensic_ruyipage.py --ua 覆盖后重采 → 达成则 TRACE_CAPTURE
-  ├─ 内核级检测（eval.toString/Error.stack 等，UA 覆盖无效，取证细则见
-  │   references/env/env-detect-bypass.md 内核级差异检测）→ 输出卡点对齐用户：
-  │   用户提供真实浏览器 cURL/HAR 走 MATERIALS_FALLBACK，或用户确认降级
-  │   （降级义务同 MATERIALS_FALLBACK：经验沉淀与最终总结写明 Step 2 缺失原因）
+  ├─ UA 覆盖无效的引擎级检测（eval.toString/Error.stack/引擎特征等，取证细则见
+  │   references/env/env-detect-bypass.md 内核级差异检测）→ 输出卡点对齐用户后三选一：
+  │   ① 用户确认后用浏览器 MCP 连接用户真实浏览器取证（先过 --guard mcp；成功样本
+  │      Cookie/指纹/JS/网络记录落盘 case/，按用户材料归类走 MATERIALS_FALLBACK 校验；
+  │      match14 实证：Firefox 取证全 400，MCP 真实 Chrome 拿到 200 成功样本与指纹基线）
+  │   ② 用户提供真实浏览器 cURL/HAR 走 MATERIALS_FALLBACK
+  │   ③ 用户确认降级（降级义务同 MATERIALS_FALLBACK：经验沉淀与最终总结写明 Step 2 缺失原因）
   └─ 未定位到检测证据不得进入本节点（先按 4.2 重采 / DIAGNOSE 排查）
 TRACE_CAPTURE
   ├─ 采集成功 + 质量达标 + 出口门禁复检通过 → CASE_LOOKUP
@@ -430,7 +437,7 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 
 ## 7. IDENTIFY
 
-先比较至少两组请求（区分计数器递增与纯随机存疑时补第三组），把字段分为固定值、时间值、随机值、会话值、服务端下发值、加密值。对每个目标参数建立 `source → entry → builder → writer` 链。
+先比较至少两组请求（区分计数器递增与纯随机存疑时补第三组），把字段分为固定值、时间值、随机值、会话值、服务端下发值、加密值；随请求序号递增的字段单独标记为**请求序号计数器**——服务端可能校验其等于页码/请求序号（match14 的 `window.n`：page2 要求 n=2），签名生成器必须与浏览器生命周期对齐：SDK 加载一次、计数器随每次签名调用递增；每请求重建沙箱会使计数器恒 1，只有首个请求通过。对每个目标参数建立 `source → entry → builder → writer` 链。
 
 **参数名存在 ≠ 参数生效（比较前先核对真实请求）**：页面源码里出现的参数名可能是 hook 遗留、旧版残留或求值为 `undefined` 被请求库丢弃。分组比较字段前，先以 `case/forensic/target-hits.json` 的 `url` 或 trace `xhrNative` 的 `url` 为准确认参数**真实存在于请求中**，不要以 `document.html` 里的字面量为准。
 
@@ -509,7 +516,7 @@ node scripts/run_with_trace.js --target <project-root>/case/js/original/<资源�
 A. 纯算法：Node `crypto`、Python `hashlib`/成熟密码库和原始序列化规则。
 B. 最小 JS 沙箱：提取算法闭包，在隔离上下文提供已证实需要的对象和函数。
 C. WASM：复现加载、内存、导入和导出调用，固定输入输出契约。
-D. 环境伪装：仅补 trace 证明必要的 Web API、对象形状、Realm、时间、随机数和指纹行为。服务端校验签名内嵌环境检测结果时（403 但正反对照显示连接无问题），用对齐探针法定位差异位——注入导出 SDK 检测函数，浏览器采样 ground-truth 与沙箱采样逐位 diff（见 `references/env/env-detect-bypass.md`）。
+D. 环境伪装：仅补 trace 证明必要的 Web API、对象形状、Realm、时间、随机数和指纹行为。环境对齐的验收线是**服务端校验的自洽性**，不是与真实浏览器逐字节一致——多数站点只校验参数间自洽（解码指纹重算签名比对），vm 沙箱指纹与真实浏览器存在少量差异仍可通过（match14 实证：mz 指纹 53 字段中 4 处差异不影响通过）；先用最小沙箱 + 真实请求试探，按需对齐，不预先逐字节复刻。服务端校验签名内嵌环境检测结果时（403 但正反对照显示连接无问题），用对齐探针法定位差异位——注入导出 SDK 检测函数，浏览器采样 ground-truth 与沙箱采样逐位 diff（见 `references/env/env-detect-bypass.md`）。
 E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定向和动态资源预热。
 
 中间值必须可单独验证；时间、随机数、UA、指纹和会话状态必须有明确来源；静态配置外置，秘密从环境变量或用户运行时输入读取。验证码拆成 `load → solve → verify`，按 `templates/captcha-verify/`（Node）或 `templates/captcha-verify-py/`（Python）骨架 + 本 case `result/src/adapter` 实现，答案层接入（`result/src/solver`）是交付组成部分；成功样本先逐字段确认明文类型、长度和绑定关系，再编写生成器，不得把一次性 challenge、ticket 或答案固定到代码。

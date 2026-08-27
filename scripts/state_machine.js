@@ -50,6 +50,12 @@ const REPLAY_NODES = ['REAL_VERIFY', 'DIAGNOSE'];
 // 因此外查必须排在本地取证与 CASE_LOOKUP 之后，用真实证据去校验外部情报，而不是反过来。
 const EXTERNAL_NODES = ['CASE_LOOKUP', 'EXTERNAL_LOOKUP', 'DIAGNOSE'];
 
+// 允许用浏览器 MCP 连接用户真实浏览器取证的节点（取证兜底通道守卫）。
+// match14 实测教训：Firefox 取证浏览器被目标站引擎级检测全 400 拒绝（--ua 覆盖无效），
+// trace 采到的全是被拒响应；经用户确认用浏览器 MCP 连真实 Chrome 才拿到 200 成功样本。
+// MCP 只作为 BLOCKED_FORENSIC 的降级兜底，防止其成为绕过 ruyipage/RuyiTrace 取证纪律的捷径。
+const MCP_NODES = ['BLOCKED_FORENSIC'];
+
 // SKILL.md §4.4 上下文防耗尽检查点：同一节点消耗 20+ 步仍未推进即为打转。
 // 计入"步"的客观事件：每次 --guard 调用（一次重放/外查尝试）、每次 --set 回到同一节点。
 // 到达 STEP_DENY 后 --guard 拒绝放行，必须先落阶段报告；--set 同节点且 --note 指向真实存在的
@@ -65,6 +71,10 @@ const GUARDS = {
   external: {
     nodes: EXTERNAL_NODES,
     deny: (node) => `当前节点 ${node} 禁止外部题解检索；该动作只能在 ${EXTERNAL_NODES.join(' / ')} 执行（先用本地取证证据确定真实终态接口与参数，再拿外部情报做校验，避免被过期文章带偏——match14 教训）`,
+  },
+  mcp: {
+    nodes: MCP_NODES,
+    deny: (node) => `当前节点 ${node} 禁止浏览器 MCP 取证；该动作只能在 ${MCP_NODES.join(' / ')} 执行（先定位引擎级检测证据并经用户确认，常规取证走 ruyipage/RuyiTrace——match14 教训：MCP 是兜底不是捷径）`,
   },
 };
 
@@ -201,6 +211,7 @@ function usage() {
   node scripts/state_machine.js --case-dir <case-dir> --get [--json]                                   # 查看当前状态、TODO 清单与历史
   node scripts/state_machine.js --case-dir <case-dir> --guard replay [--force] [--markdown]            # 动作守卫：重放/写请求入口必须调用
   node scripts/state_machine.js --case-dir <case-dir> --guard external [--force] [--markdown]          # 动作守卫：外部题解检索（联网搜索）前必须调用
+  node scripts/state_machine.js --case-dir <case-dir> --guard mcp [--force] [--markdown]               # 动作守卫：浏览器 MCP 兜底取证前必须调用（须用户确认）
 
 说明：
 - 状态持久化到 <case-dir>/state.json；--case-dir 兼容 <project-root> 与 <project-root>/case。
@@ -209,6 +220,7 @@ function usage() {
   跳过必经节点会被拒绝并提示合法路径。
 - --guard replay：当前节点不在 REAL_VERIFY/DIAGNOSE 时拒绝（退出码 2），并写入 blocks 审计；
   --guard external：当前节点不在 CASE_LOOKUP/EXTERNAL_LOOKUP/DIAGNOSE 时拒绝（退出码 2）；
+  --guard mcp：当前节点不在 BLOCKED_FORENSIC 时拒绝（退出码 2）；
   --force 放行但保留审计记录。
 - --init/--set/--get 都会渲染 state.json.todo 中的 11 项 TODO 清单（含 [x]/[~]/[ ] 勾选态），
   该清单必须同步到宿主 TODO 工具；宿主无 TODO 工具时把清单原样输出给用户。
@@ -409,7 +421,9 @@ function main() {
     // 外查守卫：取证前节点必须被拒绝，CASE_LOOKUP 起放行
     if (EXTERNAL_NODES.includes('EVIDENCE_GATE') || EXTERNAL_NODES.includes('FORENSIC_CAPTURE')) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: 外查守卫不应放行取证前节点'); }
     if (!EXTERNAL_NODES.includes('CASE_LOOKUP')) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: 外查守卫应放行 CASE_LOOKUP'); }
-    for (const kind of ['replay', 'external']) {
+    if (MCP_NODES.includes('FORENSIC_CAPTURE') || MCP_NODES.includes('EVIDENCE_GATE')) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: MCP 守卫不应放行常规取证节点'); }
+    if (!MCP_NODES.includes('BLOCKED_FORENSIC')) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: MCP 守卫应放行 BLOCKED_FORENSIC'); }
+    for (const kind of ['replay', 'external', 'mcp']) {
       if (typeof GUARDS[kind].deny('EVIDENCE_GATE') !== 'string') { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(`self-test: 守卫 ${kind} 拒绝文案缺失`); }
     }
     const fail = (msg) => { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(`self-test: ${msg}`); };
