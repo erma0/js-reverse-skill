@@ -8,6 +8,40 @@ const { spawn, spawnSync } = require('child_process');
 const paths = require('./lib/paths');
 const { assertTraceSignals, traceSignalNeedleGroups } = require('./lib/trace-signal-policy');
 
+const KNOWN_FLAGS = [
+  '--url', '--input', '--case-dir', '--dir', '--out-dir', '--profile-dir', '--ruyitrace-home',
+  '--ruyitrace-exe', '--project-dir', '--cookie', '--cookie-domain', '--duration', '--limit',
+  '--ptype', '--trace-env', '--target-signal', '--trace-signal', '--evidence-signal',
+  '--end-signal', '--signal-policy', '--dry-run', '--import-after', '--json', '--markdown',
+  '--self-test', '--help',
+];
+
+// 参数拼错时给出最接近的合法参数名（编辑距离 ≤3），避免用户对着全量 usage 逐行找。
+function suggestFlag(input) {
+  const a = String(input || '');
+  let best = '';
+  let bestScore = Infinity;
+  for (const flag of KNOWN_FLAGS) {
+    const score = editDistance(a, flag);
+    if (score < bestScore) { bestScore = score; best = flag; }
+  }
+  return bestScore <= 3 ? `，是否想用 ${best}？` : '';
+}
+
+function editDistance(a, b) {
+  const prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i += 1) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const tmp = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = tmp;
+    }
+  }
+  return prev[b.length];
+}
+
 function parseArgs(argv) {
   const args = {
     url: '',
@@ -39,6 +73,11 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i += 1) {
     const a = argv[i];
     const nextVal = (fb) => (i + 1 < argv.length && typeof argv[i + 1] === 'string' && !argv[i + 1].startsWith('-')) ? argv[++i] : fb;
+    const needVal = (hint) => {
+      const v = nextVal('');
+      if (!v) throw new Error(`${a} 缺少取值${hint ? `：${hint}` : ''}`);
+      return v;
+    };
     if (a === '--url') args.url = nextVal('');
     else if (a === '--input') args.input = nextVal('');
     else if (a === '--case-dir' || a === '--dir') args.caseDir = nextVal('');
@@ -54,26 +93,30 @@ function parseArgs(argv) {
     else if (a === '--ptype') args.ptype = nextVal('');
     else if (a === '--trace-env') args.traceEnv.push(nextVal(''));
     else if (a === '--target-signal') {
-      const signal = nextVal('');
+      const signal = needVal('信号字符串，如 Headers.set 或目标参数名');
       args.targetSignals.push(signal);
       args.evidenceSignals.push(signal);
       args.endSignals.push(signal);
     }
     else if (a === '--trace-signal') {
-      const signal = nextVal('');
+      const signal = needVal('信号字符串，如 XMLHttpRequest 或目标参数名');
       args.traceSignals.push(signal);
       args.evidenceSignals.push(signal);
     }
-    else if (a === '--evidence-signal') args.evidenceSignals.push(nextVal(''));
-    else if (a === '--end-signal') args.endSignals.push(nextVal(''));
-    else if (a === '--signal-policy') args.signalPolicy = nextVal('strict');
+    else if (a === '--evidence-signal') args.evidenceSignals.push(needVal('信号字符串，用于证据门禁'));
+    else if (a === '--end-signal') args.endSignals.push(needVal('信号字符串，用于提前结束采集'));
+    else if (a === '--signal-policy') {
+      const v = needVal('strict 或 advisory');
+      if (!['strict', 'advisory'].includes(v)) throw new Error(`--signal-policy 只接受 strict 或 advisory，收到：${v}`);
+      args.signalPolicy = v;
+    }
     else if (a === '--dry-run') args.dryRun = true;
     else if (a === '--import-after') args.importAfter = true;
     else if (a === '--json') args.json = true;
     else if (a === '--markdown') args.markdown = true;
     else if (a === '--self-test') args.selfTest = true;
     else if (a === '--help' || a === '-h') args.help = true;
-    else throw new Error(`未知参数：${a}`);
+    else throw new Error(`未知参数：${a}${suggestFlag(a)}（完整参数说明用 --help 查看）`);
   }
   if (!args.json && !args.markdown) args.markdown = true;
   if (!Number.isFinite(args.duration) || args.duration <= 0) args.duration = 120;
@@ -503,7 +546,20 @@ function runSelfTest() {
     fs.mkdirSync(jscallDir, { recursive: true });
     fs.writeFileSync(path.join(jscallDir, 'trace_jscall_process_1.jsonl'), '{"kind":"jscall"}\n', 'utf8');
     if (walkNdjson(root).length !== 5) throw new Error('walkNdjson 应匹配 .ndjson 与 .jsonl');
-    return { clean: true, tests: 15 };
+    // 参数报错精细化：缺值 / 非法枚举 / 拼错参数名各给出定向提示，不再回落全量 usage
+    threw = '';
+    try { parseArgs(['node', 'x', '--trace-signal']); } catch (e) { threw = e.message; }
+    if (!/--trace-signal 缺少取值/.test(threw)) throw new Error('信号参数缺值应报出参数名');
+    threw = '';
+    try { parseArgs(['node', 'x', '--signal-policy', 'loose']); } catch (e) { threw = e.message; }
+    if (!/只接受 strict 或 advisory/.test(threw)) throw new Error('--signal-policy 非法取值应列出合法值');
+    threw = '';
+    try { parseArgs(['node', 'x', '--trace-signals', 'abc']); } catch (e) { threw = e.message; }
+    if (!/是否想用 --trace-signal/.test(threw)) throw new Error('拼错参数名应给出最接近的合法参数');
+    threw = '';
+    try { parseArgs(['node', 'x', '--trace-signal', 'ab']); } catch (e) { threw = e.message; }
+    if (!/最少 3 字符/.test(threw)) throw new Error('信号过短应告知最短长度');
+    return { clean: true, tests: 19 };
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1060,6 +1116,6 @@ async function main() {
 
 main().catch((err) => {
   console.error(err.message || String(err));
-  console.error(usage());
+  console.error('完整参数说明：node scripts/capture_ruyitrace_log.js --help');
   process.exit(1);
 });

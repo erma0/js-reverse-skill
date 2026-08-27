@@ -390,7 +390,7 @@ node scripts/write_stage_report.js --case-dir <project-root> --stage <阶段> --
 
 **上下文防耗尽检查点（硬约束）**：按硬计数触发，不得以「预防性落盘」「提前对齐用户」为由提前触发。触发条件（TRACE_ANALYZE / IMPLEMENT / REAL_VERIFY 任一阶段满足其一即视为已触发）：
 
-- 当前节点已消耗 20+ 步仍未推进（TRACE_ANALYZE 未进 IMPLEMENT、IMPLEMENT 黑盒调试打转、REAL_VERIFY 反复排查未定位根因），或上下文接近耗尽；trace 已定位到关键资源/入口同样计入。
+- 当前节点已消耗 20+ 步仍未推进（TRACE_ANALYZE 未进 IMPLEMENT、IMPLEMENT 黑盒调试打转、REAL_VERIFY 反复排查未定位根因），或上下文接近耗尽；trace 已定位到关键资源/入口同样计入。**该条已机器强制**：`state_machine.js` 把同一节点的每次 `--guard` 与每次 `--set <同节点>` 记入 `state.json.stepCount`，12 步起输出 WARN，20 步起 `--guard` 直接拒绝（退出码 2）；只有 `--set <同节点> --note "<阶段报告文件路径>"` 且该文件真实存在才归零，口头声明「已记录」不生效。
 - 「想问用户 vs 再试一轮」摇摆超过 2 轮——摇摆本身就在消耗步骤。
 - 纯思考的决策循环：同一决策（方案/库选择、是否执行、档位判定）重新权衡 ≥2 次，或重复查询已查过的索引、重新判断已有结论。取首个决策立即执行，由验证结果而非思考内再确认判定对错；连续两段思考之间没有任何工具调用即说明正在打转。
 - 脚本 WARN：`search_js.js` / `search_trace.js` 把每次查询记入 `case/tmp/query-log.jsonl`，同一（文件、关键词）第 2 次检索即在输出头部输出 WARN、第 3 次起输出「打转实证」强提示。收到 WARN 必须换检索词/换方法，不得无视提示继续同一路线重复检索。
@@ -499,6 +499,8 @@ node scripts/run_with_trace.js --target <project-root>/case/js/original/<资源�
 不要在命令行手搓 `python -c` 或引号嵌套 grep NDJSON。默认只观察不修改；仅当 NDJSON 缺失、截断或无法覆盖关键入口时，才使用 Hook 模板，并只注入 ruyipage 定制 Firefox。Hook 必须在目标 SDK 加载前安装，命中后及时移除。
 
 环境补齐采用证据驱动的最小集合。只有 trace 显示参与参数或服务端校验的模块才实现；每轮补齐保存输入、中间值、输出和请求结果，禁止一次性伪造大量浏览器 API。环境检测代码不等于服务端约束，未进入关键链路的检测不纳入最终环境。
+
+**签名输入含不可复算随机值 = 分支判定失败（硬约束）**：复现出签名后先自问「服务端能用请求里已有的信息复算出这个值吗」。若签名依赖服务端无法复算的量（RSA 随机 padding 产物、`Math.random`/`crypto.getRandomValues` 结果、只存在于客户端的本地状态），说明沙箱走进了错误分支，**不得继续枚举算法组合或拼接顺序**——转 DIAGNOSE，从随机量产生处回溯到最近的分支条件，逐个对照该条件依赖的环境值（单变量原则）。全局对象被目标 JS 覆盖是最常见诱因，见 `references/env/env-object-model.md` 与 `references/workflow/common-pitfalls.md` 反模式 23。
 
 ## 9. IMPLEMENT
 

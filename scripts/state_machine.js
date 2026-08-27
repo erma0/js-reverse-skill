@@ -50,6 +50,13 @@ const REPLAY_NODES = ['REAL_VERIFY', 'DIAGNOSE'];
 // 因此外查必须排在本地取证与 CASE_LOOKUP 之后，用真实证据去校验外部情报，而不是反过来。
 const EXTERNAL_NODES = ['CASE_LOOKUP', 'EXTERNAL_LOOKUP', 'DIAGNOSE'];
 
+// SKILL.md §4.4 上下文防耗尽检查点：同一节点消耗 20+ 步仍未推进即为打转。
+// 计入"步"的客观事件：每次 --guard 调用（一次重放/外查尝试）、每次 --set 回到同一节点。
+// 到达 STEP_DENY 后 --guard 拒绝放行，必须先落阶段报告；--set 同节点且 --note 指向真实存在的
+// 报告文件时归零计数（报告是否落盘由文件系统裁定，不认口头声明）。
+const STEP_WARN = 12;
+const STEP_DENY = 20;
+
 const GUARDS = {
   replay: {
     nodes: REPLAY_NODES,
@@ -197,6 +204,7 @@ function usage() {
 
 说明：
 - 状态持久化到 <case-dir>/state.json；--case-dir 兼容 <project-root> 与 <project-root>/case。
+  --init 会检查另一候选目录是否也有 state.json，发现两份则告警并打印本次实际读写的绝对路径。
 - 状态转换校验：目标必须是当前节点的直接后继（见 SKILL.md §4），或回退到已访问节点；
   跳过必经节点会被拒绝并提示合法路径。
 - --guard replay：当前节点不在 REAL_VERIFY/DIAGNOSE 时拒绝（退出码 2），并写入 blocks 审计；
@@ -204,6 +212,9 @@ function usage() {
   --force 放行但保留审计记录。
 - --init/--set/--get 都会渲染 state.json.todo 中的 11 项 TODO 清单（含 [x]/[~]/[ ] 勾选态），
   该清单必须同步到宿主 TODO 工具；宿主无 TODO 工具时把清单原样输出给用户。
+- 步数预算（SKILL.md §4.4）：同一节点每次 --guard 或 --set 回到自身都累加 stepCount，
+  ${STEP_WARN} 步起输出 WARN，${STEP_DENY} 步起 --guard 直接拒绝（退出码 2），必须先落阶段报告，
+  再用 --set <同节点> --note "<报告文件路径>" 归零（路径必须真实存在，口头声明不算）。
 - 每次状态转换后必须输出状态行（当前状态(证据状态) → 目标状态(关键结论)）。`;
 }
 
@@ -240,6 +251,8 @@ function initState(caseDir, node) {
     visited: [start],
     history: [],
     blocks: [],
+    stepCount: 0,
+    stepNode: start,
   };
   syncTodo(state);
   writeState(caseDir, state);
@@ -252,13 +265,74 @@ function suggestNext(state) {
   return nexts.length ? `合法后继：${nexts.join(' → ')}` : '该节点已是终态';
 }
 
-function renderMarkdown(state, extraLines) {
+// 同一 --case-dir 输入可能落到两个不同目录（paths.resolveCaseDir：<input>/case 存在则取它，
+// 否则取 input 本身）。若项目根与 case 子目录下各有一份 state.json，进度就被劈成两半，
+// 而输出里看不出写的是哪一份——match14 实测中"--init 又回到起点"就是这么来的。
+function detectSplitStates(caseDir) {
+  const active = path.resolve(caseDir);
+  const candidates = [path.join(active, 'case')];
+  // 只有当前目录本身就是 case 子目录时，其父目录才是另一个可能的解析结果
+  if (path.basename(active).toLowerCase() === 'case') candidates.push(path.dirname(active));
+  const found = [];
+  for (const dir of candidates) {
+    if (path.resolve(dir) === active) continue;
+    if (exists(statePath(dir))) found.push(statePath(dir));
+  }
+  return found;
+}
+
+function stepCount(state) {
+  return Number((state && state.stepCount) || 0);
+}
+
+function bumpStep(state, reason) {
+  state.stepCount = stepCount(state) + 1;
+  state.stepNode = state.node;
+  state.stepLastReason = reason;
+  return state.stepCount;
+}
+
+function resetStep(state, why) {
+  state.stepCount = 0;
+  state.stepNode = state.node;
+  state.stepLastReason = why || 'reset';
+}
+
+// --note 里出现的路径确实存在时才认定阶段报告已落盘（口头声明不算）。
+function noteHasReport(caseDir, note) {
+  const text = String(note || '');
+  if (!text) return '';
+  const tokens = text.match(/[^\s"'（），,；;]+\.(md|json|jsonl|txt)/gi) || [];
+  for (const t of tokens) {
+    for (const base of [caseDir, path.dirname(path.resolve(caseDir)), process.cwd()]) {
+      const p = path.isAbsolute(t) ? t : path.join(base, t);
+      if (exists(p)) return path.resolve(p);
+    }
+  }
+  return '';
+}
+
+function stepWarning(state) {
+  const n = stepCount(state);
+  if (n >= STEP_DENY) {
+    return `同一节点 ${state.node} 已累计 ${n} 步未推进（阈值 ${STEP_DENY}）；按 SKILL.md §4.4 必须先落阶段报告（当前状态、已证实事实、缺失证据、下一步输入），再用 --set ${state.node} --note "<报告文件路径>" 归零计数`;
+  }
+  if (n >= STEP_WARN) {
+    return `同一节点 ${state.node} 已累计 ${n} 步（DENY 阈值 ${STEP_DENY}）；换检索词/换方法，别在同一路线上重复尝试`;
+  }
+  return '';
+}
+
+function renderMarkdown(state, extraLines, caseDir) {
   const lines = [];
-  lines.push(`# 状态机跟踪 <case-dir>/state.json`);
+  lines.push(`# 状态机跟踪 ${caseDir ? statePath(caseDir) : '<case-dir>/state.json'}`);
   lines.push('');
   lines.push(`- 当前节点：**${state.node}**`);
   lines.push(`- 已访问：${state.visited.join(' → ')}`);
   lines.push(`- 最近更新：${state.updatedAt}`);
+  if (stepCount(state) > 0) {
+    lines.push(`- 本节点累计步数：${stepCount(state)}（WARN ${STEP_WARN} / DENY ${STEP_DENY}）`);
+  }
   if (extraLines && extraLines.length) {
     lines.push('');
     lines.push(...extraLines);
@@ -338,6 +412,27 @@ function main() {
     for (const kind of ['replay', 'external']) {
       if (typeof GUARDS[kind].deny('EVIDENCE_GATE') !== 'string') { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(`self-test: 守卫 ${kind} 拒绝文案缺失`); }
     }
+    const fail = (msg) => { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(`self-test: ${msg}`); };
+    // 状态文件路径必须以绝对路径出现在输出里，否则路径分裂无法被察觉
+    if (!renderMarkdown(readState(tmp), null, tmp).includes(statePath(tmp))) fail('markdown 未打印真实 state.json 路径');
+    // 步数预算：同节点累加到 DENY 阈值必须给出含阈值的拒绝文案，未达 WARN 不出声
+    const budget = readState(tmp);
+    resetStep(budget, 'test');
+    if (stepWarning(budget)) fail('零步数不应告警');
+    for (let i = 0; i < STEP_WARN; i += 1) bumpStep(budget, 'test');
+    if (!stepWarning(budget)) fail(`累计 ${STEP_WARN} 步应输出 WARN`);
+    while (stepCount(budget) < STEP_DENY) bumpStep(budget, 'test');
+    if (!stepWarning(budget).includes('阶段报告')) fail(`累计 ${STEP_DENY} 步应要求先落阶段报告`);
+    resetStep(budget, 'report');
+    if (stepCount(budget) !== 0 || stepWarning(budget)) fail('落报告后步数应归零');
+    // 阶段报告以文件是否存在为准，口头声明不予认定
+    fs.writeFileSync(path.join(tmp, '阶段报告.md'), '# 阶段报告\n', 'utf8');
+    if (!noteHasReport(tmp, '已落 阶段报告.md')) fail('note 指向已存在的报告应被认定');
+    if (noteHasReport(tmp, '报告已经写好了')) fail('无文件的口头声明不应被认定');
+    // 路径分裂：<tmp>/case/state.json 与 <tmp>/state.json 并存时必须被检出
+    fs.mkdirSync(path.join(tmp, 'case'), { recursive: true });
+    fs.writeFileSync(statePath(path.join(tmp, 'case')), '{}\n', 'utf8');
+    if (!detectSplitStates(tmp).includes(statePath(path.join(tmp, 'case')))) fail('未检出并存的第二份 state.json');
     fs.rmSync(tmp, { recursive: true, force: true });
     console.log('state_machine.js self-test: PASS');
     return 0;
@@ -354,11 +449,17 @@ function main() {
     const { state, created } = initState(caseDir, args.node);
     const hint = todoHint(state.node, created ? 'init' : 'resume');
     const head = created ? `已初始化状态跟踪：${state.node}` : `状态已存在，当前节点：${state.node}`;
+    const split = detectSplitStates(caseDir);
     if (args.json) {
-      console.log(JSON.stringify(state, null, 2));
+      console.log(JSON.stringify({ ...state, statePath: statePath(caseDir), splitStates: split }, null, 2));
       return 0;
     }
-    console.log(renderMarkdown(state, ['', `> ${head}`, ...(hint ? ['', hint] : [])]));
+    const extra = ['', `> ${head}`];
+    if (split.length) {
+      extra.push('', `> **警告：检测到另一份状态文件**：${split.join(' / ')}。本次读写的是 ${statePath(caseDir)}，两份进度互不可见（--case-dir 传项目根还是 case 目录会解析到不同位置）。请只保留一份，后续所有命令固定用同一个 --case-dir。`);
+    }
+    if (hint) extra.push('', hint);
+    console.log(renderMarkdown(state, extra, caseDir));
     return 0;
   }
 
@@ -381,7 +482,7 @@ function main() {
       state.blocks = (state.blocks || []).concat({ at: new Date().toISOString(), type: `${kind}-guard`, node: state.node, message: msg });
       syncTodo(state);
       writeState(caseDir, state);
-      if (args.markdown) console.log(renderMarkdown(state, ['', `> 拒绝：${msg}`, '', `> ${suggestNext(state)}`]));
+      if (args.markdown) console.log(renderMarkdown(state, ['', `> 拒绝：${msg}`, '', `> ${suggestNext(state)}`], caseDir));
       else console.error(`${kind.toUpperCase()}_GUARD_DENIED: ${msg}`);
       return 2;
     }
@@ -390,10 +491,27 @@ function main() {
       syncTodo(state);
       writeState(caseDir, state);
     }
+    // 节点合法但已在同一节点打转到阈值：先落阶段报告再继续（SKILL.md §4.4）
+    bumpStep(state, `${kind}-guard`);
+    const exhausted = stepCount(state) >= STEP_DENY && !args.force;
+    const warn = stepWarning(state);
+    if (exhausted) {
+      state.blocks = (state.blocks || []).concat({ at: new Date().toISOString(), type: 'step-budget', node: state.node, message: warn });
+    }
+    syncTodo(state);
+    writeState(caseDir, state);
+    if (exhausted) {
+      if (args.markdown) console.log(renderMarkdown(state, ['', `> 拒绝：${warn}`], caseDir));
+      else console.error(`STEP_BUDGET_EXCEEDED: ${warn}`);
+      return 2;
+    }
     if (args.markdown) {
-      console.log(renderMarkdown(state, ['', `> **${kind} 守卫通过**：当前节点 ${state.node}`]));
+      const extra = ['', `> **${kind} 守卫通过**：当前节点 ${state.node}`];
+      if (warn) extra.push('', `> WARN：${warn}`);
+      console.log(renderMarkdown(state, extra, caseDir));
     } else {
       console.log(`${kind} 守卫通过：当前节点 ${state.node}`);
+      if (warn) console.log(`WARN: ${warn}`);
       console.log(renderTodo(state.todo && state.todo.length ? state.todo : computeTodo(state)).join('\n'));
     }
     return 0;
@@ -407,7 +525,7 @@ function main() {
       state.blocks = (state.blocks || []).concat({ at: new Date().toISOString(), type: 'illegal-transition', node: state.node, message: msg });
       syncTodo(state);
       writeState(caseDir, state);
-      if (args.markdown) console.log(renderMarkdown(state, ['', `> 拒绝：${msg}`]));
+      if (args.markdown) console.log(renderMarkdown(state, ['', `> 拒绝：${msg}`], caseDir));
       else console.error(`ILLEGAL_TRANSITION: ${msg}`);
       return 2;
     }
@@ -420,15 +538,31 @@ function main() {
     if (!allowed) {
       state.blocks = (state.blocks || []).concat({ at: state.updatedAt, type: 'illegal-transition-force', node: from, message: `--force 放行非法跳转 ${from} → ${to}` });
     }
+    // 步数计数：换节点即归零；停在同一节点则累加，除非 --note 指向真实存在的阶段报告
+    let stepNote = '';
+    if (to !== from) {
+      resetStep(state, `enter:${to}`);
+    } else {
+      const report = noteHasReport(caseDir, args.note);
+      if (report) {
+        resetStep(state, `report:${report}`);
+        stepNote = `已确认阶段报告 ${report}，本节点步数归零`;
+      } else {
+        bumpStep(state, 'set-same-node');
+        stepNote = stepWarning(state);
+      }
+    }
     syncTodo(state);
     writeState(caseDir, state);
     const hint = todoHint(to, to === from ? 'same' : wasVisited ? 'back' : 'enter');
     if (args.markdown) {
       const extra = [`> 状态转换：${from} → **${to}**${args.note ? '（' + args.note + '）' : ''}`];
+      if (stepNote) extra.push('', `> ${stepNote}`);
       if (hint) extra.push('', hint);
-      console.log(renderMarkdown(state, ['', ...extra]));
+      console.log(renderMarkdown(state, ['', ...extra], caseDir));
     } else {
       console.log(`STATE_TRANSITION: ${from} → ${to}${args.note ? ' | ' + args.note : ''}`);
+      if (stepNote) console.log(stepNote);
       if (hint) console.log(hint);
       console.log(renderTodo(state.todo).join('\n'));
     }
@@ -439,7 +573,7 @@ function main() {
     if (args.json) {
       console.log(JSON.stringify(state, null, 2));
     } else {
-      console.log(renderMarkdown(state));
+      console.log(renderMarkdown(state, null, caseDir));
     }
     return 0;
   }

@@ -203,6 +203,7 @@ globalThis.window = globalThis;
 globalThis.self = globalThis;
 globalThis.top = globalThis;
 globalThis.parent = globalThis;
+globalThis.frames = globalThis;
 
 const browser = __fixture.browser || {};
 const request = __fixture.request || {};
@@ -281,6 +282,20 @@ if (runtime.now) {
   FixedDate.UTC = RealDate.UTC;
   FixedDate.prototype = RealDate.prototype;
   globalThis.Date = FixedDate;
+}
+
+// 全局对象写保护：浏览器里 window / navigator / document 是宿主不可写属性，目标 JS 内部的
+// window = {} 这类赋值在浏览器中静默失效；vm 里普通赋值会真的顶掉全局对象、连带丢失已注册模块。
+// 改为只读 getter + 记账被拦截的写入，避免把「环境被目标自己破坏」误诊成「算法没搞对」。
+for (const __protectedName of ['window', 'self', 'top', 'parent', 'frames', 'navigator', 'document', 'location', 'screen', 'history', 'localStorage', 'sessionStorage', 'crypto', 'performance']) {
+  if (!(__protectedName in globalThis)) continue;
+  const __protectedValue = globalThis[__protectedName];
+  Object.defineProperty(globalThis, __protectedName, {
+    get() { return __protectedValue; },
+    set(v) { __push({ type: 'set-blocked', path: __protectedName, valueType: typeof v }); },
+    enumerable: true,
+    configurable: true,
+  });
 }
 
 function __resolveEntry(entry) {
@@ -378,13 +393,14 @@ function classifyError(err) {
 }
 
 function summarize(events, errors, leakageCheck) {
-  const missingGlobals = [], missingMethods = [], missingProperties = [], specialObjects = [], proxyRiskSignals = [];
+  const missingGlobals = [], missingMethods = [], missingProperties = [], specialObjects = [], proxyRiskSignals = [], blockedGlobalWrites = [];
   for (const e of errors) {
     if (e.type === 'missing-global') missingGlobals.push(e.missing);
     if (e.type === 'missing-method') missingMethods.push(e.missing);
     if (e.type === 'missing-property') missingProperties.push(e.missing);
   }
   for (const e of events) {
+    if (e.type === 'set-blocked') blockedGlobalWrites.push(e.path);
     if (e.path === 'document.all' || (e.path && e.path.startsWith('document.all.'))) specialObjects.push('document.all');
     if (['ownKeys', 'getOwnPropertyDescriptor', 'getPrototypeOf', 'toPrimitive'].includes(e.type)) proxyRiskSignals.push(`${e.type}:${e.path || e.prop || ''}`);
     if (e.path && e.path.endsWith('.toString')) proxyRiskSignals.push(`toString:${e.path}`);
@@ -396,6 +412,7 @@ function summarize(events, errors, leakageCheck) {
     missingMethods: uniq(missingMethods),
     missingProperties: uniq(missingProperties),
     specialObjects: uniq(specialObjects),
+    blockedGlobalWrites: uniq(blockedGlobalWrites),
     nodeLeakage: leakageCheck || {},
     proxyRiskSignals: uniq(proxyRiskSignals).slice(0, 100),
     runtimeErrors: errors,
@@ -468,6 +485,14 @@ function renderMarkdown(result) {
     lines.push('');
     lines.push('## 运行错误');
     for (const e of result.summary.runtimeErrors) lines.push(`- ${e.type}：${e.message}`);
+  }
+  if (result.summary.blockedGlobalWrites && result.summary.blockedGlobalWrites.length) {
+    lines.push('');
+    lines.push('## 目标 JS 试图覆盖全局对象（已拦截）');
+    lines.push('');
+    lines.push(`目标 JS 对以下全局对象做了赋值：${result.summary.blockedGlobalWrites.join('、')}。`);
+    lines.push('浏览器里这些属性不可写、赋值静默失效，本 runner 已同样拦截。');
+    lines.push('若手写沙箱复现同一目标，必须同样用只读 getter 安装这些属性，否则模块/构造器会被静默清空。');
   }
   if (result.summary.proxyRiskSignals.length) {
     lines.push('');

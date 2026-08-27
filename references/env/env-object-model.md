@@ -56,14 +56,33 @@ Node 泄露阻断 → 目标对象范围确认 → 构造函数 / 原型链 / �
 
 ## 全局对象
 
-基础关系可按目标需要安装：
+基础关系可按目标需要安装，但**不得使用普通赋值**：
 
 ```js
+// 错误：vm 里 window 变成可写属性
 globalThis.window = globalThis;
-globalThis.self = globalThis;
-globalThis.top = globalThis;
-globalThis.parent = globalThis;
+
+// 正确：只读 getter，写入静默失效（与浏览器一致）
+for (const name of ['window', 'self', 'top', 'parent', 'frames']) {
+  Object.defineProperty(globalThis, name, { get: () => globalThis, set() {}, enumerable: true, configurable: true });
+}
 ```
+
+### 目标 JS 会主动覆盖全局对象（高频卡点）
+
+除了「被检测」，全局对象还有一个更隐蔽的**被破坏**面：混淆代码里常出现 `window = {}`、`navigator = {}`、`var window = window || {}` 这类语句（自建作用域、兼容 Node/Worker 的降级分支、反调试干扰都会产生）。
+
+- 浏览器中 `window` / `navigator` / `document` / `location` / `screen` 是宿主提供的**不可写**属性，这类赋值静默失效，目标 JS 照常运行。
+- vm / 普通对象沙箱里若用普通赋值安装，这条语句会**真的顶掉全局对象**：此前注册在 `window` 上的模块、构造器（如 ASN1 / Base64 / Hex / 加密库懒加载产物）全部丢失。
+- 典型症状：`sandbox.window !== sandbox`；某个模块「明明加载过」却报 undefined；同一段代码在浏览器正常、沙箱里缺依赖。这类故障不报错、不留栈，极易被误诊成「算法没搞对」而在错误方向上反复试错。
+
+排查手段：
+
+1. 执行目标 JS 后先断言 `sandbox.window === sandbox`、`sandbox.navigator` 仍是安装时的对象。
+2. 用 `scripts/run_with_trace.js` 跑一遍，摘要里的 `blockedGlobalWrites` 字段会列出目标 JS 试图覆盖的全局对象名（该 runner 已内置只读保护并记账）。
+3. 手写沙箱必须对 window / self / top / parent / frames / navigator / document / location / screen / history / localStorage / sessionStorage / crypto / performance 全部用只读 getter 安装。
+
+### 真实性检查面
 
 真实浏览器的 `window` 不是普通对象。只要补 `Window` / `window`，就默认需要考虑：
 

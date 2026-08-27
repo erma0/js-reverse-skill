@@ -4,13 +4,15 @@
 // 参数已进入请求 writer。若确实需要使用，必须提供更具体的接口/成员/参数组合。
 const GENERIC_SIGNAL_RE = /^(?:window|document|createElement|appendChild|insertBefore|querySelector|querySelectorAll|addEventListener|dispatchEvent|setTimeout|setInterval|JSON\.stringify|Date\.now|Math\.random)$/i;
 
+const MIN_SIGNAL_LENGTH = 3;
+
 function validateTraceSignals(signals) {
   const issues = [];
   for (const raw of signals || []) {
     const signal = String(raw || '').trim();
     if (!signal) continue;
-    if (signal.length < 3) {
-      issues.push({ signal, reason: '信号过短，极易在无关字段中命中；请使用参数写入点、限定 API 或调用栈关键词' });
+    if (signal.length < MIN_SIGNAL_LENGTH) {
+      issues.push({ signal, reason: `信号过短（${signal.length} 字符，最少 ${MIN_SIGNAL_LENGTH} 字符），极易在无关字段中命中；请使用参数写入点、限定 API 或调用栈关键词` });
       continue;
     }
     if (GENERIC_SIGNAL_RE.test(signal)) {
@@ -63,4 +65,4 @@ function assertTraceSignals(signals, label = 'trace/evidence signal') {
   throw new Error(`${label} 不合格：${detail}`);
 }
 
-module.exports = { validateTraceSignals, assertTraceSignals, matchesTraceSignal, traceSignalNeedleGroups };
+module.exports = { validateTraceSignals, assertTraceSignals, matchesTraceSignal, traceSignalNeedleGroups, MIN_SIGNAL_LENGTH };

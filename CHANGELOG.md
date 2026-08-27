@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2.3.72 - 2026-08-28
+
+### 修复（match14 实测日志复盘：4 处让人白跑 30 步的缺陷）
+
+复盘猿人学 match14（m/mz Cookie）的完整执行日志，逐条定位「日志暴露的问题里哪些是 skill 自身的锅」，修掉 4 处：
+
+- **`run_with_trace.js` 全局对象可被目标 JS 顶掉（硬 bug）**：SKILL.md §7 强制走该脚本，但其 bootstrap 里 `window`/`navigator`/`document` 都是普通赋值，目标 JS 的 `window = {}` 会真的把全局对象换掉、已注册的模块全部丢失（症状 `sandbox.window !== sandbox`），而 `templates/vm-sandbox/install-env.js` 用的是正确的 `defineProperty` 只读 getter——两处写法不一致且脚本侧无任何提示。现对 14 个全局名（window/self/top/parent/frames/navigator/document/location/screen/history/localStorage/sessionStorage/crypto/performance）加只读 getter 保护，写入被吞并记入 `blockedGlobalWrites`，`--markdown` 输出「目标 JS 试图覆盖全局对象（已拦截）」段落，`--json` 同步返回。
+- **「签名含服务端不可复算的随机值」这条诊断规则此前全库缺失**：match14 里 `aa` 是 RSA PKCS#1 随机 padding 的产物却深度参与 `md5hex`，服务端根本无法复算——这已经证明沙箱走进了错误分支，但当时仍在枚举算法组合。现补 `common-pitfalls.md` 反模式 23（含速查表一行）与 SKILL.md §8 硬约束：出现不可复算随机量一律转 DIAGNOSE，从随机量产生处回溯最近分支条件，逐个对照该条件依赖的环境值（单变量原则），禁止继续试算法/拼接顺序。`env-object-model.md` 的「全局对象」小节同步重写为错误/正确写法对照，并新增「目标 JS 会主动覆盖全局对象（高频卡点）」子节。
+- **`capture_ruyitrace_log.js` 报错刷 32 行 usage 却不说哪儿错了**：日志中 4 次采集失败都是「未知参数/信号过短」，输出却是全量 usage。现改为：信号参数缺值报出参数名与取值示例；`--signal-policy` 非法取值直接报错并列出合法值（不再静默回落 strict）；参数拼错按编辑距离给「是否想用 --xxx」建议；失败只留一行 `--help` 指引。共享的 `trace-signal-policy.js` 提取 `MIN_SIGNAL_LENGTH` 常量，「信号过短」报错告知实际长度与最短长度。self-test 15 → 19 项。
+- **`state_machine.js` 路径分裂无感 + §4.4 步数预算无人执行**：`--init` 看似「重置了状态机」实为 `paths.resolveCaseDir` 把项目根与 `case/` 解析成两份 state.json，而输出的标题是字面量 `<case-dir>/state.json` 完全看不出写了哪份。现输出真实绝对路径，`--init` 检出并存的第二份即告警；同时落地步数计数：同节点每次 `--guard`/`--set <同节点>` 累加 `stepCount`，12 步 WARN、20 步 `--guard` 拒绝（退出码 2），只有 `--set <同节点> --note "<真实存在的报告文件>"` 才归零，口头声明不作数。SKILL.md §4.4 第一条据此标注「已机器强制」。
+
+验证：4 个改动脚本 `node --check` 全通过；state_machine self-test PASS（新增 6 类断言）、capture 19 项、check_evidence 52 项回归通过；`--guard` 第 20 步退出码 2、落报告后归零并重新放行，均实测确认。
+
 ## 2.3.71 - 2026-08-27
 
 ### 修复（cheatsheet 文档完整性：两个源码开关遗漏 + 章节号顺延）
