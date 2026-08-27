@@ -4,15 +4,15 @@
 >
 > 用途：TRACE_CAPTURE 采集前做**定向选型**——先判题型，再选最小开关组合，从源头避免日志过大（见 `references/workflow/trace-flow.md`「定向 trace 策略」）。自动采集用 `capture_ruyitrace_log.js --trace-env KEY=VALUE` 透传下表任意 `MOZ_DOM_*` 开关（脚本自管的 5 个除外：`MOZ_DOM_TRACE` / `MOZ_DOM_TRACE_FILE` / `MOZ_DOM_TRACE_LIMIT` / `MOZ_DOM_TRACE_PTYPE` / `MOZ_DISABLE_LAUNCHER_PROCESS`，分别对应 `--url`、`--case-dir`、`--limit`、`--ptype` 与固定值）。
 >
-> 所有开关在启动 `firefox.exe` 前设置，进程启动时读取一次，**运行中改无效**。唯一例外：`MOZ_DOM_TRACE_GATE` 受控模式下可在运行中靠控制文件随时开/关落盘（见 §6），但「录什么」的配置仍启动定死。
+> 所有开关在启动 `firefox.exe` 前设置，进程启动时读取一次，**运行中改无效**。唯一例外：`MOZ_DOM_TRACE_GATE` 受控模式下可在运行中靠控制文件随时开/关落盘（见 §7），但「录什么」的配置仍启动定死。
 
 ## 0. 应用层使用机制（源码确认）
 
-- **全部开关都是环境变量，不是命令行参数**。RuyiTrace GUI 的开关总表每项即一个 `MOZ_DOM_*` env；启动时主进程 `spawn(firefox.exe, args, { env: { ...process.env, ...switches } })` 注入。命令行参数只有：`-profile <dir>`、`-no-remote`、`-headless`、`-private-window`、`--fpfile=<path>`（**必须等号形式**，见 §8）与目标 URL。
+- **全部开关都是环境变量，不是命令行参数**。RuyiTrace GUI 的开关总表每项即一个 `MOZ_DOM_*` env；启动时主进程 `spawn(firefox.exe, args, { env: { ...process.env, ...switches } })` 注入。命令行参数只有：`-profile <dir>`、`-no-remote`、`-headless`、`-private-window`、`--fpfile=<path>`（**必须等号形式**，见 §9）与目标 URL。
 - 终端等价命令（GUI「复制启动命令」生成 PowerShell 形式）：`$env:MOZ_DOM_JSCALL_TRACE="1"` … 逐行 set 后 `& "firefox.exe" -profile <dir> -no-remote <url>`；Python/ruyiPage 集成同理——`os.environ["MOZ_DOM_*"]=...` 设好后再 `FirefoxPage(opt)`（Popen 继承环境变量）。
 - **GUI 会额外注入 3 个默认开关**（用户未显式关闭时）：`MOZ_DOM_EXCEPTION_TRACE=1`、`MOZ_DOM_EXCEPTION_LIMIT=0`、`MOZ_DOM_EXCEPTION_FLUSH_INTERVAL=1`——即 GUI 启动默认开启 exception trace（无限、每条刷盘）。下表「默认」列是**内核默认**（不设时的行为）；本 skill 的 `capture_ruyitrace_log.js` 自己 spawn 不带这 3 个，需要 exception 证据时用 `--trace-env` 显式开。
 - **锚点自动注入**：GUI「日志目录」未手动设 `MOZ_DOM_TRACE_FILE` 时自动注入 `<日志目录>\trace.jsonl`；主进程会自动 mkdir 锚点目录（内核不建目录，脚本方式自建目录同样必要）。
-- GUI 内置「常规采集」快捷组合与各题型预设见 §5。
+- GUI 内置「常规采集」快捷组合与各题型预设见 §6。
 
 ## 1. 总开关与输出
 
@@ -25,6 +25,7 @@
 | `MOZ_DOM_TRACE_INTERNAL` | `1` / 不设 | 关 | `1` 恢复记录浏览器内部噪声（chrome://、resource:// 等），排查内部行为用 |
 | `MOZ_DOM_TRACE_GATE` | 控制文件路径 | 空 | **运行时启停闸门**。设了即受控模式：启动默认暂停，控制文件**存在=开、删除=关**。未设恒开（向后兼容）。配套 session_started/stopped 哨兵 |
 | `MOZ_DOM_TRACE_GATE_POLL_MS` | `20`..`5000` | `200` | 后台线程轮询控制文件间隔（ms）。仅受控模式生效 |
+| `MOZ_DOM_TRACE_RUN_ID` | 任意字符串 | 内核自动生成 | 采集运行标识，写进记录与文件名，便于多次采集区分。不设则内核自动生成 |
 | `MOZ_DOM_COOKIE_TRACE_FILE` / `MOZ_DOM_STORAGE_TRACE_FILE` / `MOZ_DOM_WASM_TRACE_FILE` | 文件路径 | 锚点派生 | 单独把某模块导到别处（一般不用） |
 
 **锚点派生文件**：`trace_process_<pid>`（核心）、`_cookie_`、`_storage_`、`_eval_`、`_event_`、`_descriptor_`、`_wasm_`、`_jscall_`（主力）、`_exception_`。设 `MOZ_DOM_TRACE_FILE` 后这些模块日志自动落到同目录子文件夹（如 `jscall/trace_jscall_process_<pid>.jsonl`），无需单独传 `*_TRACE_FILE`。
@@ -147,7 +148,24 @@
 | `MOZ_DOM_WASM_INSN_MAX_FUNCS` | 整数，`0`=无限 | `0` | 最多反汇编几个函数 |
 | `MOZ_DOM_WASM_INSN_MAX_BYTES` | 字节数 | `1048576`(1MB) | 单函数反汇编上限 |
 
-## 4. HTTP 报文 / WebSocket 帧（C++ 网络层，无痕）
+## 4. 全量事件 trace（异步 C++ 写入）
+
+| 开关 | 可选值 | 默认 | 功能 |
+|---|---|---|---|
+| `MOZ_DOM_EVENT_TRACE_FULL` | `1` / 不设 | 关 | 全量异步事件 trace。需总开关 `MOZ_DOM_TRACE=1` 与输出锚点 |
+
+输出：`<锚点目录>/event/trace_event_process_<pid>.jsonl`。覆盖 14 类原生事件：`mousemove/mousedown/mouseup/click`、`pointermove/pointerdown/pointerup`、`keydown/keypress/keyup`、`touchstart/touchmove/touchend`、`wheel`。
+
+- `event_dispatch`：14 类全部记录；`listener_call` 通过 `event_id` 关联当前派发。
+- 完整 Listener：点击、按键、Pointer down/up、Touch start/end；**1/32 采样**：`mousemove`/`pointermove`/`touchmove`/`wheel`（高频事件降采样，避免爆量）。
+- 强制保留：慢调用、异常、`preventDefault()`、停止传播（即使命中 1/32 降采样也一定落盘）。
+- 写入：事件线程非阻塞入队，Writer 线程批量写文件；队列约 8 MiB/进程，锁竞争/队列满/记录超限时丢弃最新记录。
+- 统计：搜 `kind:event_trace_stats` 检查 `dropped` 与 `high-watermark`。
+- 关闭：移除 `MOZ_DOM_EVENT_TRACE_FULL` 恢复原有采样行为；`MOZ_DOM_TRACE_GATE=0` 停止接收并 drain/flush 已入队记录。
+
+> 用途：验证码轨迹还原（鼠标/触摸/按键时序）、交互事件链定位。事件 trace 与 jscall 独立，量较大，按需开。
+
+## 5. HTTP 报文 / WebSocket 帧（C++ 网络层，无痕）
 
 | 开关 | 可选值 | 默认 | 功能 |
 |---|---|---|---|
@@ -156,7 +174,7 @@
 | `MOZ_DOM_WS_TRACE` | `1` / 不设 | 关 | **WebSocket 帧 trace 总开关**。对页面 JS 完全无痕，抓解压/掩码前真实明文 |
 | `MOZ_DOM_WS_MAX_BYTES` | `256`..`16777216` | `65536` | 单帧 payload 字节上限 |
 
-## 5. 使用建议
+## 6. 使用建议
 
 **先判题型，再选最小开关组合——不要一上来全开。**
 
@@ -190,7 +208,7 @@ GUI 内置两个层次的现成组合（源码确认）：
 8. 跨模块用 `origin_call_id` 串数据流（「哪次调用读了哪些指纹/写了哪个 cookie」）。启用 `JSCALL_SCRIPT_URL*` 会让未记录调用不分配 `call_id`，parent/depth/summary/origin_call_id 树会被压缩。
 9. **运行时启停（`TRACE_GATE`）不替代收窄纪律**：能随时停 ≠ 可以全开等手动停——关之前的 1~2 秒足以让 `STACK_FULL` 写出 GB；`OPCODE_LIMIT` 仍是硬保险。闸门对 JIT 安全（不重编、无卡顿），可放心用于真实反爬站。
 
-## 6. 运行时启停闸门（TRACE_GATE）
+## 7. 运行时启停闸门（TRACE_GATE）
 
 浏览器**启动后再开始、随时结束** trace，只抓关心的窗口（如手动点验证码那一刻）。配置（录什么）仍走 env 启动定死；闸门只翻「此刻落不落盘」一个布尔位。
 
@@ -222,7 +240,7 @@ firefox.exe
 - 只做**全局总启停**（所有已配置模块同开同关）；脚本级收窄用 `OPCODE_URL`/`SCRIPT_URL` 配置层覆盖。
 - HTTP 报文 / WS 握手暂不受闸门控制；WS **数据帧**受控制。
 
-## 7. Stderr warning 分诊（外部脚本）
+## 8. Stderr warning 分诊（外部脚本）
 
 `JavaScript warning:` on stderr is not a trace failure. A known example:
 
@@ -238,7 +256,7 @@ with:
 
 This is a SpiderMonkey page-script warning. Treat `[DOMTrace] ERROR:` as trace failure; do not fail automation only because stderr contains `JavaScript warning`.（外部仓库提供 `domtrace_stderr_classifier.py` 做分诊，本 skill 未随包含该脚本，按上述规则手动分诊即可。）
 
-## 8. `--fpfile` 启动参数：指纹定制 + SOCKS5 认证（必须等号形式）
+## 9. `--fpfile` 启动参数：指纹定制 + SOCKS5 认证（必须等号形式）
 
 `--fpfile=<path>` 指向 profile 目录下的 `fingerprint.fp`，**必须等号形式**（`--fpfile C:\path` 空格分隔会让 SOCKS5 只发 `methods=00` 不带凭据；等号形式发 `methods=02` 完成 RFC1929 认证）。文件为逐行 `key<sep>value`：
 
@@ -262,7 +280,7 @@ user_pref("network.proxy.no_proxies_on", "localhost,127.0.0.1");
 firefox.exe --new-instance -no-remote -profile C:\path\profile --fpfile=C:\path\profile\fingerprint.fp "https://example.com/"
 ```
 
-## 9. 启动时 API 定制速查（`MOZ_DOM_API_*`）
+## 10. 启动时 API 定制速查（`MOZ_DOM_API_*`）
 
 启动 Firefox 前设置，进程内首次命中相关 API 时读取一次；默认不设 `MOZ_DOM_API_OVERRIDE` 时完全原生。对拍 / 复现实验用；真实取证保持默认，避免指纹基线被固定值污染。
 

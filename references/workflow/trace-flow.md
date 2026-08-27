@@ -121,7 +121,7 @@ RuyiTrace 除默认全量 DOM/BOM trace 外，还有一套 `MOZ_DOM_*` 定向开
 1. **先收窄再开量大的开关**：`OPCODE_*` / `JSVMP_*` 必配 `OPCODE_URL`/`SCRIPT_URL` 锁单脚本；普通 jscall 噪声先 `SCRIPT_URL`/`SCRIPT_URL_EXCLUDE`。
 2. **opcode 栈值深抓必配 PC 窗口 + LIMIT**：`OPCODE_STACK_FULL` 是爆量主因，配 `OPCODE_PC_START`/`OPCODE_PC_END` 与 `OPCODE_LIMIT`。
 3. **反爬/时延敏感站勿深序列化、勿禁 JIT**：用 `SHALLOW` 浅序列化，深序列化会拖慢 VM 触发时序检测/重试。
-4. **运行时启停闸门（`MOZ_DOM_TRACE_GATE`）不替代收窄**：关闸前 1~2 秒足以让 `STACK_FULL` 写出 GB，`OPCODE_LIMIT` 仍是硬保险。闸门适合「启动后只录手动点验证码那一段」的窗口采集（配置/操作流见 cheatsheet §6；仅手动启动方式可用，自动脚本不默认使用）。
+4. **运行时启停闸门（`MOZ_DOM_TRACE_GATE`）不替代收窄**：关闸前 1~2 秒足以让 `STACK_FULL` 写出 GB，`OPCODE_LIMIT` 仍是硬保险。闸门适合「启动后只录手动点验证码那一段」的窗口采集（配置/操作流见 cheatsheet §7；仅手动启动方式可用，自动脚本不默认使用）。
 
 ### 方式一：自动 trace
 

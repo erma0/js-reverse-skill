@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 2.3.71 - 2026-08-27
+
+### 修复（cheatsheet 文档完整性：两个源码开关遗漏 + 章节号顺延）
+
+自查发现 `ruyitrace-cheatsheet.md` 重写时丢失两个开关（源码 `switches.js` 有、原 cheatsheet 有或应有）：
+
+- **补回 `MOZ_DOM_EVENT_TRACE_FULL`（全量事件 trace）**：原 cheatsheet 开头有独立一节，重写加 §0 时被删丢。新增 §4「全量事件 trace」：14 类原生事件覆盖、1/32 降采样规则、强制保留条件、队列 8MiB 与丢弃策略、`event_trace_stats` 统计、验证码轨迹用途。
+- **补 `MOZ_DOM_TRACE_RUN_ID`**：采集运行标识，§1 总开关表新增一行。
+- **章节号顺延**：插入 §4 后原 §4~§9 → §5~§10；同步修正三处内部交叉引用（§6→§7 TRACE_GATE、§8→§9 fpfile、§5→§6 使用建议）与 `trace-flow.md` 一处外部引用（cheatsheet §6→§7）。
+- **验证**：比对源码 80 个开关名与文档覆盖（发现这两个遗漏）；self-test 15 项 + check_skill_consistency 0 问题 + dry-run 四模块混合透传正常。
+
 ## 2.3.70 - 2026-08-27
 
 ### 补充（RuyiTrace 应用源码核对：开关实际使用机制入库）
