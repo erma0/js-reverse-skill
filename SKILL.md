@@ -233,7 +233,28 @@ DELIVER / SIGN_ONLY_DELIVER → CLEANUP → DONE
 
 ### 4.1 路径、意图与环境
 
-`<project-root>` 指项目根目录，其下平级包含 `case/` 与 `result/`。所有脚本的 `--case-dir` 统一传 `<project-root>`；`scripts/lib/paths.js` 已兼容 `<project-root>` 与 `<project-root>/case`。环境检测类脚本用 `--project-dir <project-root>` 指定 tools/ 所在工程根。多 case 项目共享 tools（`<project-root>/tools/` 与各 `<case-name>/` 平级）时，`--project-dir`/`--case-dir` 传 case 目录或共享工程根均可：脚本会自动向上查找含 `tools/` 的祖先目录，避免把已装在共享工程根的 RuyiTrace/ruyipage runtime 误判缺失或重复下载。
+`<project-root>` 指项目根目录，其下**平级**包含 `case/`（取证与分析中间产物）与 `result/`（交付物）。`notes/` 是 `case/` 的子目录，**不与 `result/` 平级**：
+
+```text
+<project-root>/                # 所有脚本的 --case-dir 传这一层
+├─ case/                       # 中间产物，可清理
+│  ├─ state.json               # 状态机（state_machine.js --init 写入）
+│  ├─ notes/                   # env-snapshot.json / entry-chain.md / missing-env-priority.md 等门禁依赖
+│  ├─ 阶段报告/  tmp/  fixtures/  requests/  hooks/  env/  forensic/
+│  ├─ js/{original,pretty,extracted}/   ruyi-trace/logs/   browser/ruyipage/
+└─ result/                     # 交付物：final.js|final.py、config.json、最终项目总结.md、经验沉淀-<站点>.md、验证记录.json、src/
+```
+
+一个文件夹内放多个 case 时，**每个 `<case-name>/` 自身就是一个 `<project-root>`**（各自有 `case/` 与 `result/`），`tools/` 提到外层与各 case 平级共享：
+
+```text
+<workspace>/
+├─ tools/                      # RuyiTrace / ruyipage runtime，多 case 共享
+├─ <case-a>/{case/, result/}
+└─ <case-b>/{case/, result/}
+```
+
+所有脚本的 `--case-dir` 统一传 `<project-root>`；`scripts/lib/paths.js` 的 `resolveCaseDir()` / `resolveResultDir()` / `resolveNotesDir()` 是唯一路径真源，已兼容传 `<project-root>` 或 `<project-root>/case`，不要在脚本里自行拼 `caseDir/result` 或 `caseDir/../result`。环境检测类脚本用 `--project-dir <project-root>` 指定 tools/ 所在工程根；多 case 共享 tools 时 `--project-dir`/`--case-dir` 传 case 目录或共享工程根均可，脚本会自动向上查找含 `tools/` 的祖先目录，避免把已装在共享工程根的 RuyiTrace/ruyipage runtime 误判缺失或重复下载。
 
 从请求中提取目标 URL、接口 URL、目标参数、请求方法、范围和项目根目录。目标 URL + 目标参数可确定即直接推进；仅两者缺一且无法合理提取时才问一次最小信息。若实现需要额外动态参数，列出参数名、位置、用途假设和证据后纳入请求链范围。
 

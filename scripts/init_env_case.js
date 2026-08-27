@@ -63,7 +63,7 @@ function initCase(args) {
   if (isDangerousDir(caseDir)) throw new Error(`拒绝在危险目录中初始化：${caseDir}`);
   const actions = [];
   const caseSubDir = path.join(caseDir, 'case');
-  const dirs = ['js/original', 'js/pretty', 'js/extracted', 'requests', 'fixtures', 'notes', 'hooks', 'env', 'ruyi-trace/logs', 'browser/ruyipage', 'tmp'];
+  const dirs = ['js/original', 'js/pretty', 'js/extracted', 'requests', 'fixtures', 'notes', 'hooks', 'env', 'ruyi-trace/logs', 'browser/ruyipage', 'tmp', '阶段报告', 'forensic'];
   ensureDir(caseDir, actions);
   ensureDir(path.join(caseDir, 'result'), actions);
   for (const d of dirs) ensureDir(path.join(caseSubDir, d), actions);
