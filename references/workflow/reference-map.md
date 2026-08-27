@@ -121,6 +121,7 @@
 
 - `references/tooling/browser-acquisition.md`
 - `references/tooling/ruyi-tooling.md`
+- `references/tooling/ruyitrace-cheatsheet.md`
 
 ### workflow
 

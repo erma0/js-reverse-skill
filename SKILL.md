@@ -325,6 +325,10 @@ node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-roo
 # 目标接口 URL 的命中证据由 Step 1 承担：forensic_ruyipage.py --targets <URL> + check_evidence.js --require-network-signal <URL>。
 # --end-signal 只控制自动采集何时提前关闭，与 evidence-signal 不再混用；不传时仅用户关闭或 duration 到期结束。
 # --target-signal 仅为兼容旧调用，同时作为 evidence-signal 和 end-signal；新流程不要使用。
+# 定向采集：已锁定目标脚本/函数、jsvmp 题型或首轮日志过大时，追加 --trace-env KEY=VALUE 透传 MOZ_DOM_* 定向开关
+#（jscall 收窄、detail 真值、opcode/vm_step、WS 帧）从源头收窄，先判题型再选最小开关组合；
+# 场景组合表与收窄纪律见 references/workflow/trace-flow.md「定向 trace 策略」，完整开关手册见
+# references/tooling/ruyitrace-cheatsheet.md。默认全量采集仍是首轮与出口门禁基准。
 # 其余参数细则（--duration 默认 120 秒与收尾刷盘、--signal-policy advisory、--cookie/--cookie-domain 写入 trace profile
 # cookies.sqlite 且 --input 导入时忽略、endReason 语义）见 scripts/README.md 与
 # references/workflow/trace-flow.md，此处不重复。

@@ -23,6 +23,7 @@ function parseArgs(argv) {
     duration: 120,
     limit: 200000,
     ptype: '',
+    traceEnv: [],
     targetSignals: [],
     traceSignals: [],
     evidenceSignals: [],
@@ -51,6 +52,7 @@ function parseArgs(argv) {
     else if (a === '--duration') args.duration = Number(nextVal('120'));
     else if (a === '--limit') args.limit = Number(nextVal('200000'));
     else if (a === '--ptype') args.ptype = nextVal('');
+    else if (a === '--trace-env') args.traceEnv.push(nextVal(''));
     else if (a === '--target-signal') {
       const signal = nextVal('');
       args.targetSignals.push(signal);
@@ -83,7 +85,32 @@ function parseArgs(argv) {
   assertTraceSignals(args.evidenceSignals, 'evidence-signal');
   assertTraceSignals(args.endSignals, 'end-signal');
   if (args.evidenceSignals.length) args.targetSignals = args.evidenceSignals.slice();
+  args.traceEnvPairs = parseTraceEnv(args.traceEnv);
   return args;
+}
+
+// 定向 trace 开关透传：仅允许 MOZ_DOM_ 前缀（RuyiTrace 内核 trace 配置命名空间），
+// 不允许覆盖脚本自身管理的 5 个 key（对应专用参数 --limit / --ptype / 输出路径），
+// 避免采集计划与实际环境变量漂移。输出文件按锚点自动派生：设 MOZ_DOM_TRACE_FILE 后，
+// jscall/cookie/eval 等模块日志落在同目录子文件夹，无需单独传 *_TRACE_FILE。
+const SCRIPT_MANAGED_TRACE_ENV = new Set([
+  'MOZ_DOM_TRACE', 'MOZ_DOM_TRACE_FILE', 'MOZ_DOM_TRACE_LIMIT',
+  'MOZ_DOM_TRACE_PTYPE', 'MOZ_DISABLE_LAUNCHER_PROCESS',
+]);
+
+function parseTraceEnv(pairs) {
+  const out = {};
+  for (const item of (pairs || [])) {
+    if (typeof item !== 'string' || !item.trim()) continue;
+    const eq = item.indexOf('=');
+    if (eq <= 0) throw new Error(`--trace-env 需要 KEY=VALUE 形式，收到：${item}`);
+    const key = item.slice(0, eq).trim();
+    const value = item.slice(eq + 1).trim();
+    if (!/^MOZ_DOM_[A-Z0-9_]+$/.test(key)) throw new Error(`--trace-env 只接受 MOZ_DOM_ 前缀的环境变量：${key}（完整开关清单见 references/tooling/ruyitrace-cheatsheet.md）`);
+    if (SCRIPT_MANAGED_TRACE_ENV.has(key)) throw new Error(`--trace-env 不允许覆盖脚本管理的 ${key}：行数上限用 --limit、进程类型用 --ptype、输出路径由 --case-dir 决定`);
+    out[key] = value;
+  }
+  return out;
 }
 
 function usage() {
@@ -105,6 +132,16 @@ function usage() {
 --target-signal <信号>（兼容旧参数）：同时作为 evidence-signal 和 end-signal；新流程不要使用。
 --signal-policy strict|advisory：strict 未命中退出非 0；advisory 只记录覆盖不足，适合用户手动结束或信号尚未确定的采集。
 --ptype <list>：启用 trace 的进程类型（逗号分隔，透传 MOZ_DOM_TRACE_PTYPE），不传则全部进程类型；大页面可只留主/content 进程减少无关日志。
+--trace-env KEY=VALUE（可多次）：透传 RuyiTrace 定向 trace 开关（仅 MOZ_DOM_ 前缀；KEY=VALUE 里的值含空格时整体加引号）。
+  定向组合示例（先判题型再选最小开关，避免日志过大，完整清单见 references/tooling/ruyitrace-cheatsheet.md）：
+    # 已知目标脚本，只缩小 jscall 记录范围并排除噪声（日志量最大的降幅来源）：
+    --trace-env MOZ_DOM_JSCALL_TRACE=1 --trace-env "MOZ_DOM_JSCALL_SCRIPT_URL=challenge.js;static/crypto" --trace-env "MOZ_DOM_JSCALL_SCRIPT_URL_EXCLUDE=analytics;telemetry" --trace-env MOZ_DOM_JSCALL_SHALLOW=1
+    # 已知函数名，只记目标函数及子调用并抓参数/返回值真值：
+    --trace-env MOZ_DOM_JSCALL_TRACE=1 --trace-env MOZ_DOM_JSCALL_TARGET_ONLY=1 --trace-env "MOZ_DOM_JSCALL_DETAIL_FUNCS=encrypt,sign" --trace-env MOZ_DOM_JSCALL_SHALLOW=1
+    # 不知函数名：按脚本来源整体抓真值（长密文补 DEEP_LONG_STR 防截断）：
+    --trace-env MOZ_DOM_JSCALL_TRACE=1 --trace-env MOZ_DOM_JSCALL_SCRIPT_URL=target.js --trace-env MOZ_DOM_JSCALL_DETAIL_SCRIPT_URL=target.js --trace-env MOZ_DOM_JSCALL_SHALLOW=1 --trace-env MOZ_DOM_JSCALL_DEEP_LONG_STR=512
+    # 还原 jsvmp 指令流（autodetect；重混淆站点加 MIN_BYTECODE=128 MIN_SPAN=200）：
+    --trace-env MOZ_DOM_JSVMP_TRACE=1 --trace-env "MOZ_DOM_JSVMP_SCRIPT_URL=challenges.example.com" --trace-env MOZ_DOM_JSVMP_AUTODETECT=1
 --cookie "name=value"（可多次，或 "a=1; b=2" 分号分隔）：启动前向 trace profile 的 cookies.sqlite 预写 Cookie，用于需预置登录态/会话的页面取 Business 完整链路。
 --cookie-domain <domain>：--cookie 写入的目标域名（如 .bilibili.com），缺省取 --url 主机（含点前缀）。
 `;
@@ -185,12 +222,14 @@ function buildPlan(args, trace) {
       MOZ_DOM_TRACE_LIMIT: String(args.limit),
       MOZ_DISABLE_LAUNCHER_PROCESS: '1',
       ...(args.ptype ? { MOZ_DOM_TRACE_PTYPE: args.ptype } : {}),
+      ...(args.traceEnvPairs || {}),
     },
   };
 }
 
-// 递归扫描目录下 NDJSON（兼容新版分目录结构：domtrace/ 主日志 + cookie/descriptor/event/storage 分类；
-// 也兼容旧版顶层单文件）。优先返回 domtrace/ 下的主日志，其余按修改时间倒序。
+// 递归扫描目录下 NDJSON/JSONL（兼容新版分目录结构：domtrace/ 主日志 + jscall/cookie/descriptor/event/storage
+// 分类——jscall 等派生模块日志后缀为 .jsonl；也兼容旧版顶层单文件）。优先返回 domtrace/ 下的主日志，
+// 其余按修改时间倒序。
 // sinceMs 容差 10s：新版内核启动较慢（Firefox 155 重 fork），日志文件可能晚于采集起点才创建/写入。
 function walkNdjson(dir) {
   if (!isDir(dir)) return [];
@@ -201,7 +240,7 @@ function walkNdjson(dir) {
     for (const ent of entries) {
       const p = path.join(d, ent.name);
       if (ent.isDirectory()) walk(p);
-      else if (/\.ndjson$/i.test(ent.name)) out.push(p);
+      else if (/\.(?:ndjson|jsonl)$/i.test(ent.name)) out.push(p);
     }
   };
   walk(dir);
@@ -450,7 +489,21 @@ function runSelfTest() {
     if (!missed || missed.imported) throw new Error('未导入文件应标记为未导入');
     if (missed.processType !== 'content') throw new Error('候选诊断应带出 process_type');
     if (cands.some((c) => c.lines < 0)) throw new Error('候选诊断行数不应为负');
-    return { clean: true, tests: 11 };
+    // 定向 trace 开关透传：合法 MOZ_DOM_ key、非法前缀、脚本托管 key 三种路径
+    const envParsed = parseTraceEnv(['MOZ_DOM_JSCALL_TRACE=1', 'MOZ_DOM_JSCALL_SCRIPT_URL=a.js;b.js']);
+    if (envParsed.MOZ_DOM_JSCALL_TRACE !== '1' || envParsed.MOZ_DOM_JSCALL_SCRIPT_URL !== 'a.js;b.js') throw new Error('--trace-env 应解析 KEY=VALUE');
+    let threw = false;
+    try { parseTraceEnv(['MOZ_DOM_JSVMP_TRACE=1', 'MOZ_OTHER=1']); } catch { threw = true; }
+    if (!threw) throw new Error('非 MOZ_DOM_ 前缀应被拒绝');
+    threw = false;
+    try { parseTraceEnv(['MOZ_DOM_TRACE=0']); } catch { threw = true; }
+    if (!threw) throw new Error('覆盖脚本管理的 key 应被拒绝');
+    // walkNdjson 应同时发现 .ndjson 与 .jsonl（jscall 派生日志）
+    const jscallDir = path.join(root, 'jscall');
+    fs.mkdirSync(jscallDir, { recursive: true });
+    fs.writeFileSync(path.join(jscallDir, 'trace_jscall_process_1.jsonl'), '{"kind":"jscall"}\n', 'utf8');
+    if (walkNdjson(root).length !== 5) throw new Error('walkNdjson 应匹配 .ndjson 与 .jsonl');
+    return { clean: true, tests: 15 };
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -867,6 +920,11 @@ function renderMarkdown(obj) {
   }
   lines.push(`- 启动参数：${[plan.firefoxExe].concat(plan.firefoxArgs).join(' ')}`);
   lines.push(`- 环境变量：MOZ_DOM_TRACE=1，MOZ_DOM_TRACE_FILE=<case trace file>，MOZ_DOM_TRACE_LIMIT=${args.limit}${args.ptype ? `，MOZ_DOM_TRACE_PTYPE=${args.ptype}` : ''}，MOZ_DISABLE_LAUNCHER_PROCESS=1`);
+  const extraEnv = Object.entries(args.traceEnvPairs || {});
+  if (extraEnv.length) {
+    lines.push(`- 定向 trace 开关（--trace-env）：${extraEnv.map(([k, v]) => `${k}=${v}`).join('，')}`);
+    lines.push('  - jscall/eval/cookie 等派生模块日志按锚点派生到输出目录子文件夹（如 jscall/trace_jscall_process_<pid>.jsonl），导入时按分类日志生成摘要，检索用 search_trace.js。');
+  }
   if (args.dryRun) {
     lines.push('', '## Dry-run 结果');
     lines.push('- 未启动浏览器，未创建日志文件。');

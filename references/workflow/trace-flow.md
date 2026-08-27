@@ -92,6 +92,36 @@ python scripts/forensic_ruyipage.py --url <目标页> --case-dir <project-root> 
 
 取证来源需要 RuyiTrace 时，默认自动 trace（脚本自动启动 trace Firefox 捕获，不询问用户选择采集方式）；用户已提供 NDJSON 时直接导入，不重复采集。自动 trace 失败、需要登录/验证/权限交互时转手动 trace。
 
+### 定向 trace 策略（先判题型，再选最小开关组合）
+
+RuyiTrace 除默认全量 DOM/BOM trace 外，还有一套 `MOZ_DOM_*` 定向开关：jscall 记录范围过滤（`SCRIPT_URL` / `SCRIPT_URL_EXCLUDE`）、参数/返回值真值抓取（`DETAIL_FUNCS` / `DETAIL_SCRIPT_URL` / `DETAIL_SHA256`）、opcode / vm_step 指令层（jsvmp 还原）、WASM、WebSocket 帧、运行时启停闸门（`TRACE_GATE`）。完整开关手册见 `references/tooling/ruyitrace-cheatsheet.md`；自动采集用 `--trace-env KEY=VALUE` 透传（可多次，仅 `MOZ_DOM_` 前缀；`MOZ_DOM_TRACE` / `MOZ_DOM_TRACE_FILE` / `MOZ_DOM_TRACE_LIMIT` / `MOZ_DOM_TRACE_PTYPE` / `MOZ_DISABLE_LAUNCHER_PROCESS` 由脚本管理，对应 `--case-dir` / `--limit` / `--ptype`，传了会报错）。
+
+**默认全量与定向采集的分工**：
+
+- 默认采集（只开 `MOZ_DOM_TRACE=1` + `--limit` + `--ptype`）：首轮通用环境画像——目标在哪个脚本未知、需要全站 API 访问统计与环境模块分类时用。Step 2 出口门禁与质量判定以默认采集的 domtrace 主日志为准。
+- 定向采集（`--trace-env` 组合）：已锁定目标脚本/函数后的重采、TRACE_RETRY 补采、或首轮日志过大时用。jscall 定向日志落到输出目录 `jscall/trace_jscall_process_<pid>.jsonl`（锚点自动派生，无需传 `*_TRACE_FILE`），随 `--import-after` 按分类日志导入摘要，检索用 `search_trace.js --trace <jscall日志路径>`。
+
+**何时必须定向（判定信号）**：
+
+- 单个 domtrace 文件超百 MB，或摘要里第三方脚本（统计/反指纹 SDK）噪声占大头 → 用 `SCRIPT_URL(_EXCLUDE)` 收窄重采，不要只靠导入后过滤和分批投喂硬扛。
+- 首轮已定位目标 JS 文件（stack.file 命中）→ 重采时锁单脚本 + detail 真值，拿参数/返回值。
+- jsvmp / 自建字节码 VM 题型（IDENTIFY 判定）→ opcode / vm_step 开关，必锁单脚本。
+
+| 场景 | 推荐组合（追加到 capture_ruyitrace_log.js） |
+|---|---|
+| 缩小记录范围 + 排噪声 | `--trace-env MOZ_DOM_JSCALL_TRACE=1 --trace-env "MOZ_DOM_JSCALL_SCRIPT_URL=<目标脚本/路径子串>" --trace-env "MOZ_DOM_JSCALL_SCRIPT_URL_EXCLUDE=analytics;telemetry;sentry" --trace-env MOZ_DOM_JSCALL_SHALLOW=1` |
+| 已知函数名，抓参数/返回值真值 | `--trace-env MOZ_DOM_JSCALL_TRACE=1 --trace-env MOZ_DOM_JSCALL_TARGET_ONLY=1 --trace-env "MOZ_DOM_JSCALL_DETAIL_FUNCS=encrypt,sign" --trace-env MOZ_DOM_JSCALL_SHALLOW=1` |
+| 不知函数名（锁脚本整体抓真值） | `--trace-env MOZ_DOM_JSCALL_TRACE=1 --trace-env "MOZ_DOM_JSCALL_SCRIPT_URL=target.js" --trace-env "MOZ_DOM_JSCALL_DETAIL_SCRIPT_URL=target.js" --trace-env MOZ_DOM_JSCALL_SHALLOW=1 --trace-env MOZ_DOM_JSCALL_DEEP_LONG_STR=512` |
+| 还原 jsvmp 指令流 | `--trace-env MOZ_DOM_JSVMP_TRACE=1 --trace-env "MOZ_DOM_JSVMP_SCRIPT_URL=<目标域名>" --trace-env MOZ_DOM_JSVMP_AUTODETECT=1`（重混淆站点再加 `MIN_BYTECODE=128`、`MIN_SPAN=200`） |
+| 抓 WebSocket 帧明文 | `--trace-env MOZ_DOM_WS_TRACE=1` |
+
+**收窄纪律（违反任何一条都可能产出 GB 级日志）**：
+
+1. **先收窄再开量大的开关**：`OPCODE_*` / `JSVMP_*` 必配 `OPCODE_URL`/`SCRIPT_URL` 锁单脚本；普通 jscall 噪声先 `SCRIPT_URL`/`SCRIPT_URL_EXCLUDE`。
+2. **opcode 栈值深抓必配 PC 窗口 + LIMIT**：`OPCODE_STACK_FULL` 是爆量主因，配 `OPCODE_PC_START`/`OPCODE_PC_END` 与 `OPCODE_LIMIT`。
+3. **反爬/时延敏感站勿深序列化、勿禁 JIT**：用 `SHALLOW` 浅序列化，深序列化会拖慢 VM 触发时序检测/重试。
+4. **运行时启停闸门（`MOZ_DOM_TRACE_GATE`）不替代收窄**：关闸前 1~2 秒足以让 `STACK_FULL` 写出 GB，`OPCODE_LIMIT` 仍是硬保险。闸门适合「启动后只录手动点验证码那一段」的窗口采集（配置/操作流见 cheatsheet §6；仅手动启动方式可用，自动脚本不默认使用）。
+
 ### 方式一：自动 trace
 
 检测到 `RuyiTrace.exe`、定制内核 `firefox(.exe)` 和 `RUYI_DOMTRACE.txt` 完整后（新版 2.5+ 位于 `resources/kernel/`，旧版 1.x 位于 `firefox/`），可使用随包脚本自动启动 RuyiTrace 的 trace Firefox，并通过 `MOZ_DOM_TRACE` 环境变量写出 NDJSON：
@@ -102,6 +132,7 @@ node scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <projec
 # 需预置登录态/会话时追加 --cookie "sessionid=abc; token=xyz"（可多次或分号分隔）与 --cookie-domain ".example.com"：
 #   启动前向 trace profile 的 cookies.sqlite 预写（firefox 未启动时注入），页面与 trace 均携带该会话。
 #   仅自动 trace 生效；--input 手动导入已有日志时忽略 --cookie。
+# 定向采集：已锁定目标脚本/函数或首轮日志过大时，追加 --trace-env MOZ_DOM_* 开关收窄（场景组合表见上方「定向 trace 策略」）。
 ```
 
 执行要求：
@@ -213,6 +244,7 @@ set MOZ_DISABLE_LAUNCHER_PROCESS=1
 | `MOZ_DOM_TRACE_LIMIT=<n>` | 单进程行数上限 |
 | `MOZ_DOM_TRACE_PTYPE=<list>` | 启用 trace 的进程类型 |
 | `MOZ_DISABLE_LAUNCHER_PROCESS=1` | Windows 下避免 launcher 提前退出 |
+| 其他 `MOZ_DOM_*` | 定向 trace 开关（jscall / opcode / vm_step / WASM / WS / TRACE_GATE），完整清单见 `references/tooling/ruyitrace-cheatsheet.md`；手动方式可直接 `set`，自动方式用 `--trace-env` 透传 |
 
 ## RuyiTrace 长字段截断保护
 
@@ -289,12 +321,13 @@ node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-
 5. 如果 RuyiTrace 没有相关证据，明确标记"RuyiTrace 未覆盖"，再使用 Proxy trace / Hook / 断点继续排查。
 6. 交付前运行 `node scripts/check_fingerprint_fixture.js --case-dir <project-root> --require canvas,webgl,audio,dom --markdown`；并手动复核 NativeProtect 保护证据（涉及 `document.all` 时确认 HTMLDDA 近似处理）。
 
-日志可能很大。大文件处理原则：
+日志可能很大。大文件处理原则（源头收窄优先，事后过滤兜底）：
 
+- **源头收窄优先**：判定信号出现（单文件超百 MB / 第三方噪声占大头 / 已锁定目标脚本）时按「定向 trace 策略」用 `--trace-env` 收窄重采，而不是继续全量采集再事后过滤。
 - 不把完整日志直接写入最终报告。
 - 先导入并生成摘要（`import_ruyitrace_log.js` 已流式读取，不会 OOM）。
 - 单次会话可能产生数百 MB，**按 5-10 万行一段分批投喂分析**，防止一次性贴入撑爆上下文；优先分析和目标 API / 参数生成时间段相关的片段（先 `search_trace.js --url/--keyword` 定位到相关行段，只读那段）。
-- 采集时可用 `--limit` 限制单进程行数、`--ptype` 只保留关心的进程类型，从源头缩小日志。
+- `--limit` 限制单进程行数、`--ptype` 只保留关心的进程类型是兜底手段；两者的粒度都不如 `--trace-env` 定向开关精细。
 - 原始日志保存在 case 内，默认作为可复核证据保留到 CLEANUP，按 SKILL.md 第 11 节清理规则处理，不询问。
 
 ## RuyiTrace 优先诊断原则

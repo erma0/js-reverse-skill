@@ -345,6 +345,12 @@ new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, clientX: 3, clien
 - 默认自动 trace：用 capture_ruyitrace_log.js 自动启动随 RuyiTrace 提供的 trace Firefox 捕获 NDJSON（需要 RuyiTrace 完整安装）。
 - 转手动 trace：需要登录 / 验证码 / 复杂交互或用户已提供日志时，用户用 RuyiTrace.exe 自行采集，把 NDJSON 日志路径交给 AI 直接导入生成摘要。
 
+### 定向 trace 策略（避免日志过大）
+
+默认采集（`MOZ_DOM_TRACE=1` + `--limit` + `--ptype`）用于首轮通用环境画像；已锁定目标脚本/函数、TRACE_RETRY 重采或首轮日志过大（单文件超百 MB / 第三方 SDK 噪声占大头）时，用 `--trace-env KEY=VALUE`（可多次，仅 `MOZ_DOM_` 前缀）透传 RuyiTrace 定向开关——jscall 记录范围收窄（`SCRIPT_URL`/`SCRIPT_URL_EXCLUDE`）、参数/返回值真值（`DETAIL_FUNCS`/`DETAIL_SCRIPT_URL`）、opcode / vm_step 指令层（jsvmp）、WebSocket 帧。**先判题型再选最小开关组合，从源头收窄，不要全量采集后只靠事后过滤。**
+
+场景组合表、收窄纪律（opcode 必锁单脚本+PC 窗口+LIMIT；反爬站用 `SHALLOW` 勿深序列化勿禁 JIT；`TRACE_GATE` 闸门不替代收窄）见 `references/workflow/trace-flow.md`「定向 trace 策略」；完整开关手册（含 WASM、HTTP 报文、API 定制、SOCKS5 代理）见 `references/tooling/ruyitrace-cheatsheet.md`。
+
 ### 方式一：自动 trace
 
 检测到 `RuyiTrace.exe`、定制内核 `firefox(.exe)` 和 `RUYI_DOMTRACE.txt` 完整后（新版 2.5+ 位于 `resources/kernel/`，旧版 1.x 位于 `firefox/`），不要默认让用户手动打开 GUI。优先使用随包脚本自动启动 RuyiTrace 的 trace Firefox，并通过 `MOZ_DOM_TRACE` 环境变量写出 NDJSON：
@@ -414,6 +420,7 @@ set MOZ_DISABLE_LAUNCHER_PROCESS=1
 | `MOZ_DOM_TRACE_LIMIT=<n>` | 单进程行数上限 |
 | `MOZ_DOM_TRACE_PTYPE=<list>` | 启用 trace 的进程类型 |
 | `MOZ_DISABLE_LAUNCHER_PROCESS=1` | Windows 下避免 launcher 提前退出 |
+| 其他 `MOZ_DOM_*` | 定向 trace 开关（jscall / opcode / vm_step / WASM / WS / TRACE_GATE），完整清单见 `references/tooling/ruyitrace-cheatsheet.md`；手动方式可直接 `set`，自动方式用 `--trace-env` 透传 |
 
 ## RuyiTrace NDJSON 事件结构
 
@@ -501,6 +508,7 @@ node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-
 
 日志可能很大。大文件处理原则：
 
+- **源头收窄优先**：单文件超百 MB / 第三方噪声占大头 / 已锁定目标脚本时，按「定向 trace 策略」用 `--trace-env` 收窄重采，不要只靠事后过滤。
 - 不把完整日志直接写入最终报告。
 - 先导入并生成摘要。
 - 必要时按行分块，优先分析和目标 API / 参数生成时间段相关的片段。

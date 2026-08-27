@@ -375,10 +375,13 @@ async function main() {
     // 多进程/多目录日志经常同名；加入来源路径摘要，避免复制时静默覆盖前一个文件。
     if (inputs.length > 1) {
       const digest = crypto.createHash('sha1').update(path.resolve(input)).digest('hex').slice(0, 10);
-      const stem = dstName.replace(/\.ndjson$/i, '');
-      dstName = `${stem}.${digest}.ndjson`;
+      const m = /\.(ndjson|jsonl)$/i.exec(dstName);
+      const suffix = m ? m[1].toLowerCase() : 'ndjson';
+      const stem = dstName.replace(/\.(?:ndjson|jsonl)$/i, '');
+      dstName = `${stem}.${digest}.${suffix}`;
     }
-    const dst = path.join(logDir, dstName.endsWith('.ndjson') ? dstName : `${dstName}.ndjson`);
+    // jscall 等派生模块日志后缀为 .jsonl，复制时保留原后缀，不强制改成 .ndjson
+    const dst = path.join(logDir, /\.(?:ndjson|jsonl)$/i.test(dstName) ? dstName : `${dstName}.ndjson`);
     fs.copyFileSync(input, dst);
     return dst;
   });

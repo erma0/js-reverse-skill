@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 2.3.69 - 2026-08-27
+
+### 功能（RuyiTrace 定向 trace：先判题型选最小开关，从源头避免日志过大）
+
+RuyiTrace 内核除默认全量 DOM/BOM trace 外有一整套 `MOZ_DOM_*` 定向开关（jscall 记录范围过滤、参数/返回值真值抓取、opcode/vm_step 指令层、WASM、WS 帧、运行时启停闸门），本 skill 此前只透传 5 个基础变量，日志过大只能靠 `--limit`/`--ptype` 兜底与事后过滤。本次把定向能力接入采集链路：
+
+- **`capture_ruyitrace_log.js` 新增 `--trace-env KEY=VALUE`（可多次）**：透传任意 `MOZ_DOM_*` 定向开关（仅前缀校验；脚本自管的 `MOZ_DOM_TRACE`/`MOZ_DOM_TRACE_FILE`/`MOZ_DOM_TRACE_LIMIT`/`MOZ_DOM_TRACE_PTYPE`/`MOZ_DISABLE_LAUNCHER_PROCESS` 传了报错并指向对应专用参数，防采集计划与实际环境漂移）。jscall 等派生模块日志按锚点自动落输出目录子文件夹（`jscall/trace_jscall_process_<pid>.jsonl`）。self-test 11 → 15 项断言。
+- **`walkNdjson` 兼容 `.jsonl` 后缀**：jscall/exception 等派生模块日志后缀是 `.jsonl` 而非 `.ndjson`，旧扫描会静默漏文件；`import_ruyitrace_log.js` 复制时保留 `.jsonl` 原后缀（此前强制改写为 `.ndjson`）。自测中发现并修正正则错误：`/\.(nd)?jsonl$/` 不匹配 `.ndjson`（正确为 `/\.(?:ndjson|jsonl)$/`），否则全量日志扫描直接失效。
+- **新增 `references/tooling/ruyitrace-cheatsheet.md`**：RuyiTrace 2.5+ 全量开关速查手册入库（jscall/opcode/vm_step/WASM/WS/GATE/API 定制/SOCKS5），标注来源与快照日期，工具升级后以随包文档为准。
+- **`trace-flow.md` 新增「定向 trace 策略」章节**：默认全量（首轮通用环境画像、出口门禁基准）与定向采集（已锁定目标脚本/TRACE_RETRY 重采/日志过大）的分工；判定信号（单文件超百 MB、第三方 SDK 噪声占大头、jsvmp 题型）；五类场景组合表；四条收窄纪律（OPCODE/JSVMP 必锁单脚本、`STACK_FULL` 必配 PC 窗口+LIMIT、反爬站 `SHALLOW` 勿禁 JIT、`TRACE_GATE` 闸门不替代收窄）。大文件处理原则改为「源头收窄优先，事后过滤兜底」。
+- **同步**：`ruyi-tooling.md` 采集流程加定向策略要点与环境变量表扩展；`SKILL.md` TRACE_CAPTURE 采集命令注释加定向采集提示；`scripts/README.md` 索引更新；`reference-map.md` 登记 cheatsheet。
+
 ## 2.3.68 - 2026-08-26
 
 ### 经验固化（match13 复盘：服务端下发脚本型 cookie 打法 + 终态过滤精确性）
