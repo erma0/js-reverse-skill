@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 2.3.70 - 2026-08-27
+
+### 补充（RuyiTrace 应用源码核对：开关实际使用机制入库）
+
+读取 RuyiTrace 应用静态源码（`src/shared/switches.js`、`src/main/main.js`、`launch/index.vue`、`fingerprint-file.js` 等）核对开关的实际使用方式，把源码级确认补进 `references/tooling/ruyitrace-cheatsheet.md`：
+
+- **新增 §0「应用层使用机制」**：确认全部 `MOZ_DOM_*` 开关均为环境变量（主进程 `spawn(env)` 注入，命令行参数只有 `-profile`/`-no-remote`/`-headless`/`-private-window`/`--fpfile=`/URL）；PowerShell 与 Python/ruyiPage 两种等价用法；GUI 会额外注入 3 个 exception 默认开关（`TRACE=1`/`LIMIT=0`/`FLUSH=1`，与内核默认不同——skill 脚本采集不带，需 `--trace-env` 显式开）；日志目录未设 TRACE_FILE 时 GUI 自动注入 `<dir>\trace.jsonl` 锚点并 mkdir。
+- **§5 补 GUI 现成组合**：「常规采集」快捷组合（jscall 无限+SHALLOW+HTTP+exception 落盘，同步进 `trace-flow.md` 场景表首行）与七个题型预设的完整参数（A 预设 `SHALLOW_DEPTH=2`/`MAX_VALUE_BYTES=131072`、C 预设 `STACK_FULL` 配套、E 预设 `OPCODE_LIMIT=4000000` 硬保险等）。
+- **§8 重写为「`--fpfile` 指纹定制 + SOCKS5 认证」**：源码确认 fpfile 不只代理凭据——`fingerprint.fp` 逐行 `key<sep>value` 可覆盖约 100 项指纹字段（WebRTC IP 用 `=` 分隔，时区/语言/字体/UA/Canvas seed/WebGL·WebGPU 全套/触控用 `:`），`socksauth.*` 四行合并进同一文件（旧独立 proxy.fp 已被 GUI 合并）；等号形式约束保留。
+- **§9 补参数语义细节**：sequence 最多 32 值耗尽重复末值、pattern 最多 64 字节循环、seed 支持 0x 十六进制、performance.now 覆盖后不倒退。
+
 ## 2.3.69 - 2026-08-27
 
 ### 功能（RuyiTrace 定向 trace：先判题型选最小开关，从源头避免日志过大）

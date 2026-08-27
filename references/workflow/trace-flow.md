@@ -109,6 +109,7 @@ RuyiTrace 除默认全量 DOM/BOM trace 外，还有一套 `MOZ_DOM_*` 定向开
 
 | 场景 | 推荐组合（追加到 capture_ruyitrace_log.js） |
 |---|---|
+| 对齐 GUI「常规采集」 | `--trace-env MOZ_DOM_JSCALL_TRACE=1 --trace-env MOZ_DOM_JSCALL_LIMIT=0 --trace-env MOZ_DOM_JSCALL_FLUSH_INTERVAL=8 --trace-env MOZ_DOM_JSCALL_SHALLOW=1 --trace-env MOZ_DOM_HTTP_PACKET_TRACE=1 --trace-env MOZ_DOM_EXCEPTION_TRACE=1 --trace-env MOZ_DOM_EXCEPTION_LIMIT=0 --trace-env MOZ_DOM_EXCEPTION_FLUSH_INTERVAL=1` |
 | 缩小记录范围 + 排噪声 | `--trace-env MOZ_DOM_JSCALL_TRACE=1 --trace-env "MOZ_DOM_JSCALL_SCRIPT_URL=<目标脚本/路径子串>" --trace-env "MOZ_DOM_JSCALL_SCRIPT_URL_EXCLUDE=analytics;telemetry;sentry" --trace-env MOZ_DOM_JSCALL_SHALLOW=1` |
 | 已知函数名，抓参数/返回值真值 | `--trace-env MOZ_DOM_JSCALL_TRACE=1 --trace-env MOZ_DOM_JSCALL_TARGET_ONLY=1 --trace-env "MOZ_DOM_JSCALL_DETAIL_FUNCS=encrypt,sign" --trace-env MOZ_DOM_JSCALL_SHALLOW=1` |
 | 不知函数名（锁脚本整体抓真值） | `--trace-env MOZ_DOM_JSCALL_TRACE=1 --trace-env "MOZ_DOM_JSCALL_SCRIPT_URL=target.js" --trace-env "MOZ_DOM_JSCALL_DETAIL_SCRIPT_URL=target.js" --trace-env MOZ_DOM_JSCALL_SHALLOW=1 --trace-env MOZ_DOM_JSCALL_DEEP_LONG_STR=512` |

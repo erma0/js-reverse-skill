@@ -1,10 +1,18 @@
 # RuyiTrace 定向 trace 开关速查表
 
-> 来源：RuyiTrace 2.5+ 随包 cheatsheet（`src/renderer/assets/cheatsheet.md`），2026-08 快照。工具升级后以随包最新文档为准，本表过期时优先更新本文件再继续用。
+> 来源：RuyiTrace 2.5+ 随包 cheatsheet（`src/renderer/assets/cheatsheet.md`），2026-08 快照，并经应用源码（`src/shared/switches.js`、`src/main/main.js` 等）核对补充。工具升级后以随包最新文档为准，本表过期时优先更新本文件再继续用。
 >
 > 用途：TRACE_CAPTURE 采集前做**定向选型**——先判题型，再选最小开关组合，从源头避免日志过大（见 `references/workflow/trace-flow.md`「定向 trace 策略」）。自动采集用 `capture_ruyitrace_log.js --trace-env KEY=VALUE` 透传下表任意 `MOZ_DOM_*` 开关（脚本自管的 5 个除外：`MOZ_DOM_TRACE` / `MOZ_DOM_TRACE_FILE` / `MOZ_DOM_TRACE_LIMIT` / `MOZ_DOM_TRACE_PTYPE` / `MOZ_DISABLE_LAUNCHER_PROCESS`，分别对应 `--url`、`--case-dir`、`--limit`、`--ptype` 与固定值）。
 >
 > 所有开关在启动 `firefox.exe` 前设置，进程启动时读取一次，**运行中改无效**。唯一例外：`MOZ_DOM_TRACE_GATE` 受控模式下可在运行中靠控制文件随时开/关落盘（见 §6），但「录什么」的配置仍启动定死。
+
+## 0. 应用层使用机制（源码确认）
+
+- **全部开关都是环境变量，不是命令行参数**。RuyiTrace GUI 的开关总表每项即一个 `MOZ_DOM_*` env；启动时主进程 `spawn(firefox.exe, args, { env: { ...process.env, ...switches } })` 注入。命令行参数只有：`-profile <dir>`、`-no-remote`、`-headless`、`-private-window`、`--fpfile=<path>`（**必须等号形式**，见 §8）与目标 URL。
+- 终端等价命令（GUI「复制启动命令」生成 PowerShell 形式）：`$env:MOZ_DOM_JSCALL_TRACE="1"` … 逐行 set 后 `& "firefox.exe" -profile <dir> -no-remote <url>`；Python/ruyiPage 集成同理——`os.environ["MOZ_DOM_*"]=...` 设好后再 `FirefoxPage(opt)`（Popen 继承环境变量）。
+- **GUI 会额外注入 3 个默认开关**（用户未显式关闭时）：`MOZ_DOM_EXCEPTION_TRACE=1`、`MOZ_DOM_EXCEPTION_LIMIT=0`、`MOZ_DOM_EXCEPTION_FLUSH_INTERVAL=1`——即 GUI 启动默认开启 exception trace（无限、每条刷盘）。下表「默认」列是**内核默认**（不设时的行为）；本 skill 的 `capture_ruyitrace_log.js` 自己 spawn 不带这 3 个，需要 exception 证据时用 `--trace-env` 显式开。
+- **锚点自动注入**：GUI「日志目录」未手动设 `MOZ_DOM_TRACE_FILE` 时自动注入 `<日志目录>\trace.jsonl`；主进程会自动 mkdir 锚点目录（内核不建目录，脚本方式自建目录同样必要）。
+- GUI 内置「常规采集」快捷组合与各题型预设见 §5。
 
 ## 1. 总开关与输出
 
@@ -24,6 +32,8 @@
 > **cookie trace 无痕（无开关）**：cookie 读/写/拒绝/发送在 C++ 网络层 + Document 层插桩，一律传 `cx=nullptr`，不进 JS realm、不抓栈、不调 `JS_ClearPendingException`，`stack` 字段恒 `[]`，页面 JS（含 performance.now 时序检测）无从感知。两种来源都覆盖：HTTP `Set-Cookie`（`source:"http"`）与 `document.cookie=`（`source:"document.cookie"`）。无需任何开关；旧 `MOZ_DOM_COOKIE_TRACE_STACK` 已废弃删除。
 
 ### 1.1 JS 异常 trace（exception）
+
+> GUI 启动默认注入 `TRACE=1` / `LIMIT=0` / `FLUSH_INTERVAL=1`（见 §0）；下表「默认」为内核默认。脚本方式需要异常证据时显式开：`--trace-env MOZ_DOM_EXCEPTION_TRACE=1 --trace-env MOZ_DOM_EXCEPTION_LIMIT=0 --trace-env MOZ_DOM_EXCEPTION_FLUSH_INTERVAL=1`。
 
 | 开关 | 可选值 | 默认 | 功能 |
 |---|---|---|---|
@@ -150,6 +160,11 @@
 
 **先判题型，再选最小开关组合——不要一上来全开。**
 
+GUI 内置两个层次的现成组合（源码确认）：
+
+- **「常规采集」快捷开关**（GUI 一键，日常推荐）：`MOZ_DOM_TRACE=1` + `JSCALL_TRACE=1` + `JSCALL_LIMIT=0` + `JSCALL_FLUSH_INTERVAL=8` + `JSCALL_SHALLOW=1` + `HTTP_PACKET_TRACE=1` + `EXCEPTION_TRACE=1` + `EXCEPTION_LIMIT=0` + `EXCEPTION_FLUSH_INTERVAL=1`。
+- **题型预设**：A 加密函数（另加 `SHALLOW_DEPTH=2`、`MAX_VALUE_BYTES=131072`）、B 脚本整体抓值、C opcode 看穿 VM（`STACK=1`+`STACK_FULL=1`+`STACK_SLOTS=4`，必补 `OPCODE_URL` 与 PC 窗口）、D 反爬 VM(Turnstile)（`TARGET_ONLY=1`+`DETAIL_SCRIPT_URL=challenges.cloudflare.com`+`SHALLOW=1`）、E 重型 JSVM 定位（`OPCODE_LIMIT=4000000` 做硬保险）、F WebSocket 帧、jsvmp autodetect（含 `MIN_BYTECODE=128`+`MIN_SPAN=200`）。
+
 | 场景 | 推荐开关组合 |
 |---|---|
 | **逆向某加密函数**（知道函数名） | `JSCALL_TRACE`+`TARGET_ONLY`+`DETAIL_FUNCS=xxx`+`SHALLOW`+`LIMIT=0` |
@@ -223,11 +238,14 @@ with:
 
 This is a SpiderMonkey page-script warning. Treat `[DOMTrace] ERROR:` as trace failure; do not fail automation only because stderr contains `JavaScript warning`.（外部仓库提供 `domtrace_stderr_classifier.py` 做分诊，本 skill 未随包含该脚本，按上述规则手动分诊即可。）
 
-## 8. SOCKS5 密码代理速查
+## 8. `--fpfile` 启动参数：指纹定制 + SOCKS5 认证（必须等号形式）
 
-支持 SOCKS5 username/password 认证；凭据通过 `--fpfile=<path>` 传入，不新增环境变量。国内站点默认直连（SKILL.md 绝对规则同向：代理是边缘场景）。
+`--fpfile=<path>` 指向 profile 目录下的 `fingerprint.fp`，**必须等号形式**（`--fpfile C:\path` 空格分隔会让 SOCKS5 只发 `methods=00` 不带凭据；等号形式发 `methods=02` 完成 RFC1929 认证）。文件为逐行 `key<sep>value`：
 
-`user.js`：
+- **指纹定制字段**（约 100 项，GUI「指纹」页同源，源码 `browser-fingerprint-schema.json`）：WebRTC IP（`local_webrtc_ipv4=` 等，分隔符 `=`）；时区/语言（`timezone:Asia/Shanghai`）、字体、`useragent`、`hardwareConcurrency`、屏幕宽高、Canvas seed（`canvas:<seed>`）、WebGL 全套（vendor/renderer/max_* /shader_precision/扩展列表）、WebGPU 全套（vendor/architecture/limits.*）、触控（`touch.*`、`maxTouchPoints`）——分隔符 `:`。
+- **SOCKS5 认证**：`socksauth.host=` / `socksauth.port=` / `socksauth.username=` / `socksauth.password=` 四行（旧版独立 `proxy.fp` 在 GUI 内已合并进同一 fpfile）。国内站点默认直连，代理是边缘场景。
+
+配套 `user.js`（proxy prefs，GUI 自动写入）：
 
 ```js
 user_pref("network.proxy.type", 1);
@@ -238,21 +256,11 @@ user_pref("network.proxy.socks_remote_dns", true);
 user_pref("network.proxy.no_proxies_on", "localhost,127.0.0.1");
 ```
 
-把 `<proxy_host>` 和 `1080` 换成实际代理主机与端口；端口是整数，不加引号。
-
-`proxy.fp`：
-
-```text
-<proxy_host>:<proxy_port>:<proxy_username>:<proxy_password>
-```
-
-启动必须用等号形式：
+启动（等号形式）：
 
 ```bat
-firefox.exe --new-instance -no-remote -profile C:\path\profile --fpfile=C:\path\proxy.fp "https://example.com/"
+firefox.exe --new-instance -no-remote -profile C:\path\profile --fpfile=C:\path\profile\fingerprint.fp "https://example.com/"
 ```
-
-不要写成 `--fpfile C:\path\proxy.fp`。实测空格分隔形式会让 SOCKS5 只发 `methods=00`，不会带用户名密码；等号形式会发 `methods=02` 并完成 RFC1929 认证。
 
 ## 9. 启动时 API 定制速查（`MOZ_DOM_API_*`）
 
@@ -280,3 +288,5 @@ firefox.exe
 ```
 
 Cloudflare/挑战页默认建议：不需要就别设 `MOZ_DOM_API_OVERRIDE`；时间类优先 `native` 或 `increment`，不要长期 `fixed`；随机类优先 `seeded`；只开启当前需要 trace 的 API。
+
+参数语义细节（源码确认）：`sequence` 最多读取 32 个值，耗尽后重复最后一个；`pattern` 支持连续十六进制或逗号分隔，最多读取 64 字节并循环填充；`seed` 支持十进制或 `0x` 十六进制；`performance.now` 覆盖后仍保持非负、不倒退；`crypto.getRandomValues` 保持返回原 TypedArray。
