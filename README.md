@@ -12,6 +12,7 @@
 | [xbsReverseSkill](https://github.com/lwjjike/xbsReverseSkill) | 补环境流程 + 工具链 + web-verify-patcher 验证码识别/求解模块（ddddocr/坐标/轨迹脚本 + 题型分类器） | MIT |
 | [ruyipage](https://github.com/LoseNine/ruyipage) | Firefox WebDriver BiDi 取证 | BSD-3-Clause（上游 README 附加"仅限合法合规非盈利个人研究、商用需授权"限制） |
 | [RuyiTrace](https://github.com/LoseNine/Firefox-FingerPrint-Analyzer) | NDJSON trace 内核 | 未声明（上游 README 声明其 Firefox 内核为 MPL-2.0） |
+| [js-reverse-mcp](https://github.com/zhizhuodemao/js-reverse-mcp) | 浏览器 MCP 兜底取证通道（可选依赖；BLOCKED_FORENSIC 引擎检测降级时连接非 Firefox 内核浏览器采成功样本/指纹基线，工具含断点、网络追踪、脚本源码分析） | Apache-2.0 |
 
 > ⚠️ 合规提示：hello_js_reverse_skill 与 RuyiTrace 两个上游项目未提供 LICENSE 文件，按默认版权法其作者保留所有权利；本仓库引用的上游流程/代码用于个人研究与技术交流，**商业分发或二次发布前需逐一与上游作者确认授权**。
 
@@ -48,7 +49,7 @@ js-reverse-skill/
 - **Agent Skills 机制**（Claude Code / ZCode / TRAE 等）：把整个仓库克隆到对应 skills 目录即可被自动发现，常见位置：用户级 `~/.agents/skills/js-reverse-skill/`、`~/.claude/skills/js-reverse-skill/`，或项目级 `<project>/.claude/skills/`、`<project>/.codex/skills/`。
 - **自定义指令 / 系统提示注入**（Cursor / Copilot 等）：把 `SKILL.md` 内容作为项目规范注入（如 `.cursorrules`、copilot-instructions.md 引用），并保证 `scripts/`、`references/`、`templates/`、`cases/` 随仓库可访问——脚本按 skill 根相对路径调用。
 
-运行要求：Node.js ≥ 18（门禁/检查脚本离线可用）；Python ≥ 3.9 仅取证（`forensic_ruyipage.py`）与验证码辅助脚本需要；ruyipage/RuyiTrace 由 `install_all.js` 按需安装到用户工程 `tools/`，首次安装后建议用 `check_tool_pins.js --record` 固化哈希锁定。
+运行要求：Node.js ≥ 18（门禁/检查脚本离线可用）；Python ≥ 3.9 仅取证（`forensic_ruyipage.py`）与验证码辅助脚本需要；ruyipage/RuyiTrace 由 `install_all.js` 按需安装到用户工程 `tools/`，首次安装后建议用 `check_tool_pins.js --record` 固化哈希锁定；浏览器 MCP 为可选兜底依赖（仅引擎检测降级场景使用，见「执行门禁」），不在 `install_all.js` 管理范围，由用户在宿主侧自行安装。
 
 ## 如何使用
 
@@ -97,6 +98,8 @@ node scripts/check_evidence.js --case-dir <project-root> --url <target-url> --in
 环境检测类脚本统一 `--project-dir` 定位 tools/ 所在工程根；多 case 项目共享 tools 时，`--project-dir`/`--case-dir` 传 case 目录或共享工程根均可（自动向上查找含 `tools/` 的祖先目录）。目标接口 URL/关键词已知时，`check_evidence.js` 加 `--require-target-signal <目标接口URL或关键词>` 同时约束 Step 1 与 Step 2。
 
 Step 1 只接受有效 `capture.json` 网络记录（纯元数据；终态与关联记录索引在 `target-hits.json`/`related-hits.json`，超过 JSON 预览阈值的完整 body/WASM 分别在 `case/forensic/bodies/`、`case/forensic/wasm/`），或通过内容校验的 HAR、cURL、原始 HTTP 请求文本；单独 JS、截图和指纹基线只作辅助材料，不计为 Step 1。Step 2 只接受内容可解析、记录非空且关联目标域的 RuyiTrace NDJSON/JSONL（新版按进程类型分目录，脚本自动递归扫描）；摘要不能替代日志。脚本输出 `none`、`step1-only`、`step2-only` 或 `both`，据此补采缺失步骤。
+
+取证浏览器被目标站引擎级检测拒绝（`--ua` 覆盖无效）时进入 BLOCKED_FORENSIC：经用户确认后可选用浏览器 MCP（如 [js-reverse-mcp](https://github.com/zhizhuodemao/js-reverse-mcp)）连接非 Firefox 内核浏览器兜底取证，成功样本/Cookie/指纹/JS 落盘 `case/` 并按用户材料过 `check_evidence.js` 校验。MCP 是可选依赖且仅限两个位置（动作守卫 `--guard mcp` 硬卡）：BLOCKED_FORENSIC 兜底取证、引擎检测 case 的 DIAGNOSE 双对照浏览器侧；无 MCP 时走用户提供 cURL/HAR 或降级路径，skill 完整可用。
 
 ## 案例查询
 

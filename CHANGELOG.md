@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2.3.74 - 2026-08-28
+
+### 文档（README 同步 MCP 兜底通道 + 来源表补 js-reverse-mcp）
+
+- README「来源」表新增 [js-reverse-mcp](https://github.com/zhizhuodemao/js-reverse-mcp)（Apache-2.0）：浏览器 MCP 兜底取证通道的可选依赖。
+- README「执行门禁」补 BLOCKED_FORENSIC MCP 兜底说明（可选、仅两个守卫位置、产物按用户材料校验、无 MCP 时降级路径完整可用）；「运行要求」注明 MCP 不在 install_all.js 管理范围。
+
 ## 2.3.73 - 2026-08-28
 
 ### 优化（MCP 兜底通道复盘二轮：DIAGNOSE 双对照浏览器侧 + 三个高效性缺口）
