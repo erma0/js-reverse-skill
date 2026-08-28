@@ -109,6 +109,8 @@ match10 实测：sandbox 预填"看起来完整"的运行时状态快照后，�
 4. **反调试代码不必删**：模块尾部的 `.init()`（`setInterval` + `console.info` 控制台检测）在 Node 里必然失败，但它发生在签名函数挂载**之后**，用 `try/catch` 包住即可，删除反而可能破坏模块结构。
 5. **语义不可"优化"**：`charAt` 索引超出字母表长度时返回空串（该位不产出字符）——这是算法语义，改成数组下标会拿到 `undefined`；同理 `Date.parse(new Date).toString()` 是秒级时间戳，换成 `Date.now()` 会改变精度。
 
+可直接复用的骨架：`templates/vm-sandbox/webpack-module-harness.js`（切片模块逐个执行 + 共享 `window` + require 桩 + catch 可见化）。
+
 ## 十一、服务端校验语义假设
 
 ### 25. 环境指纹对齐的验收线是"参数自洽"，不是"逐字节复刻真实浏览器"——先最小沙箱试探再按需对齐

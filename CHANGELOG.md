@@ -10,7 +10,8 @@ match16（webpack 打包 + obfuscator.io 混淆，URL 查询参数签名）完�
 - **common-pitfalls 新增反模式 26**：抠出的代码在沙箱里静默走错分支（分支漂移）。打包器注入的宿主对象（`__webpack_require__` 的 `n`、`n.g = globalThis`）在抠代码后不会自动存在，原代码若用 `try/catch`、`typeof`、`if (n.g)` 兜底，缺失即静默切到另一条确定性分支——无报错、无 undefined、格式全对。正确做法：抠前先扫分支条件 → 按打包器语义补宿主对象 → 沙箱禁止静默吞错（catch 命中即信号）→ 用**两组取证样本**反证分支；"格式正确但被拒"排查顺序：分支 → 输入量精度 → 状态生命周期（反模式 24）→ 会话/TLS。**顺带补齐速查表漏登记的 24、25 两行**。
 - **experience-rules 新增规则 26（webpack bundle 模块切片黑盒执行要点）**：模块定界（正则扫 `\d+:function(...){` 起点按偏移排序，追加 0~5 个 `}` 逐个 `node --check`）、隔离作用域（`new Function` 逐个执行 + 共享同一 `window`）、require 桩（`n.g = globalThis`，反模式 26 的防线）、反调试代码 try/catch 包住不必删、语义不可"优化"（`charAt` 越界空串 / 秒级时间戳）。
 - **SKILL.md §9 路径 B 补黑盒执行的宿主对象纪律**：抠模块执行必须复刻打包器注入对象，并指向规则 26 / 反模式 26。
-- 验证：`check_skill_consistency` 引用一致性 131 条目 0 问题 + `search_cases.js match16` 命中新条目 + 两脚本 self-test PASS。
+- **新增模板 `templates/vm-sandbox/webpack-module-harness.js`**：把规则 26 变成可直接复制的代码（切片模块逐个执行 + 共享 `window` + require 桩 + catch 可见化禁止静默吞错），与既有 `wasm-loader/emscripten-bundle-blackbox.js`（整包 WASM 黑盒）形成对称；归入既有 vm-sandbox 类别，不新增模板类目。
+- 验证：`check_skill_consistency` 引用一致性 131 条目 0 问题 + `search_cases.js match16` 命中新条目 + 两脚本 self-test PASS + `check_final_artifact` 在 match16 真实项目全项通过（TLS 判定 not-required，不再误判）。
 
 ## 2.3.78 - 2026-08-28
 
