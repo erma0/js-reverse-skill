@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2.3.73 - 2026-08-28
+
+### 优化（MCP 兜底通道复盘二轮：DIAGNOSE 双对照浏览器侧 + 三个高效性缺口）
+
+match14 复盘二轮（含 e35afee 改动复核），补 4 处：
+
+- **DIAGNOSE 双对照浏览器侧 MCP 通道（通用性缺口）**：引擎检测 case 走到 DIAGNOSE 时，双对照的浏览器侧（正向"浏览器新鲜签名"/反向"真实浏览器连接"）唯一可用浏览器是 MCP 真实浏览器——站点拒绝 ruyipage 内核时 Firefox 无法承担该角色。`--guard mcp` 现放行 `BLOCKED_FORENSIC`（兜底取证）与 `DIAGNOSE`（双对照浏览器侧，**须 visited 已含 BLOCKED_FORENSIC**，普通 case DIAGNOSE 仍拒绝），guard 结构新增 `check(state)` 条件函数 + `deny(node, state)` 差异化拒绝文案；SKILL.md §10 新增「引擎检测 case 的双对照浏览器侧」段（hook 验证/新鲜度/落盘审计要求不变，未经 BLOCKED_FORENSIC 不得借双对照名义引入 MCP）。
+- **fixture 多序号纪律（高效性）**：n 计数器类有状态 bug 单样本结构性不可见（match14 page1 恰好 n=1 与沙箱恒 1 巧合一致）。SKILL.md §10 fixture 段新增「多请求 case 至少固化 2 个不同请求序号样本」，§4.2 网络取证新增「翻页/序列目标取证交互覆盖 ≥2 请求序号」，把计数器 bug 的发现时机从 REAL_VERIFY 失败提前到离线 fixture 比对。
+- **取证脚本引擎检测预警（高效性）**：`forensic_ruyipage.py` PARTIAL（目标请求已发出但全部被拒）时输出路由提示——核对拒绝原因 → `--ua` 重采一次 → 仍全 4xx 即疑似引擎级检测进 BLOCKED_FORENSIC 三选一，禁止无限重采（match14 曾在此打转）。
+- **browser-acquisition.md 失同步修复（一致性）**：「三个来源」→「常规三来源 + BLOCKED_FORENSIC MCP 兜底」，来源表补第 4 行，两处「禁止 MCP」条款补引擎检测降级例外，消除与 SKILL.md 绝对规则 8 四来源的矛盾。
+
+验证：`node --check` + state_machine self-test PASS（新增 3 类 MCP 守卫断言：引擎检测语境 DIAGNOSE 放行/普通 DIAGNOSE 拒绝/拒绝文案存在）；check_skill_consistency 131 引用 0 问题；check_routing_benchmarks 26/26 通过；forensic_ruyipage.py py_compile 通过。
+
 ## 2.3.72 - 2026-08-28
 
 ### 修复（match14 实测日志复盘：4 处让人白跑 30 步的缺陷）

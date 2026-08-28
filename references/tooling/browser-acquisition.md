@@ -15,21 +15,22 @@
 
 ## 取证工具约束
 
-取证工具固定为第 2 节绝对规则第 8 条允许的三个来源，EVIDENCE_GATE 自动判定后按 SKILL.md 4.3 命令执行：
+取证工具固定为第 2 节绝对规则第 8 条允许的来源（常规三来源 + BLOCKED_FORENSIC 引擎检测降级时的浏览器 MCP 兜底），EVIDENCE_GATE 自动判定后按 SKILL.md 4.3 命令执行：
 
 | 来源 | 使用条件 | 执行 |
 |---|---|---|
 | ruyiPage 网络取证 | 需补 Step 1（无有效 capture.json / HAR / cURL / 请求文本） | `python scripts/forensic_ruyipage.py --url <目标URL> --case-dir <project-root> --markdown` |
 | RuyiTrace 日志采集 | 需补 Step 2（无有效 NDJSON） | `node scripts/capture_ruyitrace_log.js --url <目标URL> --case-dir <project-root> --import-after --markdown` |
 | 用户手动材料 | 用户提供了真实存在的文件 | 先过 `check_evidence.js` 门禁，按可跳过步骤跳过取证 |
+| 浏览器 MCP 兜底取证 | 仅 BLOCKED_FORENSIC：引擎级检测拒绝取证浏览器且 `--ua` 无效，经用户确认 + `node scripts/state_machine.js --case-dir <project-root> --guard mcp` | 连接用户真实浏览器采成功样本/Cookie/指纹/JS 落盘 `case/`，按用户材料走 check_evidence 校验（SKILL.md 绝对规则 8 ④；DIAGNOSE 双对照浏览器侧同守卫，须已过 BLOCKED_FORENSIC） |
 
 > ⚠️ **URL ≠ 证据**：仅提供目标 URL / 接口 URL / JS URL 不构成任何取证材料，仍须走完整两步取证。用户手动提供材料时，先用 `node scripts/check_evidence.js --case-dir <project-root> --url <目标URL> --inputs <材料路径> --markdown` 验证文件真实存在，并以门禁输出的可跳过步骤为准（cURL/HAR/JS 只能跳过 Step 1；Step 2 RuyiTrace 日志采集需 NDJSON 才能跳过）。
 
-门禁判定需要取证后，不要询问用户“用哪个工具”，直接按来源执行；禁止使用 chrome-devtools 类 MCP、agent-browser / browser 类 skill、系统 Chrome / Firefox / Edge 打开目标站，或用 requests / curl 直接抓取目标站 JS——这些不属于任何合法取证来源（见 SKILL.md 第3节纯协议红线与第4.3节 FORENSIC_CAPTURE）。
+门禁判定需要取证后，不要询问用户“用哪个工具”，直接按来源执行；禁止使用 chrome-devtools 类 MCP、agent-browser / browser 类 skill、系统 Chrome / Firefox / Edge 打开目标站，或用 requests / curl 直接抓取目标站 JS——这些不属于任何合法取证来源（BLOCKED_FORENSIC 引擎检测降级并经 `--guard mcp` + 用户确认的浏览器 MCP 兜底取证除外，见 SKILL.md 绝对规则 8 ④、第3节纯协议红线与第4.3节 FORENSIC_CAPTURE）。
 
 已判定的取证来源在本次 case 内沿用，不中途更换：ruyipage 网络取证用 ruyiPage 做页面/网络/JS 取证；用户手动来源不启动本机浏览器自动化，只使用用户提供的真实文件。
 
-如果取证工具不可用、路径缺失、runtime 不合格、需要登录、或必须更换取证方式：工具不可用先按 GATE-1 安装计划补齐（`scripts/install_all.js`），用户已提供真实材料时按决策树阻塞点 #5 降级为手动材料取证；RuyiTrace 缺失时的安装/降级确认见 `ruyi-tooling.md`「RuyiTrace 但未安装」节。不得自动 fallback 到普通系统 Firefox、普通 Playwright、Puppeteer 或其他 Playwright Firefox，也不得 fallback 到 chrome-devtools 类 MCP、agent-browser / browser 类 skill 等任何 AI 浏览器工具。
+如果取证工具不可用、路径缺失、runtime 不合格、需要登录、或必须更换取证方式：工具不可用先按 GATE-1 安装计划补齐（`scripts/install_all.js`），用户已提供真实材料时按决策树阻塞点 #5 降级为手动材料取证；RuyiTrace 缺失时的安装/降级确认见 `ruyi-tooling.md`「RuyiTrace 但未安装」节。不得自动 fallback 到普通系统 Firefox、普通 Playwright、Puppeteer 或其他 Playwright Firefox，也不得 fallback 到 chrome-devtools 类 MCP、agent-browser / browser 类 skill 等任何 AI 浏览器工具（引擎级检测降级语境的浏览器 MCP 兜底取证除外：须先过 BLOCKED_FORENSIC 定位检测证据 + 用户确认 + `--guard mcp`，见上表第 4 行）。
 
 详细 ruyiPage / RuyiTrace 流程见 `ruyi-tooling.md`；自动点击、拖拽、键盘、滚动和验证码交互的 `isTrusted` 可信输入规则见 `quality/trusted-input.md`。
 

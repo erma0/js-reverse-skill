@@ -50,11 +50,13 @@ const REPLAY_NODES = ['REAL_VERIFY', 'DIAGNOSE'];
 // 因此外查必须排在本地取证与 CASE_LOOKUP 之后，用真实证据去校验外部情报，而不是反过来。
 const EXTERNAL_NODES = ['CASE_LOOKUP', 'EXTERNAL_LOOKUP', 'DIAGNOSE'];
 
-// 允许用浏览器 MCP 连接用户真实浏览器取证的节点（取证兜底通道守卫）。
+// 允许用浏览器 MCP 连接用户真实浏览器的节点（取证兜底通道守卫）。
 // match14 实测教训：Firefox 取证浏览器被目标站引擎级检测全 400 拒绝（--ua 覆盖无效），
 // trace 采到的全是被拒响应；经用户确认用浏览器 MCP 连真实 Chrome 才拿到 200 成功样本。
-// MCP 只作为 BLOCKED_FORENSIC 的降级兜底，防止其成为绕过 ruyipage/RuyiTrace 取证纪律的捷径。
-const MCP_NODES = ['BLOCKED_FORENSIC'];
+// MCP 定位是兜底而非主通道，防止其成为绕过 ruyipage/RuyiTrace 取证纪律的捷径。
+// DIAGNOSE 仅限引擎检测 case（visited 含 BLOCKED_FORENSIC）的双对照浏览器侧：
+// 站点拒绝 ruyipage 内核时，正向对照的"浏览器新鲜签名"只能来自 MCP 真实浏览器。
+const MCP_NODES = ['BLOCKED_FORENSIC', 'DIAGNOSE'];
 
 // SKILL.md §4.4 上下文防耗尽检查点：同一节点消耗 20+ 步仍未推进即为打转。
 // 计入"步"的客观事件：每次 --guard 调用（一次重放/外查尝试）、每次 --set 回到同一节点。
@@ -74,7 +76,13 @@ const GUARDS = {
   },
   mcp: {
     nodes: MCP_NODES,
-    deny: (node) => `当前节点 ${node} 禁止浏览器 MCP 取证；该动作只能在 ${MCP_NODES.join(' / ')} 执行（先定位引擎级检测证据并经用户确认，常规取证走 ruyipage/RuyiTrace——match14 教训：MCP 是兜底不是捷径）`,
+    check: (state) => state.node !== 'DIAGNOSE' || (state.visited || []).includes('BLOCKED_FORENSIC'),
+    deny: (node, state) => {
+      if (node === 'DIAGNOSE' && state && !(state.visited || []).includes('BLOCKED_FORENSIC')) {
+        return `DIAGNOSE 的浏览器 MCP 仅限引擎检测 case 的双对照浏览器侧（本 case 未经过 BLOCKED_FORENSIC）：浏览器侧对照按 SKILL.md 第 10 节用 ruyipage hook 完成；确有引擎检测证据先回 BLOCKED_FORENSIC 对齐用户`;
+      }
+      return `当前节点 ${node} 禁止浏览器 MCP 取证；该动作只能在 BLOCKED_FORENSIC（引擎检测兜底取证）/ DIAGNOSE（双对照浏览器侧，须已过 BLOCKED_FORENSIC）执行（先定位引擎级检测证据并经用户确认，常规取证走 ruyipage/RuyiTrace——match14 教训：MCP 是兜底不是捷径）`;
+    },
   },
 };
 
@@ -220,7 +228,8 @@ function usage() {
   跳过必经节点会被拒绝并提示合法路径。
 - --guard replay：当前节点不在 REAL_VERIFY/DIAGNOSE 时拒绝（退出码 2），并写入 blocks 审计；
   --guard external：当前节点不在 CASE_LOOKUP/EXTERNAL_LOOKUP/DIAGNOSE 时拒绝（退出码 2）；
-  --guard mcp：当前节点不在 BLOCKED_FORENSIC 时拒绝（退出码 2）；
+  --guard mcp：当前节点不在 BLOCKED_FORENSIC/DIAGNOSE 时拒绝（退出码 2）；
+  DIAGNOSE 仅限已过 BLOCKED_FORENSIC 的引擎检测 case 双对照浏览器侧（未经过则拒绝）；
   --force 放行但保留审计记录。
 - --init/--set/--get 都会渲染 state.json.todo 中的 11 项 TODO 清单（含 [x]/[~]/[ ] 勾选态），
   该清单必须同步到宿主 TODO 工具；宿主无 TODO 工具时把清单原样输出给用户。
@@ -423,6 +432,10 @@ function main() {
     if (!EXTERNAL_NODES.includes('CASE_LOOKUP')) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: 外查守卫应放行 CASE_LOOKUP'); }
     if (MCP_NODES.includes('FORENSIC_CAPTURE') || MCP_NODES.includes('EVIDENCE_GATE')) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: MCP 守卫不应放行常规取证节点'); }
     if (!MCP_NODES.includes('BLOCKED_FORENSIC')) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: MCP 守卫应放行 BLOCKED_FORENSIC'); }
+    // MCP 守卫：DIAGNOSE 仅在引擎检测语境（visited 含 BLOCKED_FORENSIC）放行双对照浏览器侧
+    if (!GUARDS.mcp.check({ node: 'DIAGNOSE', visited: ['EVIDENCE_GATE', 'FORENSIC_CAPTURE', 'BLOCKED_FORENSIC', 'DIAGNOSE'] })) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: MCP 守卫应放行引擎检测语境的 DIAGNOSE'); }
+    if (GUARDS.mcp.check({ node: 'DIAGNOSE', visited: ['EVIDENCE_GATE', 'DIAGNOSE'] })) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: MCP 守卫不应放行未经过 BLOCKED_FORENSIC 的 DIAGNOSE'); }
+    if (typeof GUARDS.mcp.deny('DIAGNOSE', { node: 'DIAGNOSE', visited: [] }) !== 'string') { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: MCP 守卫 DIAGNOSE 拒绝文案缺失'); }
     for (const kind of ['replay', 'external', 'mcp']) {
       if (typeof GUARDS[kind].deny('EVIDENCE_GATE') !== 'string') { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(`self-test: 守卫 ${kind} 拒绝文案缺失`); }
     }
@@ -490,9 +503,9 @@ function main() {
       console.error(`未知守卫类型：${args.guard}（当前支持 ${Object.keys(GUARDS).join(' / ')}）`);
       return 1;
     }
-    const allowed = guard.nodes.includes(state.node);
+    const allowed = guard.nodes.includes(state.node) && (!guard.check || guard.check(state));
     if (!allowed && !args.force) {
-      const msg = guard.deny(state.node);
+      const msg = guard.deny(state.node, state);
       state.blocks = (state.blocks || []).concat({ at: new Date().toISOString(), type: `${kind}-guard`, node: state.node, message: msg });
       syncTodo(state);
       writeState(caseDir, state);

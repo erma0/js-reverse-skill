@@ -27,7 +27,7 @@ description: >
 | IMPLEMENT 前 | `node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` | 退出码 0（两文件达标） |
 | 重放/写请求前 | `node scripts/state_machine.js --case-dir <project-root> --guard replay` | 只在 REAL_VERIFY/DIAGNOSE 放行 |
 | 外部题解检索前 | `node scripts/state_machine.js --case-dir <project-root> --guard external` | 只在 CASE_LOOKUP/EXTERNAL_LOOKUP/DIAGNOSE 放行 |
-| 浏览器 MCP 兜底取证前 | `node scripts/state_machine.js --case-dir <project-root> --guard mcp` | 只在 BLOCKED_FORENSIC 放行（须用户确认） |
+| 浏览器 MCP 兜底取证前 | `node scripts/state_machine.js --case-dir <project-root> --guard mcp` | BLOCKED_FORENSIC 取证（须用户确认）；DIAGNOSE 双对照浏览器侧（须已过 BLOCKED_FORENSIC） |
 | 交付前 | `check_final_artifact.js` + `check_code_quality.js` | 退出码 0 |
 
 主线：INTENT_CONFIRM → ENV_READY → EVIDENCE_GATE →（FORENSIC_CAPTURE → TRACE_CAPTURE）→ CASE_LOOKUP → IDENTIFY → TRACE_ANALYZE → IMPLEMENT → REAL_VERIFY → DELIVER → CLEANUP → DONE。打转信号：检索输出 `[WARN] 重复检索` 或 `[STATE]` 提示即执行 §4.4 防耗尽检查点序列。
@@ -47,7 +47,7 @@ node scripts/state_machine.js --case-dir <project-root> --set <NODE> --note "<�
 node scripts/state_machine.js --case-dir <project-root> --guard replay
 # 外部题解/文章检索前必过（细则见 4 节「外部检索时序」）
 node scripts/state_machine.js --case-dir <project-root> --guard external
-# 浏览器 MCP 连接用户真实浏览器兜底取证前必过（细则见 4 节 BLOCKED_FORENSIC；须用户确认）
+# 浏览器 MCP 连接用户真实浏览器兜底取证前必过（BLOCKED_FORENSIC 取证须用户确认；DIAGNOSE 双对照浏览器侧须已过 BLOCKED_FORENSIC）
 node scripts/state_machine.js --case-dir <project-root> --guard mcp
 # 进入每个节点前聚合跑该节点必验门禁；输出含 FAIL 或需参数缺失时停在当前节点
 node scripts/gate.js --case-dir <project-root> --at <NODE> --url <目标URL> --inputs <材料路径> --markdown
@@ -312,6 +312,7 @@ python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root>
 
 - **退出码语义**：`PARTIAL`（仅 OPTIONS/非 2xx）与 `NO_TARGET`（完全未命中）均非 0；任一非 OPTIONS 2xx 命中即 `PASS`、退出码 0。HTTP 2xx 只表示目标请求已取证，不表示业务成功（通用脚本不猜业务码）。
 - **重试型场景**：登录可能因验证码/校验失败重试时调大 `--target-settle`（单位秒，默认 3；建议 10~30，上限 120），保证重试仍在同一会话内。关联材料以最后一次有效终态向前回溯，验证码中间接口不是额外终态门禁（load → verify 由分析阶段从同一会话回溯）。
+- **翻页/序列请求类目标**：取证交互覆盖 ≥2 个请求序号（如翻 2 页再收尾），为 fixture 多序号比对留成功样本——单序号样本看不见计数器递增语义（反模式 24，match14 教训）。
 - **收尾耗时预期**：≈ `--target-settle` 秒数 + 落盘时间（通常 1 分钟内）。等待远超预期（如超 5 分钟）时先核对时间参数是否把毫秒当秒传入，不要无限轮询干等。
 - **证据完整性**：body 超过 JSON 内联预览阈值时必须读取对应 `saved_to` 完整文件，`*_complete=false` 不能拿预览替代原始证据。
 - **手动结束**：需要用户交互时提示其在窗口完成操作——**操作完成后用户直接关闭浏览器窗口即视为手动结束抓包，脚本会立即收尾落盘（报告 endReason=browser-closed），不是失败**。
@@ -527,7 +528,7 @@ E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定�
 
 **写请求格式取证（硬约束）**：提交/写入接口的请求格式（Content-Type、body 编码方式、字段名）必须从页面源码（`case/forensic/document.html` 的 form/submit 逻辑）或 capture.json 的真实成功样本取证，**禁止猜测**。常见陷阱：①页面用 jQuery `$.ajax({data: {...}})` 默认表单编码（`application/x-www-form-urlencoded`），AI 误用 `application/json`；②CSRF token 字段名/位置因站点而异；③提交接口路径与数据接口不同域。写请求前必须列出「Content-Type + body 构造依据」并引用 capture/document.html 具体行号，不得凭"通常用 JSON"发起请求（实战：JSON 提交持续被服务端拒，改表单编码即通过）。
 
-进入真实请求前先完成离线回归：把取证阶段抓到的真实样本（同输入参数 + 浏览器侧期望输出）固化为 `case/fixtures/*.fixture.json`，用本地入口以同样输入生成实际输出，逐字段过门禁比对；任一字段不一致先回 IMPLEMENT 排查，不得带着已知偏差发起真实请求：
+进入真实请求前先完成离线回归：把取证阶段抓到的真实样本（同输入参数 + 浏览器侧期望输出）固化为 `case/fixtures/*.fixture.json`，用本地入口以同样输入生成实际输出，逐字段过门禁比对；任一字段不一致先回 IMPLEMENT 排查，不得带着已知偏差发起真实请求。**多请求 case（翻页/批量/序列调用）fixture 至少固化 2 个不同请求序号的样本**（如 page1 与 page2）：计数器/会话状态类 bug 只在第 2+ 样本暴露——match14 的 n 计数器在单样本下与沙箱恒 1 巧合一致（反模式 24），取证阶段即应覆盖 ≥2 序号成功样本：
 
 ```powershell
 node scripts/compare_fixture.js --fixture case/fixtures/<样本>.fixture.json --actual case/tmp/<实际输出>.json --field <目标参数> --markdown
@@ -554,6 +555,8 @@ node scripts/compare_fixture.js --fixture case/fixtures/<样本>.fixture.json --
 2. **反向对照**：自己的签名 + 真实浏览器连接（取证阶段 ruyipage `add_preload_script` hook XHR.open 替换目标参数，hook 必须带执行标记并验证）→ 403 ⇒ 服务端校验签名内容，与连接无关。
 3. 定位为「签名内容被校验」后，用**对齐探针法**测量 SDK 实际内嵌的环境检测并逐位对齐（见 `references/env/env-detect-bypass.md`），不要先假设需要复现 canvas/行为轨迹等完整浏览器指纹。
 4. **对照必须在健康 session 下做，且一次只改一个变量**：连续失败会触发站点惩罚机制（惩罚期内连浏览器基线请求都被拒，对照数据全部作废）；每组对照前先复刻一次确定成功的基线请求，失败即冷却后重做。HTTP 200 + 业务层风控文案时先按 `references/network/ip-risk-control.md` 会话状态类风控专节（蜜月期窗口/"频率墙"误判警示/失败惩罚）排查。
+
+**引擎检测 case 的双对照浏览器侧**：取证浏览器被引擎级检测拒绝的 case（state 已过 BLOCKED_FORENSIC），双对照的浏览器侧——正向的「浏览器新鲜签名」与反向的「真实浏览器连接」——经 `--guard mcp` 用浏览器 MCP 连接用户真实浏览器执行（站点只接受真实内核时 ruyipage 无法承担该角色，match14 语境）；hook 必须带执行标记并验证、样本新鲜度与 `captureToReplayMs` 记录要求不变，对照产物落盘 `case/` 供审计。未经 BLOCKED_FORENSIC 的 case 浏览器侧一律用 ruyipage，不得借双对照名义引入 MCP。
 
 未完成上述对照，不得宣布连接层风控结论，不得转而交付浏览器内核取数方案（取证浏览器脚本放进 `case/` 也算交付违规）。双对照结果写入 `result/验证记录.json` 顶层 `riskLayerDiagnosis` 字段（`forwardControl`/`reverseControl`/`conclusion`，正向必须含 `captureToReplayMs` 采集→重放延迟，反向必须含 `hookVerified: true`），并过门禁：
 

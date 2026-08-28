@@ -2399,6 +2399,10 @@ def render_markdown(r: Dict[str, Any]) -> str:
         L.append("")
         L.append("[未通过] 终态目标未达成：指定 --targets/--targets-regex 后未捕获到终态接口的非 OPTIONS 2xx 响应（Step 1 缺失）。")
         L.append("请重采（--click/--scroll/--manual-pause）或由用户提供 cURL/HAR/原始请求文本，不得转源码搜索。")
+        if r.get("acceptance") == "PARTIAL":
+            L.append("[提示] 目标请求已发出但全部被拒（无 2xx）：先核对拒绝原因（登录/验证码/业务参数错误）；")
+            L.append("排除后用 --ua 覆盖重采一次，仍全部 4xx 且响应含风控文案 → 疑似引擎级检测（Firefox 内核被识别），")
+            L.append("按 SKILL.md §4 进入 BLOCKED_FORENSIC（对齐用户三选一，可经 --guard mcp 用真实浏览器兜底取证），禁止无限重采。")
         candidates = r.get("observedDynamicCandidates") or []
         if candidates:
             L.append("本次实际观察到以下动态 2xx 接口；它们只是重采候选，不自动冒充终态：")
