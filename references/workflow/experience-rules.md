@@ -124,9 +124,10 @@ match10 实测：sandbox 预填"看起来完整"的运行时状态快照后，�
 2. **trace writer 层**：`XMLHttpRequest.open` / `fetch` / `Headers.set` 的**参数全文**里没有该字段（`search_trace.js --keyword <目标URL>` 直接检索 URL 字面量最快——trace 里的 XHR 记录常被第三方 SDK 淹没，match17 实测前两名高频栈是 transcend-cdn 与 mozilla 站点脚本，目标域脚本只排第三）。
 3. **Cookie/存储层**：`case/ruyi-trace/logs/cookie/*.ndjson` 里目标域**无 JS 写入的 cookie**（只有 `Hm_*` 之类统计 cookie 即视为干净），无 WASM/JSVMP/混淆 SDK 调用，`crypto` 类 trace 条数为个位数且不来自目标域脚本。
 
-三条都干净后，**约束只可能在三个地方**，逐项落实为交付实现（match17 实证：HTTP/2 + 末页 UA=yuanrenxue + sessionid）：
+三条都干净后，**约束只可能在三个地方**，逐项落实为交付实现（match17 实证：HTTP/2 + 末页 UA=yuanrenxue + sessionid；match19 实证：服务端 TLS ClientHello 黑名单 + 末页 UA 分流）：
 1. **传输层**：协议版本（HTTP/2、ALPN）、TLS 指纹、连接复用与顺序——Node 侧用原生 `node:http2`：一次 `http2.connect()` 建会话、多次 `client.request()` 复用、最后 `client.close()`（交付门禁 Session 三件套天然满足，`client.alpnProtocol === 'h2'` 可作协议自检）；**不要发 `accept-encoding`**，避免 br/zstd 需额外解压，同时保留 zlib 解压兜底。协议要求以取证响应头（如 `x-firefox-spdy: h2`）与题面为准，不要用 HTTP/1.1 反向上报惩罚计数。
-2. **请求头语义**：UA（末页 UA 红线是站点惯例）、Referer、`X-Requested-With`、Cookie 里的登录凭据——这些不是"签名"，但缺一项就取不到数据，且失败常表现为 **HTTP 200 + `data` 非数值**（必须对每页做元素类型校验，不能只看状态码）。
+   **传输层失败先做跨客户端栈对照（match19 实证）**：同一请求用三个不同 TLS 栈各发一次——Node（`https`/`http2`）、curl（schannel/openssl）、Python `requests`（OpenSSL）——再叠加逐项复刻浏览器头/UA/开窗时序。判读：全部 400 → 内容/会话层（回 DIAGNOSE 双对照）；仅 Node 400 → **服务端 TLS ClientHello 指纹黑名单**（match19："token failed" 文案 ≠ 令牌参数缺失——同文案在 match9 是 m-cookie 缺失，在 match19 是客户端栈被拉黑，**错误文案不指示病因层**）；此时给 Node 做 TLS 伪装脆弱且不可持续，**按证据切换交付语言**（Python `requests.Session` 的 `session.get/close` 同样满足 Session 三件套门禁），并在最终总结声明切换依据。
+2. **请求头语义**：UA（末页 UA 红线是站点惯例）、Referer、`X-Requested-With`、Cookie 里的登录凭据——这些不是"签名"，但缺一项就取不到数据，且失败常表现为 **HTTP 200 + `data` 非数值**（必须对每页做元素类型校验，不能只看状态码——match19 末页 UA 未过时返回 200 + `["请","将","UA",...]` 提示数组）。
 3. **响应层**：数据加密/字体映射/图片拼装（内容还原型，Step 2 可豁免）。
 
 **反例**：三条判据已全干净却继续翻 JS 找"隐藏签名"、或把 `m:window.match17` 这类诱饵参数拿去逆算法（反模式 27）。收手不等于降低验证标准——真实请求、fixture 回归、多轮稳定性验证照样要做，只是工作量从"还原算法"转移到"对齐传输层与校验响应"。
@@ -164,5 +165,6 @@ JSVMP 字节码对每个环境访问都有 try/catch 或条件分支：环境语
 | `cases/yuanrenxue-match9-dynamic-cookie2.md` | 规则 22 实战验证（RSA 循环加密禁缓存）+ 规则 23 实战验证（随机边缘拒绝需大样本判别）+ 数据绑定会话（反模式 19）+ 黑盒 SDK 定期更新（dynamic-resource.md 专节） |
 | `cases/yuanrenxue-match10-ruishu3-replay-defense.md` | 规则 24 实战验证（预填状态快照致引导脚本走旁路）+ 反模式 16/20/11 实战验证（插桩 while(1) 禁令 / VM 卡死转投浏览器 / 外部失败误归因通道层）+ 会话配套资源（dynamic-resource.md 专节）+ 元素语义真实化（env-object-model.md） |
 | `cases/yuanrenxue-match16-webpack-blackbox-branch.md` | 规则 26 实战验证（webpack 模块切片定界 + 隔离作用域 + require 桩 + 反调试处理）+ 反模式 26 实战验证（抠代码后分支漂移：格式全对却被拒） |
-| `cases/yuanrenxue-match17-http2-transport-plaintext.md` | 规则 27 实战验证（请求侧无签名三条判据 + 传输层 HTTP/2/UA/Cookie 对齐）+ 反模式 27 实战验证（诱饵参数 `m` 恒 undefined 被 `$.param` 丢弃）+ 反模式 22 二次实证（`--targets "question/17"` 误命中静态资源） |
+| `cases/yuanrenxue-match17-http2-transport-plaintext.md` | 规则 27 实战验证（请求侧无签名三条判据 + 传输层 HTTP/2/UA/Cookie 对齐）+ 反模式 27 实战验证（诱饵参数 `m` 恒 undefined 被序列化层丢弃）+ 反模式 22 二次实证（`--targets "question/17"` 误命中静态资源） |
 | `cases/yuanrenxue-match18-jsvmp-mouse-gated-signature.md` | 规则 28 实战验证（JSVMP 静默退出双层插桩定位 + 语义级环境对齐：内建自有属性 / webdriver 挂原型 / 鼠标事件门控）+ 反模式 28 实证 + 反模式 27 四次实证（`window.match18` 连环诱饵）+ 末页 page=05 双重校验 |
+| `cases/yuanrenxue-match19-tls-fingerprint-blocklist.md` | 规则 27 扩充实证（跨客户端栈对照法定位 TLS ClientHello 黑名单 + 交付语言切换依据；末页 UA 提示数组按元素类型判别）+ 反模式 27 五次实证并修正机理（丢弃在 `k.extend` 深拷贝 `copy!==undefined` 守卫，非 `$.param`——debug 文本含参数 ≠ wire URL 含参数） |

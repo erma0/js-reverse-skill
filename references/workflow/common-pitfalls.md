@@ -327,12 +327,14 @@ $.ajax = function () {
 };
 ```
 
-看上去 `m` 就是待还原的签名参数——实际上 `/api/match/17` **从未被请求**（capture.json 25 个包全量核对），`window.match17` 恒为 `undefined`，jQuery `$.param` 序列化时丢弃 undefined 值，真实 URL 里根本没有 `m`。trace writer 的参数全文可佐证：`["GET","/api/question/17?page=1&pageSize=10&kw=",true,"undefined","undefined"]`。同站同源形态此前已出现两次：第 7 题 `m` 是 `/api/match/7`（404）hook 遗留，第 13 题 `m:window.match13` 同样是 hook 遗留——**三次同源**，说明这不是个案而是该站点的固定诱饵模式。
+看上去 `m` 就是待还原的签名参数——实际上 `/api/match/17` **从未被请求**（capture.json 25 个包全量核对），`window.match17` 恒为 `undefined`，序列化层把 undefined 键丢弃，真实 URL 里根本没有 `m`。trace writer 的参数全文可佐证：`["GET","/api/question/17?page=1&pageSize=10&kw=",true,"undefined","undefined"]`。同站同源形态此前已出现两次：第 7 题 `m` 是 `/api/match/7`（404）hook 遗留，第 13 题 `m:window.match13` 同样是 hook 遗留——**三次同源**，说明这不是个案而是该站点的固定诱饵模式。
 
-**为什么辩护不成立**："页面里写了这个参数名，那就一定有生成逻辑，只是我还没找到"——参数名存在只证明**有人写过这个字面量**，不证明它进入了真实请求。常见的"写了但没生效"路径有四类：① 赋值依赖的接口从未被调用（本例，hook 守卫的 URL 是老版路径）；② 值恒为 `undefined`/空串，被序列化库（`$.param`、`URLSearchParams`、axios `params`、`JSON.stringify`）静默丢弃；③ 赋值代码在 `if` 分支里且该分支未执行；④ 参数是历史版本遗留，接口已改版但 JS 常量没删。把这四类当成"算法还没找到"去逆，是**无解方向**——没有任何算法能复现一个从未发出的值。
+**丢弃机理精确版（match19 trace 实证，修正 match17 的归因）**：match19 的页面 debug 文本 `$dbg.text("GET "+API+"?"+$.param(d))` 明明输出 `...&kw=&m=`（RuyiTrace seq733 为证），但同一数据的真实 `XMLHttpRequest.open` URL 没有 `m`（seq814）——说明 **`$.param` 并不丢弃 undefined**（它把 undefined/null 渲染为空串 `m=`，`null==n?"":n`）。真正丢弃发生在 `$.ajax` 内部的 **options 深拷贝**：`k.extend(!0,{},{k.ajaxSettings,t})` 逐键合并时 `copy!==undefined` 守卫跳过 `m: undefined`，克隆后的 `v.data` 根本没有 m 键。净效果与旧归因相同（真实请求无 m），但机理判定不同：**"调试显示的参数串"与"wire URL"不一致时，查序列化/拷贝链路，别玄学找"参数去哪了"**；且"调用链上任何一层做了对象浅/深拷贝"都可能是丢弃点（extend、`{...d}` 展开不丢、`JSON.parse(JSON.stringify(d))` 会把 undefined 键丢掉）。
+
+**为什么辩护不成立**："页面里写了这个参数名，那就一定有生成逻辑，只是我还没找到"——参数名存在只证明**有人写过这个字面量**，不证明它进入了真实请求。常见的"写了但没生效"路径有四类：① 赋值依赖的接口从未被调用（本例，hook 守卫的 URL 是老版路径）；② 值恒为 `undefined`/空串，被序列化/对象拷贝层静默丢弃（序列化库如 `URLSearchParams`、axios `params`、`JSON.stringify`；对象拷贝层如 jQuery `$.ajax` 内部 `k.extend` 深拷贝的 `copy!==undefined` 守卫、JSON 序列化往返）；③ 赋值代码在 `if` 分支里且该分支未执行；④ 参数是历史版本遗留，接口已改版但 JS 常量没删。把这四类当成"算法还没找到"去逆，是**无解方向**——没有任何算法能复现一个从未发出的值。
 
 **正确做法**：
-1. **参数是否生效，一律以 trace writer 的参数全文或 capture.json 真实请求 URL 为准**，不能以 `document.html` / JS 源码里的字面量为准。源码里的参数名只是候选清单，不是事实清单。
+1. **参数是否生效，一律以 trace writer 的参数全文或 capture.json 真实请求 URL 为准**，不能以 `document.html` / JS 源码里的字面量为准，**也不能以页面自己的调试输出为准**（match19：`$.param(d)` 的 debug 文本含 `&m=`，wire URL 没有——见上方机理精确版）。源码里的参数名只是候选清单，不是事实清单。
 2. 发现"待还原参数恒为 `undefined` / 空 / 全零"时，先查它的**赋值路径有没有被执行**（hook 守卫的 URL 是否被请求过、赋值语句所在的分支是否可达、老路径是否 404），而不是立刻去找算法。
 3. 用 URL 子串在 `capture.json` 里反查：目标参数名在 25 个包里出现过几次？一次都没出现就是诱饵。
 4. 确认请求侧全明文后**明确收手**，转去检查传输层与响应层（见规则 27），不要在"一定有签名"的预设下继续翻 JS。

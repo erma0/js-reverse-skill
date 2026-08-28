@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2.3.84 - 2026-08-29
+
+### 经验固化（match19 案例入库：全明文 + Node TLS 指纹黑名单 + 跨客户端栈对照法 + 反模式 27 机理修正 + 取证工具三处补强）
+
+match19（「乌拉乌拉乌拉」）完整实战成果入库。本题表面是入门题（请求侧/响应侧全明文），实际埋了两层非常规约束：诱饵参数 `m` 的消亡机理与历史记载不同（丢弃在 jQuery 深拷贝层而非 `$.param`），以及**服务端按 TLS ClientHello 指纹拉黑特定客户端栈**（Node 全系 400 `token failed`，curl/Python requests 同参数 200）。核心方法论增量：**"错误文案不指示病因层"——跨客户端栈对照是传输层黑名单的最快定位手段**。
+
+- **新案例 `cases/yuanrenxue-match19-tls-fingerprint-blocklist.md`** + `cases/index.json`（37 条）+ match 题号速查表第 19 行。技术指纹：`GET /api/question/19?page=N&pageSize=10&kw=` 明文 JSON；`m:window.match19` 诱饵（反模式 27 第五次实证）；Node https/http2 → 400 `{"error":"token failed"}` 而 curl（schannel）/Python requests（OpenSSL）200；page5 普通 UA 返回 200 提示数组 `["请","将","UA",...]`（按 data 元素类型判别非状态码）；数据绑定 sessionid（答案 27219355）；提交 `POST /a/19` 表单编码 code=2 通关。踩坑记录 7 条：token failed 文案 ≠ 令牌缺失、debug 输出 ≠ wire URL、语言切换的证据链、末页提示数组判别、翻页点击 disabled 静默吞、属性选择器静默失配、`--targets` 用 `page=N` 片段。
+- **common-pitfalls 反模式 27 机理精确化（match19 修正 match17 归因）**：`$.param` 对 undefined **渲染空串 `m=` 并不丢弃**（match19 debug 文本 trace seq733 为证），真正丢弃发生在 `$.ajax` 内部 `k.extend(!0,{},{ajaxSettings},t)` 深拷贝的 `copy!==undefined` 守卫（seq814 wire URL 无 m）——净效果相同但诊断动作不同："调试显示的参数串"与"wire URL"不一致时直接查序列化/拷贝链路；"写了但没生效"路径 ② 扩充对象拷贝层（k.extend 深拷贝 / JSON 往返）。match17 案例文件同步加勘误指针。**反模式 27 实战案例计数 3 → 5（match18 连环诱饵 + match19 机理修正）**。
+- **experience-rules 规则 27 扩充「跨客户端栈对照法」**：传输层失败时同一请求用 Node/curl/Python 三个 TLS 栈各发一次——全部 400 → 内容/会话层回 DIAGNOSE；仅 Node 400 → 服务端 TLS ClientHello 黑名单，给 Node 做 TLS 伪装脆弱不可持续，按证据切换交付语言（Python `requests.Session` 的 `session.get/close` 同样满足 Session 三件套）。相关案例表补 match19 行。
+- **SKILL.md 三处补强（均为 match19 实测返工点）**：① §10 双对照协议正向对照补"对照客户端本身也可能是变量"——同请求多 TLS 栈各发一次判读黑名单，指向规则 27；② §9 交付语言规则新增第二类合法更换：**服务端封锁证据驱动的语言切换**（此前规则只认"用户显式指定"，证据驱动切换会与规则冲突），须写入总结与经验沉淀；③ §4.4 IMPLEMENT 准入补 `missing-env-priority.md` 格式硬要求（每行环境项须带 `P0`/`P1`/`P2` 优先级标记 + 分级依据，纯叙述表格会被 check_env_prerequisites.js 判 BLOCK——match19 实测返工点）。§4.2 取证节补翻页点击两个静默失败坑（disabled 按钮吞点击 + 属性选择器静默失配）与产物轮转说明。
+- **forensic_ruyipage.py 三处补强**：① 新增 `--click-delay <秒>`：导航（DOMContentLoaded 即返回）后延迟再点击，解决页面自身 loading 态 disabled 按钮静默吞点击（match19 两次空耗各 120s 的根因），argparse 校验非负；② `--click` 选择器未命中时跳过点击并输出明确告警（含选择器改写建议），替代原先 `human_click(None)` 在当前位置盲点且日志照打"已拟人点击"的误导行为；③ 新增产物轮转备份 `_rotate_previous`：capture.json / target-hits.json / related-hits.json / document.html 写入前自动轮转为 `<name>.prev-1~3`（match19 实测 run4 的 page2 双序号样本被 run5 覆盖丢失，只能重采），带非 .json 后缀避免被证据门禁误扫描。
+- 验证：`forensic_ruyipage.py --self-test` 通过（含轮转路径）+ `py_compile` 通过；`check_skill_consistency.js --project-dir .` 通过；`search_cases.js` 对 `match19`/`token failed` 均命中新条目；match19 真实交付（`ai-js-reverse/match19/result`）的交付口径（Python 入口 + attempts 契约 + FINAL_ARTIFACT_* 标记）与本版 SKILL.md 一致。
+
 ## 2.3.83 - 2026-08-29
 
 ### 经验固化（match18 案例入库：JSVMP 静默退出 + 反模式 28「环境语义级偏差」+ 规则 28 双层插桩定位法 + 流程补强四处）

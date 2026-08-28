@@ -12,7 +12,7 @@
 
 - JS 特征：页面无混淆、无 SDK、无 WASM、无 JSVMP；请求由内联 script block 12（IIFE，`window.jQuery`）直接 `$.ajax({url:"/api/question/17", data:{page,pageSize,kw,m}})` 发起
 - 参数特征：`page`(1-5) / `pageSize`(固定 10) / `kw`(固定空串)，**全明文**；无签名、无 token、无时间戳、无随机量、无指纹参数
-- **诱饵参数特征**：页面 `data` 对象里写了 `m:window.match17`，但 `window.match17` 由 `$.ajax` hook 在有人请求 `/api/match/17` 时才赋值——该接口从未被调用（25 个包全量核对），值恒为 `undefined`，被 jQuery `$.param` 序列化时直接丢弃。真实 writer 参数全文：`["GET","/api/question/17?page=1&pageSize=10&kw=",true,"undefined","undefined"]`
+- **诱饵参数特征**：页面 `data` 对象里写了 `m:window.match17`，但 `window.match17` 由 `$.ajax` hook 在有人请求 `/api/match/17` 时才赋值——该接口从未被调用（25 个包全量核对），值恒为 `undefined`，被序列化/拷贝层直接丢弃。真实 writer 参数全文：`["GET","/api/question/17?page=1&pageSize=10&kw=",true,"undefined","undefined"]`。（match19 trace 修正机理：`$.param` 对 undefined 渲染空串 `m=` 并不丢弃，真正丢弃发生在 `$.ajax` 内部 `k.extend` 深拷贝的 `copy!==undefined` 守卫——详见反模式 27 机理精确版）
 - 请求特征：`GET /api/question/17?page=N&pageSize=10&kw=`；Cookie 侧无签名（仅 `sessionid` + 百度统计 `Hm_*`）；**无 JS 写入的挑战 cookie**
 - 传输层特征：必须以 HTTP/2 发起（题名「天杀的 Http2.0」）；第 5 页（末页）UA 必须改为 `yuanrenxue`，否则不返回该页数据
 - 风控特征：数据**绑定 sessionid**（同 session 各页数值恒定，可反复复验）

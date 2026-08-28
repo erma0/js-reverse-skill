@@ -313,6 +313,7 @@ python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root>
 - **退出码语义**：`PARTIAL`（仅 OPTIONS/非 2xx）与 `NO_TARGET`（完全未命中）均非 0；任一非 OPTIONS 2xx 命中即 `PASS`、退出码 0。HTTP 2xx 只表示目标请求已取证，不表示业务成功（通用脚本不猜业务码）。
 - **重试型场景**：登录可能因验证码/校验失败重试时调大 `--target-settle`（单位秒，默认 3；建议 10~30，上限 120），保证重试仍在同一会话内。关联材料以最后一次有效终态向前回溯，验证码中间接口不是额外终态门禁（load → verify 由分析阶段从同一会话回溯）。
 - **翻页/序列请求类目标**：取证交互覆盖 ≥2 个请求序号（如翻 2 页再收尾），为 fixture 多序号比对留成功样本——单序号样本看不见计数器递增语义（反模式 24，match14 教训）。
+- **翻页点击两个静默失败坑（match19 实测，各空耗一轮 120s）**：① 页面在 DOMContentLoaded 时自身首屏 AJAX 还在飞行、操作按钮常处于 `disabled` 态——disabled 控件不派发 click，拟人点击被静默吞掉（无报错、无请求），用 `--click-delay 5~30` 让点击等 loading 结束（等价替代：`--manual-pause` + stdin 管道延迟）；② ruyipage `page.ele()` 对部分属性选择器（`[data-page=5]`）查不到且不报错，脚本会在当前位置盲点并照常打"已拟人点击"——优先用 id/结构选择器（`css:#pgxNext`、`css:#pgxPages button:nth-child(5)`）。另：每轮取证会覆盖 `case/forensic/capture.json` 等同名产物，脚本现自动轮转 `.prev-1~3` 备份；跨轮关键样本（如 page2 body）仍应在报告产出后及时转录。
 - **收尾耗时预期**：≈ `--target-settle` 秒数 + 落盘时间（通常 1 分钟内）。等待远超预期（如超 5 分钟）时先核对时间参数是否把毫秒当秒传入，不要无限轮询干等。
 - **证据完整性**：body 超过 JSON 内联预览阈值时必须读取对应 `saved_to` 完整文件，`*_complete=false` 不能拿预览替代原始证据。
 - **手动结束**：需要用户交互时提示其在窗口完成操作——**操作完成后用户直接关闭浏览器窗口即视为手动结束抓包，脚本会立即收尾落盘（报告 endReason=browser-closed），不是失败**。
@@ -392,7 +393,7 @@ node scripts/write_stage_report.js --case-dir <project-root> --stage <阶段> --
 **阶段报告默认不生成，仅在以下场景按需落盘**：多轮复杂补环境 / 跨会话续接风险、上下文防耗尽检查点触发、或用户明确要求。关键结论随节点落盘（IDENTIFY 结论、WASM 黑盒跑通、body 结构确认、实现方案选定等）不受默认省略限制，必须写入 `case/阶段报告/`；最小报告至少含当前状态、已证实事实、缺失证据、下一步输入。阶段报告落盘是后台动作：落盘后立即按「下一步输入」继续推进下一状态，不等用户确认——「报告已写、下一步等指示」违反第 1 节连续执行总则。
 
 **IMPLEMENT 准入三件套（不可跳过）**：进入 IMPLEMENT 前必须按序完成，任一缺失停在 TRACE_ANALYZE。**禁止先根据 Node.js 报错盲补——盲补会导致十几轮「加载→崩→猜→再加载」的空转循环**：
-1. **证据前置**：走路径 B/C/D（最小 JS 沙箱、WASM、环境伪装）且需补浏览器对象时，先基于 RuyiTrace NDJSON 产出 `notes/entry-chain.md`（入口函数 → 请求链 → 关键 `stack.file:line:col`，TRACE_ANALYZE 已定位的 builder/writer 即 IMPLEMENT 第一实现目标）与 `notes/missing-env-priority.md`（用 `scripts/analyze_trace.js --summary` 从 NDJSON 抽取的 SDK 实际读取环境清单，含 `api`、`stack.file`、`line`、`col`、环境模块、补齐优先级和「RuyiTrace 证据 / Node trace 补充 / 推断」标记；黑盒执行无法逐项精确复现时至少列出已观测的环境读取/挂载点并标注「黑盒执行，不逐项精确复现」）。两文件缺一不得开始补环境。
+1. **证据前置**：走路径 B/C/D（最小 JS 沙箱、WASM、环境伪装）且需补浏览器对象时，先基于 RuyiTrace NDJSON 产出 `notes/entry-chain.md`（入口函数 → 请求链 → 关键 `stack.file:line:col`，TRACE_ANALYZE 已定位的 builder/writer 即 IMPLEMENT 第一实现目标）与 `notes/missing-env-priority.md`（用 `scripts/analyze_trace.js --summary` 从 NDJSON 抽取的 SDK 实际读取环境清单，含 `api`、`stack.file`、`line`、`col`、环境模块、补齐优先级和「RuyiTrace 证据 / Node trace 补充 / 推断」标记；黑盒执行无法逐项精确复现时至少列出已观测的环境读取/挂载点并标注「黑盒执行，不逐项精确复现」）。**格式要求（check_env_prerequisites.js 硬校验）**：每行环境项必须带显式优先级标记（`P0`/`P1`/`P2` 或列头「优先级」），并写明分优先级的依据；纯叙述性"是否进实现"表格而无优先级列会被判 BLOCK。两文件缺一不得开始补环境。
 2. **门禁脚本复核**：`node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` 退出码非 0 不得开始补环境（详见 `references/env/env-debug-loop.md` 的「RuyiTrace 优先诊断门禁」）。
 3. **Step 2 前置**：`node scripts/check_trace_gate.js` 退出码 0（Step 2 已具备且目标 writer 覆盖满足）。Step 2 缺失不得进入 IMPLEMENT，例外见下方「IMPLEMENT 硬前置条件」。
 
@@ -512,7 +513,7 @@ node scripts/run_with_trace.js --target <project-root>/case/js/original/<资源�
 
 ## 9. IMPLEMENT
 
-**交付语言（进入本节点即定，中途不更换）**：默认 Node.js，不按路径预判；用户显式指定其他语言（如 Python）时遵从并写入最终总结。补环境题型（B/C/D）核心为执行目标 JS 算法，选 Python 入口时须在总结声明 JS 执行桥接方式，禁止静默包 Node 子进程充当"Python 交付"。
+**交付语言（进入本节点即定；确需更换须凭证据）**：默认 Node.js，不按路径预判；用户显式指定其他语言（如 Python）时遵从并写入最终总结。两类合法的例外/更换，均须在最终总结声明依据：① 用户显式指定（任意阶段）；② **服务端封锁证据驱动的切换**——REAL_VERIFY/DIAGNOSE 用跨客户端栈对照法证明默认语言客户端被服务端传输层指纹黑名单拦截（match19 实证：Node https/http2 全 400 token failed，curl/Python requests 同参数 200），此时切 Python `requests.Session` 是正确处置而非违规，语言切换记录写入总结 §6 与经验沉淀。补环境题型（B/C/D）核心为执行目标 JS 算法，选 Python 入口时须在总结声明 JS 执行桥接方式，禁止静默包 Node 子进程充当"Python 交付"。
 
 实现路径按以下顺序降级：
 
@@ -553,7 +554,7 @@ node scripts/compare_fixture.js --fixture case/fixtures/<样本>.fixture.json --
 
 **403/风控码分层定位协议（硬约束：下「连接层拦截 / 纯协议不可绕过」结论前必须完成）**：用「签名来源 × 连接来源」双对照定位拦截层，完整矩阵见 `references/network/ip-risk-control.md`：
 
-1. **正向对照**：浏览器**新鲜**签名 + 纯协议客户端（curl_cffi 等）重放 → 200 ⇒ 连接层无问题，问题在自己的签名内容；403 ⇒ 连接层嫌疑才成立。内嵌 serverTime/时间戳的签名有有效期，对照必须用采集后立即重放的新鲜样本并记录采集→重放延迟；**用过期样本得到的 403 不构成任何结论**（实战误判：拼多多 40002 被误判为连接层风控）。
+1. **正向对照**：浏览器**新鲜**签名 + 纯协议客户端（curl_cffi 等）重放 → 200 ⇒ 连接层无问题，问题在自己的签名内容；403 ⇒ 连接层嫌疑才成立。内嵌 serverTime/时间戳的签名有有效期，对照必须用采集后立即重放的新鲜样本并记录采集→重放延迟；**用过期样本得到的 403 不构成任何结论**（实战误判：拼多多 40002 被误判为连接层风控）。**对照客户端本身也可能是变量（match19 实证）**：同一份请求用多个不同 TLS 栈各发一次（curl / Python requests / Node https+http2），若浏览器 200、curl/requests 200、唯独 Node 400 → 是服务端 TLS ClientHello 黑名单而非签名内容——"错误文案不指示病因层"（同是 `token failed`，match9 是 m-cookie 缺失、match19 是客户端栈被拉黑）；详见规则 27 跨客户端栈对照法。
 2. **反向对照**：自己的签名 + 真实浏览器连接（取证阶段 ruyipage `add_preload_script` hook XHR.open 替换目标参数，hook 必须带执行标记并验证）→ 403 ⇒ 服务端校验签名内容，与连接无关。
 3. 定位为「签名内容被校验」后，用**对齐探针法**测量 SDK 实际内嵌的环境检测并逐位对齐（见 `references/env/env-detect-bypass.md`），不要先假设需要复现 canvas/行为轨迹等完整浏览器指纹。
 4. **对照必须在健康 session 下做，且一次只改一个变量**：连续失败会触发站点惩罚机制（惩罚期内连浏览器基线请求都被拒，对照数据全部作废）；每组对照前先复刻一次确定成功的基线请求，失败即冷却后重做。HTTP 200 + 业务层风控文案时先按 `references/network/ip-risk-control.md` 会话状态类风控专节（蜜月期窗口/"频率墙"误判警示/失败惩罚）排查。

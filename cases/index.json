@@ -727,6 +727,31 @@
       "strategy": "B vm 沙箱黑盒执行 + D 环境伪装：取证内联 JSVMP（jsvmpzl v1.1.3）一字不改跑 Node vm，语义级环境对齐（宿主内建注入为自有属性 / navigator.webdriver 挂原型 / readyState=complete + 合成鼠标事件序列）；t=服务器秒（Date.now 重写同步 getTime），v=VM 字节码非确定性密文靠服务端验收；VM 不签 page 字面值 1/5，末页用 page=05+UA=yuanrenxue 双重校验通过；数据绑定 sessionid（答案 32036118）；提交 POST /a/18 表单编码（code=2 通关）",
       "file": "yuanrenxue-match18-jsvmp-mouse-gated-signature.md",
       "verifiedAt": "2026-08-28"
+    },
+    {
+      "title": "请求/响应全明文 + Node TLS 指纹黑名单 + 末页 UA 分流（猿人学第19题）",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match19",
+        "乌拉乌拉乌拉",
+        "api/question/19",
+        "token failed",
+        "TLS 指纹黑名单",
+        "客户端栈对照",
+        "Node https 400",
+        "yuanrenxue UA",
+        "末页 UA",
+        "诱饵参数",
+        "window.match19",
+        "deep-extend 丢弃",
+        "k.extend undefined",
+        "window.request 未定义"
+      ],
+      "strategy": "A 纯算还原 + E 传输层对齐：请求侧全明文过无签名三判据后收手（m:window.match19 是诱饵——k.extend 深拷贝丢弃 undefined 键，真实请求无 m）；难点在传输层——Node https/http2 全部 400 token failed（服务端 TLS ClientHello 黑名单），跨客户端栈对照（curl/requests 200 vs Node 400）定位后切 Python requests.Session 交付；page5 必须 UA=yuanrenxue（普通 UA 返回提示数组非 4xx）；数据绑定 sessionid（答案 27219355）；提交 POST /a/19 表单编码（code=2 通关）",
+      "file": "yuanrenxue-match19-tls-fingerprint-blocklist.md",
+      "verifiedAt": "2026-08-29"
     }
   ]
 }

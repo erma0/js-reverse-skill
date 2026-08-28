@@ -650,9 +650,24 @@ def _trigger_actions(page, args: argparse.Namespace, human: str) -> None:
             logger.info("已向下滚动 %s px", amt)
         except Exception as e:
             logger.warning("scroll 失败：%s", e)
+    if args.click and args.click_delay > 0:
+        # 导航（wait="interactive"，DOMContentLoaded 即返回）后页面自身的首屏 AJAX 往往还在
+        # 飞行中，很多页面此时把操作按钮置为 disabled（disabled 控件不派发 click 事件）——
+        # 立即点击会被静默吞掉：无报错、无请求、无命中（match19 翻页实测两次空耗各 120s）。
+        # --click-delay 让点击等页面 loading 态结束、按钮恢复可用后再执行。
+        logger.info("等待 %.1fs 再执行点击（--click-delay）", args.click_delay)
+        time.sleep(args.click_delay)
     if args.click:
         try:
             ele = page.ele(args.click, timeout=10)
+            if not ele:
+                logger.warning(
+                    "click 选择器未命中元素，已跳过点击（不会在当前位置盲点）：%s。"
+                    "ruyipage 对部分属性选择器（如 [data-page=5]）可能查不到且不报错，"
+                    "改用 id 或结构选择器（如 css:#pgxNext、css:#pgxPages button:nth-child(5)）",
+                    args.click,
+                )
+                return
             act = page.actions
             if hasattr(act, "human_click"):
                 act.human_click(ele, algorithm=human).perform()
@@ -1204,9 +1219,36 @@ def _build_result(args, browser_path, baseline_id, fingerprint, cookies,
     }
 
 
+def _rotate_previous(out_dir: str, names: List[str], keep: int = 3) -> None:
+    """把上一轮取证产物轮转备份为 <name>.prev-1 … <name>.prev-<keep>，再写入本轮。
+
+    多轮取证（重采/翻页/末页 UA 验证）默认写同名文件，上一轮关键样本（如 page=2
+    响应体只存在于那一轮的 target-hits.json）会随覆盖**不可恢复地丢失**——match19
+    实测返工点：run4 抓到 page1+page2 双序号样本，run5 覆盖后只能重采一遍。
+    带非 .json 后缀（.prev-N）避免被证据门禁/分析脚本按普通 json 扫描。
+    """
+    for name in names:
+        base = os.path.join(out_dir, name)
+        if not os.path.exists(base):
+            continue
+        try:
+            oldest = os.path.join(out_dir, f"{name}.prev-{keep}")
+            if os.path.exists(oldest):
+                os.remove(oldest)
+            for i in range(keep - 1, 0, -1):
+                src = os.path.join(out_dir, f"{name}.prev-{i}")
+                if os.path.exists(src):
+                    os.replace(src, os.path.join(out_dir, f"{name}.prev-{i + 1}"))
+            os.replace(base, os.path.join(out_dir, f"{name}.prev-1"))
+            logger.info("已轮转上一轮产物 %s → %s.prev-1", name, name)
+        except Exception as e:
+            logger.warning("轮转 %s 失败（不影响本轮输出）：%s", name, e)
+
+
 def _write_outputs(args, browser_path, records_meta, target_hits, related_hits, fingerprint, baseline_id, js_dir):
     """落盘抓包元数据、终态目标、关联链路与指纹基线，返回输出路径字典。"""
     os.makedirs(args.out_dir, exist_ok=True)
+    _rotate_previous(args.out_dir, ["capture.json", "target-hits.json", "related-hits.json", "document.html"])
     with open(os.path.join(args.out_dir, "capture.json"), "w", encoding="utf-8") as f:
         json.dump(records_meta, f, ensure_ascii=False, indent=2)
     with open(os.path.join(args.out_dir, "target-hits.json"), "w", encoding="utf-8") as f:
@@ -1888,7 +1930,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     p.add_argument("--max-related-packets", type=int, default=60, help="终态前关联动态 body 的最大包数，默认 60；从终态向前优先保留")
     p.add_argument("--max-related-total-bytes", type=int, default=100 * 1024 * 1024, help="终态前关联动态 body 的总保留预算，默认 100MB")
     p.add_argument("--no-related-bodies", action="store_true", help="关闭终态前关联动态 body 自动保存，仅保留 JS/目标接口响应体")
-    p.add_argument("--click", default="", help="导航后拟人点击的 CSS 选择器")
+    p.add_argument("--click", default="", help="导航后拟人点击的选择器；优先用 id/结构选择器（css:#pgxNext、css:#pgxPages button:nth-child(5)），部分属性选择器（[data-page=5]）查不到且不报错")
+    p.add_argument("--click-delay", type=float, default=0.0, help="导航后延迟 N 秒再执行 --click（单位秒，默认 0）。页面 DOMContentLoaded 时自身首屏 AJAX 常还在飞行中、操作按钮处于 disabled 态，立即点击会被静默吞掉（disabled 控件不派发 click）；建议 5~30 秒")
     p.add_argument("--scroll", type=int, default=0, help="导航后滚动像素数")
     p.add_argument("--manual-pause", action="store_true", help="导航后暂停，等待手动完成登录/业务再继续；AI 后台运行遇非交互 stdin（EOF）时自动退化为等待 --wait，不阻塞")
     p.add_argument("--cookie", action="append", default=[], metavar="NAME=VALUE", help="预置 Cookie，可多次传；支持 'name=value' 或 'a=1; b=2' 分号分隔（注入到页面所在域名）。用于绕过需登录态/预置会话的页面，缺省域名取 --url 的主机，可用 --cookie-domain 显式指定")
@@ -1903,6 +1946,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         p.error("--url 为必填项（--self-test 除外）")
     if a.wait < 0 or a.settle < 0 or a.target_settle < 0:
         p.error("--wait/--settle/--target-settle 不能为负数")
+    if a.click_delay < 0:
+        p.error("--click-delay 不能为负数")
     if a.target_settle > 120:
         p.error("--target-settle 单位是秒（默认 3；验证码/登录重试建议 10~30，上限 120）。当前值 %s 疑似把毫秒当秒传入（如 15000ms 应写 15），按此值收尾窗口会阻塞数小时" % a.target_settle)
     if a.wait > 600:
