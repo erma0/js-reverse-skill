@@ -18,6 +18,7 @@ function parseArgs(argv) {
     targetSignals: [],
     signalPolicy: 'strict',
     noSummaryWrite: false,
+    summaryWrite: false,
     json: false,
     markdown: false,
   };
@@ -33,6 +34,7 @@ function parseArgs(argv) {
     else if (a === '--target-signal' || a === '--trace-signal') args.targetSignals.push(nextVal(''));
     else if (a === '--signal-policy') args.signalPolicy = nextVal('strict');
     else if (a === '--no-summary-write') args.noSummaryWrite = true;
+    else if (a === '--summary-write') args.summaryWrite = true;
     else if (a === '--json') args.json = true;
     else if (a === '--markdown') args.markdown = true;
     else if (a === '--help' || a === '-h') args.help = true;
@@ -58,7 +60,8 @@ function usage() {
 --trace-signal <信号>（可多次）：扫描日志中的环境 API / writer / 参数写入点。
 --target-signal <信号>（兼容旧调用）：等价于 --trace-signal。
 --signal-policy strict|advisory：strict 未命中退出非 0；advisory 只报告未命中，不把有效 NDJSON 误报为“采集失败”。
---no-summary-write：不覆盖写入 notes/ruyitrace-summary.md。capture_ruyitrace_log.js 对 cookie/storage/event 等分类日志导入时使用，避免分类日志覆盖主 DOM trace 摘要。`;
+--no-summary-write：不覆盖写入 notes/ruyitrace-summary.md。capture_ruyitrace_log.js 对 cookie/storage/event 等分类日志导入时使用，避免分类日志覆盖主 DOM trace 摘要。
+--summary-write：强制写入摘要。纯分类日志导入默认已跳过摘要覆盖（避免 check_trace_gate.js 读到「摘要未关联目标域」的假证据），确需写入时用本标志。`;
 }
 
 function exists(p) {
@@ -92,6 +95,16 @@ function classifyApi(api) {
   if (/Worker|ServiceWorker|postMessage|MessageChannel/.test(api)) return 'worker-message';
   if (/Document|Element|Node|CSS|Style|Layout|DOMRect/.test(api)) return 'dom-layout';
   return 'other';
+}
+
+// 分类日志识别：capture_ruyitrace_log.js 按 trace_<category>_process_<pid>.ndjson 命名
+// storage/cookie/event/descriptor/eval/wasm 等分类日志只记录对应模块的事件，
+// 不包含业务 JS 调用栈（stack.file），不适用「页面 JS 覆盖」质量判定（match20 实测误判来源）。
+const CATEGORY_LOG_RE = /^trace_(storage|cookie|event|descriptor|eval|wasm|jscall|jsvmp)_process_.+\.(?:ndjson|jsonl)$/i;
+function classifyLogFile(file) {
+  const base = path.basename(String(file || '')).toLowerCase();
+  const m = CATEGORY_LOG_RE.exec(base);
+  return m ? m[1] : null;
 }
 
 function visibleHash(value) {
@@ -299,7 +312,14 @@ function renderMarkdown(result) {
   lines.push(`- 目标信号策略：${result.signalPolicy || 'strict'}`);
   lines.push('', '## 质量判定');
   const q = result.summary.quality || {};
-  if (!q.hasPageJs) {
+  const inputCategories = inputs.map((f) => classifyLogFile(f));
+  const allCategoryLogs = inputCategories.length > 0 && inputCategories.every((c) => c !== null);
+  if (allCategoryLogs) {
+    // 分类日志（storage/cookie/event/descriptor/eval/wasm）本就不含 stack.file，
+    // 「页面 JS 覆盖」判定对它必然误报「重度不足」——改为说明性输出并指向主日志（match20 实测）。
+    lines.push(`- [说明] 本批输入全部为分类日志（${[...new Set(inputCategories)].join('/')}）：按设计只记录对应模块事件，不含业务 JS 调用栈，**不适用「页面 JS 覆盖」质量判定**。`);
+    lines.push('- trace 质量必须以 domtrace/ 主日志（trace_process_*.ndjson）为准；请先导入主日志并复查 `check_trace_gate.js`，不要因本摘要判 TRACE_RETRY。');
+  } else if (!q.hasPageJs) {
     lines.push('- [重度不足] **未覆盖页面 JS**：stack.file 无任何 http/https 页面脚本（全为浏览器内核 resource:// / file:// / self-hosted 路径），疑似只采集到浏览器内核/父进程，未命中目标页面，按 TRACE_RETRY 处理（查因→重试/转手动/降级补充）。');
   } else if (q.apiEmptyRatio > 0.95) {
     lines.push(`- [重度不足] **有效 API 调用占比过低**（api 为空记录占比 ${(q.apiEmptyRatio * 100).toFixed(1)}%），疑似采集不完整或字段缺失，按 TRACE_RETRY 处理。`);
@@ -388,7 +408,18 @@ async function main() {
   const summary = await summarizeNdjson(copiedTo, args);
   const result = { inputs, copiedTo, summary, signalPolicy: args.signalPolicy };
   const md = renderMarkdown(result);
-  if (!args.noSummaryWrite) fs.writeFileSync(path.join(notesDir, 'ruyitrace-summary.md'), md, 'utf8');
+  // 纯分类日志导入默认不覆盖 notes/ruyitrace-summary.md：分类日志不含目标域/信号信息，
+  // 覆盖后 check_trace_gate.js 会读到「摘要未关联目标域」的假证据（match20 实测返工点）。
+  // 混合导入（含主日志）或用户显式 --no-summary-write=false 语义不变；需要强制写分类日志摘要时传 --summary-write。
+  const allCategoryLogs = inputs.length > 0 && inputs.every((f) => classifyLogFile(f) !== null);
+  let summarySkipped = false;
+  if (allCategoryLogs && !args.noSummaryWrite && !args.summaryWrite) {
+    summarySkipped = true;
+    console.error('[说明] 输入全部为分类日志：已跳过 notes/ruyitrace-summary.md 覆盖（主 trace 摘要保留）；确需写入请加 --summary-write');
+  } else if (!args.noSummaryWrite) {
+    fs.writeFileSync(path.join(notesDir, 'ruyitrace-summary.md'), md, 'utf8');
+  }
+  result.summarySkipped = summarySkipped;
   if (args.json) console.log(JSON.stringify(result, null, 2));
   if (args.markdown) process.stdout.write(md);
   if (args.targetSignals.length && !summary.targetSignal.allHit && args.signalPolicy === 'strict') {

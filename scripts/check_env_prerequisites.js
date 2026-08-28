@@ -33,7 +33,7 @@ function usage() {
 
 说明：
 - IMPLEMENT 前置（SKILL.md 4.4）：补环境（路径 B/C/D）前必须基于 RuyiTrace 产出两份文件，缺一不得开始。
-- entry-chain.md 校验：非空，且至少含一处 stack 定位（文件名:行号 形态，如 app.js:123 或 https://.../app.js:123:5）。
+- entry-chain.md 校验：非空，且至少含一处 stack 定位（文件名:行号 形态，如 app.js:123 或 https://.../app.js:123:5；webpack sourceURL 的 js?:147:37 带查询串形态也接受）。
 - missing-env-priority.md 校验：非空；含优先级标记（"优先级"或 P0/P1/P2 表述），且含证据来源标记
   （"RuyiTrace 证据" / "Node trace 补充" / "推断"）或黑盒声明（"黑盒执行，不逐项精确复现"）。
 - 黑盒执行无法逐项精确复现时允许以"已观测环境读取清单 + 黑盒声明"替代逐项清单，但不得以黑盒为由跳过本门禁。`;
@@ -47,8 +47,9 @@ function readText(p) {
   return fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
 }
 
-// stack 定位：文件路径/名 + :行号（可选 :列号）。兼容 https://host/a.js:1:2、app.js:33、chunk-1.js:88
-const STACK_REF_RE = /[\w./@~-]+\.[A-Za-z0-9]{1,5}:\d+(?::\d+)?/;
+// stack 定位：文件路径/名 + :行号（可选 :列号）。兼容 https://host/a.js:1:2、app.js:33、chunk-1.js:88，
+// 以及 webpack eval sourceURL 带查询串的形态 webpack:///./pkg/index_bg.js?:147:37（? 归一化前原样，match20 实测）
+const STACK_REF_RE = /[\w./@~?=-]+\.[A-Za-z0-9]{1,5}\??\s*:\d+(?::\d+)?/;
 
 function checkEntryChain(text) {
   const problems = [];
@@ -157,7 +158,13 @@ function runSelfTest() {
     fs.writeFileSync(path.join(root, 'case', 'notes', 'missing-env-priority.md'), '   \n', 'utf8');
     r = check(root);
     if (r.pass || !r.problems.some((p) => p.includes('内容为空'))) throw new Error('空文件应拦截');
-    return { clean: true, tests: 5 };
+
+    // case 6: webpack eval sourceURL 带 ? 的 stack 形态 → 通过（match20 实测被旧正则误拒）
+    fs.writeFileSync(path.join(root, 'case', 'notes', 'missing-env-priority.md'), '| 模块 | api | 优先级 | 证据 |\n|---|---|---|---|\n| wasm | sign | P0 | RuyiTrace 证据 |', 'utf8');
+    fs.writeFileSync(path.join(root, 'case', 'notes', 'entry-chain.md'), '入口 req → builder sign\nstack webpack:///./pkg/index_bg.js?:147:37 func:sign\nstack webpack:///./index.js?:39:19 func:req\n', 'utf8');
+    r = check(root);
+    if (!r.pass) throw new Error(`webpack ? 形态 stack 应通过，实际：${r.problems.join('；')}`);
+    return { clean: true, tests: 6 };
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

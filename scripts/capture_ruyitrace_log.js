@@ -1019,7 +1019,9 @@ async function capture(args, plan) {
     const mainMaxLines = candidates
       .filter((c) => mainSet.has(path.resolve(c.file)))
       .reduce((m, c) => Math.max(m, c.lines), 0);
-    const missedBigger = candidates.filter((c) => !c.imported && c.lines > mainMaxLines);
+    // 「更大候选」只在 domtrace 主日志里找：分类日志（storage/cookie/event/descriptor/eval/wasm）
+    // 行数再大也不是页面 JS trace（match20 实测 7241 行 storage 日志触发假告警，误导手动导入顺序）。
+    const missedBigger = candidates.filter((c) => !c.imported && c.lines > mainMaxLines && /[\\/]domtrace[\\/]/.test(c.file));
     if (!effectiveMain.length || result.mainTraceRescued || missedBigger.length) {
       result.traceCandidates = candidates;
       result.manualImportCommands = candidates

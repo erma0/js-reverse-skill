@@ -109,6 +109,8 @@ function patchWasmBindgenEnv() {
 }
 ```
 
+**import 桩语义（match20 实测的关键坑）**：不改写全局、直接提供 importObject 桩时，桩的返回值要按"浏览器里会返回什么"对齐，不是按"Node 里什么是真的"——get-global 初始化链要求 `__wbg_instanceof_Window_*` 桩返回 **true**、`__wbg_document_*`/`__wbg_body_*` 桩返回**非空对象**（空壳 `{body:{}}` 即可），返回 false/None 会让 Rust 端进 `unreachable`。详见 `env-debug-loop.md`「WASM trap：unreachable」专节。
+
 ## Emscripten 环境补全
 
 Emscripten 编译的 WASM 通常需要提供 `Module` 对象：
@@ -189,6 +191,7 @@ async function runWasmSign(wasmPath, inputData) {
 2. 内存大小是否足够（`TOTAL_MEMORY` / `initial`）
 3. 是否缺少 `Math`、`Date` 等宿主对象
 4. Emscripten 是否需要 `ENV`、`PATH`、`FS` 等运行时
+5. **wasm-bindgen 的 get-global 检测链**（match20 实证）：imports 全部提供仍裸 trap `RuntimeError: unreachable` 时，优先怀疑 `instanceof_Window` 桩返回了 false（浏览器语义是 true）或 `document`/`body` 桩返回 None——给每个 import 桩加一行调用日志（桩名 + 实参），看访问序列停在哪个桩之后即可锁定。诊断流程与修复清单见 `env-debug-loop.md`「WASM trap：unreachable」专节。
 
 ### 输出为空或错误
 

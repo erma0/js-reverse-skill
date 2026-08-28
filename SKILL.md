@@ -450,7 +450,7 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 | md5、sha、aes、hmac、SM2/SM4/SM3 | 定位入口后优先纯算法还原 |
 | `_0x`、obfuscator.io、控制流平坦化 | AST 反混淆工具链处理（命令入口见下方），再判断是否可纯算 |
 | 200KB+、while-switch、dispatcher、字节码数组 | JSVMP 黑盒执行或最小环境复现，不反编译 |
-| WebAssembly、wasm base64、webpack 内嵌 wasm | 先整包黑盒，不默认补完整浏览器、禁止先手撕字节码 |
+| WebAssembly、wasm base64、webpack 内嵌 wasm | 先整包黑盒，不默认补完整浏览器、禁止先手撕字节码；带 `__wbg_*` 导入的 wasm-bindgen 模块原样还原 glue，Node 沙箱桩语义陷阱见路径 C 与 env-debug-loop「WASM trap：unreachable」（match20） |
 | 412 循环、sdenv、挑战 Cookie | 先还原挑战链，再确认业务签名链 |
 | webmssdk、byted_acrawler、bdms、a_bogus、X-Bogus、_signature | trace 定位环境读取和签名写入；注意 `byted_acrawler.sign` 多返回老版 `_signature`，`a_bogus`/`X-Bogus` 由 `bdms` 生成，两者不可混淆 |
 | geetest、smcp、dx-captcha、TCaptcha、NECaptcha、AWSC | 按封装层、答案层、verify 链分别处理 |
@@ -519,7 +519,7 @@ node scripts/run_with_trace.js --target <project-root>/case/js/original/<资源�
 
 A. 纯算法：Node `crypto`、Python `hashlib`/成熟密码库和原始序列化规则。
 B. 最小 JS 沙箱：提取算法闭包，在隔离上下文提供已证实需要的对象和函数。**从 webpack/rollup 打包 bundle 抠模块黑盒执行时，必须复刻打包器注入的宿主对象**——webpack 的 `__webpack_require__` 桩要作为 `n` 传入且 `n.g = globalThis`，否则依赖 `n.g` 的 `try/catch` 兜底分支会静默走错分支，产出"格式全对但服务端全拒"的签名（反模式 26）；模块切片定界（模块体边界 = 下一模块起点 - 2，追加 0~5 个 `}` 逐个 `node --check`）、各模块隔离作用域并共享同一 `window`、反调试代码 try/catch 包住即可不必删，见规则 26。**JSVMP 整体黑盒执行时的语义级对齐（值对 ≠ 对齐，match18 实证）**：① VM 经 `window.XXX` 取内建（如 `___.BigInt`）时，宿主内建必须是 sandbox **自有属性**（`vm.createContext(base)` 的内建不在 base 对象上，缺失 → 字节码自吞 TypeError 后 0 步静默退出）；② 探测类属性（`navigator.webdriver`）必须挂**原型**——真实浏览器里 `hasOwnProperty('webdriver')` 为 false，自有属性即被判定自动化环境；③ VM 注册的交互监听（mousemove/mousedown/mouseup）要由 addEventListener 桩**捕获**并派发合成事件，`document.readyState` 给浏览器同款值——不派发事件则签名链路静默不产出。症状识别与"window 级 Proxy + VM 原语包装 + 浏览器 trace seq 对齐"定位法见反模式 28 / 规则 28 / env-debug-loop「静默退出诊断」专节。
-C. WASM：复现加载、内存、导入和导出调用，固定输入输出契约。**无外部导入的确定性 wasm 是最简形态**（如猿人学 match15 的 `main.wasm`，`WebAssembly.Module.imports()` 为空、`(i32,i32)->i32` 纯确定性）：Node 原生 `WebAssembly.instantiate(bytes)` 直接执行导出函数即可，无需任何补环境，同一实例可跨请求复用；wasm 进交付物用独立文件（`result/wasm/`）或程序注入 base64（禁止手贴长字符串），注入后 md5 核对原始证据，见 common-pitfalls 反模式 25。
+C. WASM：复现加载、内存、导入和导出调用，固定输入输出契约。**无外部导入的确定性 wasm 是最简形态**（如猿人学 match15 的 `main.wasm`，`WebAssembly.Module.imports()` 为空、`(i32,i32)->i32` 纯确定性）：Node 原生 `WebAssembly.instantiate(bytes)` 直接执行导出函数即可，无需任何补环境，同一实例可跨请求复用；wasm 进交付物用独立文件（`result/wasm/`）或程序注入 base64（禁止手贴长字符串），注入后 md5 核对原始证据，见 common-pitfalls 反模式 25。**带导入的 wasm-bindgen 模块**（match20 实证）：imports 是 glue 的 `__wbg_*` 桩，原样还原 glue + heap 管理即可，get-global 初始化链的桩语义陷阱（`instanceof_Window` 须返回 true、document/body 须非空对象，否则 wasm trap `unreachable`）见 env-debug-loop「WASM trap：unreachable」专节；**wasm 字节获取**：取证通道对 `instantiateStreaming` 流式源只记元数据拿不到字节（ruyitrace-cheatsheet WASM 节），本地无字节时按 dynamic-resource.md 运行时二进制拉取 + hash 校验 + fixture 对拍兜底版本变更，不得从文本化损坏的抓包产物里恢复。
 D. 环境伪装：仅补 trace 证明必要的 Web API、对象形状、Realm、时间、随机数和指纹行为。环境对齐的验收线是**服务端校验的自洽性**，不是与真实浏览器逐字节一致——多数站点只校验参数间自洽（解码指纹重算签名比对），vm 沙箱指纹与真实浏览器存在少量差异仍可通过（match14 实证：mz 指纹 53 字段中 4 处差异不影响通过）；先用最小沙箱 + 真实请求试探，按需对齐，不预先逐字节复刻。服务端校验签名内嵌环境检测结果时（403 但正反对照显示连接无问题），用对齐探针法定位差异位——注入导出 SDK 检测函数，浏览器采样 ground-truth 与沙箱采样逐位 diff（见 `references/env/env-detect-bypass.md`）。
 E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定向和动态资源预热。**不是每题都有签名**——请求侧参数全明文时走 A+E，不做补环境（match4/7/12/17 实证）。判定"无签名"必须过三条判据：① 网络层——`case/forensic/target-hits.json` 目标请求除业务参数外无动态字段，可疑参数名在 capture.json 全量反查 0 次；② trace writer 层——`XMLHttpRequest.open` / `fetch` / `Headers.set` 参数全文里没有该字段；③ Cookie/存储层——目标域无 JS 写入 cookie、无 WASM/JSVMP/混淆 SDK。三条全干净即收手，转查传输层（协议版本/ALPN、UA 红线、登录凭据）与响应层（内容还原）。**参数名存在 ≠ 参数生效**：`m:window.match17` 这类 hook 遗留参数恒为 `undefined`、被 `$.param` / `URLSearchParams` 静默丢弃，拿去逆算法是无解方向——生效性只看 trace writer 参数全文与 capture.json 真实 URL（反模式 27）。实现侧用 Node 原生 `node:http2`：一次 `http2.connect()` 建会话、多次 `client.request()` 复用、最后 `client.close()`（天然满足 Session 门禁三件套），`client.alpnProtocol === 'h2'` 自检，**不发 `accept-encoding`** 避免 br/zstd 额外解压。详见规则 27。
 
@@ -537,7 +537,7 @@ E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定�
 node scripts/compare_fixture.js --fixture case/fixtures/<样本>.fixture.json --actual case/tmp/<实际输出>.json --field <目标参数> --markdown
 ```
 
-退出码 0（字段一致）才进入真实 API 验证；退出码 2 表示首个偏差点已定位，回 IMPLEMENT 修复后复跑。fixtures 属于可复核证据，脱敏后随交付保留。
+退出码 0（字段一致）才进入真实 API 验证；退出码 2 表示首个偏差点已定位，回 IMPLEMENT 修复后复跑。fixtures 属于可复核证据，**只放 `case/fixtures/`（随项目保留）**——`result/` 下任何文本文件不得包含样本加密参数值（含期望值）：`check_final_artifact.js` 对 result 全量文本扫描样本值命中即判「复用样本参数」。交付入口读取 fixture 做 selftest 时用 `../case/fixtures/<样本>.fixture.json` 相对路径并容忍缺失（缺失则警告跳过对拍，主流程不受影响，match20 实测返工点）。
 
 范围纪律：黑盒输出与取证样本结构一致后，直接用真实目标 URL 进入 REAL_VERIFY；内部参数映射等旁支问题记录到 `经验沉淀-<站点>.md`，不阻塞主交付、不横向展开。
 

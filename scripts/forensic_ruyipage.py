@@ -446,6 +446,33 @@ def _safe_body(body: Any) -> bytes:
     return json.dumps(body, ensure_ascii=False).encode("utf-8", "replace")
 
 
+def _raw_body_from_packet(packet: Any, direction: str = "response") -> Optional[bytes]:
+    """直读 BiDi collector 的 base64 通道，返回无损原始响应字节；不可得时返回 None。
+
+    背景（match20 实测）：ruyipage 库的 ``_decode_body_value`` 把 BiDi base64 通道
+    b64decode 后再做 ``decode("utf-8", errors="replace")``，二进制 body（wasm/图片/
+    octet-stream）在 packet 的 ``response_body`` str 里已被 U+FFFD 文本化替换，信息
+    不可逆丢失，落盘 .wasm 无法编译。BiDi ``network.getData`` 的 base64 通道保存的是
+    原始字节，这里经 packet 的 collector 直接读取绕过库层文本化。任何失败都返回 None，
+    调用方回退 ``_safe_body`` 文本路径，不影响既有行为。
+    """
+    try:
+        attr = "_response_collector" if direction == "response" else "_request_collector"
+        collector = getattr(packet, attr, None)
+        rid = getattr(packet, "request_id", "")
+        if not collector or not rid:
+            return None
+        data = collector.get(rid, data_type=direction)
+        b64 = getattr(data, "base64", None)
+        if isinstance(b64, dict) and b64.get("type") == "base64":
+            value = b64.get("value")
+            if isinstance(value, str) and value:
+                return base64.b64decode(value)
+        return None
+    except Exception:
+        return None
+
+
 def _json_default(value: Any) -> Any:
     """第三方对象的 JSON 最终兜底，避免取证已落盘却在 CLI 输出阶段报错。"""
     to_dict = getattr(value, "to_dict", None)
@@ -762,12 +789,15 @@ def _serialize_packet_bodies(
     max_wasm_bytes: Optional[int] = None,
     out_dir: Optional[str] = None,
     capture_index: int = -1,
+    raw_response_body: Optional[bytes] = None,
 ) -> Tuple[Dict[str, Any], int]:
     """保留完整 body 证据，JSON 仅内联小 body 或大 body 预览。
 
     返回 (序列化记录, 本次占用预算的原始字节数)。普通 body 超过 per_body_limit、
     WASM 超过 max_wasm_bytes、或剩余总预算不足时不会写入不可用的半包；JSON 中仅保留
     预览并显式标记 omitted_reason。完整二进制、大文本和所有 WASM 写入独立文件。
+    raw_response_body：BiDi base64 通道的无损响应字节（_raw_body_from_packet 产出），
+    提供时 response 方向优先使用，绕过库层 UTF-8 replace 文本化（wasm 取证关键）。
     """
     out = dict(d)
     inline_limit = max(0, min(
@@ -781,7 +811,11 @@ def _serialize_packet_bodies(
     for direction in ("response", "request"):
         body_key = f"{direction}_body"
         headers = out.get(f"{direction}_headers") or {}
-        raw = _safe_body(out.get(body_key))
+        if direction == "response" and raw_response_body:
+            raw = raw_response_body
+            out[f"{body_key}_lossless"] = True
+        else:
+            raw = _safe_body(out.get(body_key))
         if direction == "response":
             encoded = raw
             raw = _maybe_decompress(encoded, headers)
@@ -1057,6 +1091,7 @@ def _classify_packets(steps, args, substrings, regexes, body_cache=None):
             max_wasm_bytes=args.max_wasm_bytes,
             out_dir=args.out_dir,
             capture_index=i,
+            raw_response_body=_raw_body_from_packet(p),
         )
         serialized["capture_index"] = i
         serialized["related_reason"] = _related_reason(meta) or "terminal-predecessor"
@@ -1096,6 +1131,7 @@ def _classify_packets(steps, args, substrings, regexes, body_cache=None):
                 max_wasm_bytes=args.max_wasm_bytes,
                 out_dir=args.out_dir,
                 capture_index=i,
+                raw_response_body=_raw_body_from_packet(p),
             )
             serialized["capture_index"] = i
             target_hits.append(serialized)
@@ -2122,6 +2158,30 @@ def run_self_test() -> int:
         assert wasm_path.endswith(".wasm") and wasm_saved == len(wasm_body), "WASM 路径或预算计数错误"
         assert wasm_record.get("response_body_file_type") == "wasm", "WASM 类型标记错误"
         assert wasm_record.get("response_body_complete") is True, "完整 WASM 被误标为截断"
+
+        # 无损通道：response_body 已被库层文本化损坏（U+FFFD）时，raw_response_body
+        # （BiDi base64 通道字节）应原样落盘，且 sha256 基于无损字节（match20 实测）。
+        corrupted_text = wasm_body.decode("utf-8", "replace")
+        raw_record, raw_saved = _serialize_packet_bodies(
+            {
+                "url": "https://api.example.com/api2/20",
+                "method": "GET",
+                "response_headers": {"Content-Type": "application/wasm"},
+                "response_body": corrupted_text,
+            },
+            10 * 1024 * 1024,
+            20 * 1024 * 1024,
+            inline_limit=1024,
+            max_wasm_bytes=50 * 1024 * 1024,
+            out_dir=out_dir,
+            capture_index=9,
+            raw_response_body=wasm_body,
+        )
+        raw_path = os.path.join(out_dir, raw_record["response_body_saved_to"])
+        with open(raw_path, "rb") as f:
+            assert f.read() == wasm_body, "raw 通道必须逐字节落盘无损字节"
+        assert raw_record.get("response_body_lossless") is True, "无损通道标记缺失"
+        assert raw_saved == len(wasm_body), "无损通道预算计数错误"
         assert wasm_record.get("response_body_sha256") == hashlib.sha256(wasm_body).hexdigest(), "WASM SHA-256 错误"
 
         omitted_record, _ = _serialize_packet_bodies(

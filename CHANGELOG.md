@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## 2.3.86 - 2026-08-29
+
+### 经验固化（match20 案例入库：WASM wasm-bindgen 签名 + 取证工具四处修复）
+
+match20（2022 新年挑战）完整实战成果入库。sign 由 `/api2/20` 返回的 Rust wasm-bindgen 模块计算（`sign=wasmSign(page+'|'+t)`，t 为同步 `/api/getTime` 服务器毫秒文本），Node 原生 WebAssembly 黑盒执行通关（答案 27713926）。本题暴露的不是算法难点，而是 **wasm 字节获取** 与 **Node 沙箱桩语义** 两条证据链坑，以及三处门禁/导入工具的误报——均为实战返工点。
+
+- **新案例 `cases/yuanrenxue-match20-wasm-bindgen-sign.md`** + `cases/index.json`（38 条）+ match 题号速查表第 20 行。技术指纹：webpack 三 chunk + `/api2/20` 返回 `application/wasm`（funcCount=791，imports 13/exports 8，导出 `sign`）；RuyiTrace domtrace 出现 `passStringToWasm0`/`getStringFromWasm0` 即 wasm-bindgen 实锤；sign 32 位 hex 但**非** `md5("page|t")`（实测排除，防后人在纯算层空转）；题面「试炼步骤」区块为唯一口径来源（全部 5 页求和 + 末页 UA=yuanrenxue，首跑按 3 页口径提交 wrong answer 的返工记录）；页面 hook 残留拦 `/api/match/20` 存 `window.match20`（反模式 27 同族第六次实证）。踩坑 6 条。
+- **forensic_ruyipage.py 修复（wasm 取证字节文本化损坏）**：ruyipage 库层 `_decode_body_value` 对 BiDi base64 通道 b64decode 后 `decode('utf-8', errors='replace')`，二进制 body（wasm/图片/octet-stream）在 `response_body` str 里已被 U+FFFD 替换，落盘 `.wasm` 不可编译（match20：`section extends past end of the module`，FFFD×7427）。新增 `_raw_body_from_packet()`：经 packet 的 collector 直读 BiDi `getData` base64 通道拿**无损原始字节**，`_serialize_packet_bodies` 新增 `raw_response_body` 参数优先使用并标记 `response_body_lossless: true`（sha256 同步修正为真实字节哈希）；失败回退原路径零破坏。自测新增「response_body 已损坏 + raw 通道无损落盘」断言。
+- **import_ruyitrace_log.py/js 两处误报修复**：① 分类日志（storage/cookie/event/descriptor/eval/wasm，按 `trace_<category>_process_*.ndjson` 命名识别）本就不含 stack.file，导入摘要不再误判「重度不足：未覆盖页面 JS」，改为说明性输出并指向 domtrace 主日志；② 纯分类日志导入默认**跳过** `notes/ruyitrace-summary.md` 覆盖（match20 实测：分类日志摘要覆盖主 trace 摘要后，check_trace_gate.js 读到「摘要未关联目标域」假警告），需要强制写入加 `--summary-write`。
+- **capture_ruyitrace_log.js 告警修复**：「存在未导入的更大候选日志」只在 domtrace/ 主日志里比较——match20 实测 7241 行 storage 分类日志触发假告警（>4027 行主 trace），误导手动导入顺序；候选清单仍全量列出。
+- **check_env_prerequisites.js 正则兼容**：STACK_REF_RE 扩展接受 webpack eval sourceURL 带 `?` 查询串的 stack 形态（`webpack:///./pkg/index_bg.js?:147:37`，match20 实测被判「未发现 stack 定位」BLOCK）；自测补第 6 项断言。
+- **文档四处**：① `env-debug-loop.md` 新增「WASM trap：unreachable」专节（get-global 检测链序列、`instanceof_Window` 须返回 true / document·body 须非空、import 桩调用日志定位法、禁借机伪造指纹的红线）；② `env-wasm.md` 补 import 桩语义与 unreachable 第 5 项排查（互链）；③ `ruyitrace-cheatsheet.md` WASM 节补「字节获取边界」（instantiateStreaming 流式源 `no_bytes/metadata_only` 是设计行为；旧抓包 wasm 落盘默认视为损坏）；④ SKILL.md §9 路径 C 区分「无导入纯确定性」（match15）与「带导入 wasm-bindgen」（match20）两形态 + §10 fixture 约束精确化（**期望值只放 `case/fixtures/`，result/ 下任何文本文件不得含样本加密参数值**——门禁全量扫描，match20 实测 result/fixtures/ 被打回）+ §7 T1 wasm 行补 bindgen 指针。
+- **common-pitfalls.md**：反模式 25 追加第二形态（取证产物二进制默认先验完整性：FFFD 症状/编译报错特征/修复脚本/旧产物不受追溯）；反模式 28 追加形态四（wasm-bindgen import 桩返回"合理"但语义错误的值——值对 ≠ 对齐的 wasm 版）；同根因合并，不新增编号。
+- 验证：`forensic_ruyipage.py --self-test` 通过（含新增 raw 通道断言）；`check_env_prerequisites.js --self-test` 通过（6 项）；`check_skill_consistency.js --project-dir .` 通过（131 引用 0 问题）；`check_routing_benchmarks.js` 26/26 通过；`search_cases.js` 对 `match20`/`wasm-bindgen` 均命中新条目。
+
 ## 2.3.85 - 2026-08-29
 
 ### 方法论修正（跨客户端栈对照升级为三级客户端阶梯 + 判读矩阵 + 最低可用栈交付原则）

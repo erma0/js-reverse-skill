@@ -148,6 +148,12 @@
 | `MOZ_DOM_WASM_INSN_MAX_FUNCS` | 整数，`0`=无限 | `0` | 最多反汇编几个函数 |
 | `MOZ_DOM_WASM_INSN_MAX_BYTES` | 字节数 | `1048576`(1MB) | 单函数反汇编上限 |
 
+**字节获取边界（match20 实测，别在拿不到字节上空耗）**：
+
+- 页面用 `WebAssembly.instantiateStreaming(fetch(...))` 时，trace 只记 `imports_resolve` / `instantiate` 元数据（imports/exports 清单、funcCount），`dumped:false, dumpReason:"no_bytes"`（compile start 阶段）或 `"metadata_only"`（success 阶段）——**流式源拿不到完整模块字节**，`byteLength:0`/`sha256` 为空是设计行为不是故障。
+- ruyipage 网络层落盘的 wasm（bodies/wasm/ 或 forensic/wasm/）在旧版库层经 UTF-8 replace 文本化（FFFD×数千），二进制不可逆损坏、无法编译；2.3.86 起 `forensic_ruyipage.py` 已改走 BiDi base64 无损通道（记录带 `response_body_lossless: true`），**旧产物里的 wasm 落盘文件默认应视为损坏**。
+- 结论：需要可执行的 wasm 字节时，按 `references/network/dynamic-resource.md` 的运行时二进制拉取纪律（HTTP 客户端直拉 + 魔数/hash 校验），不要试图从 trace 或旧抓包产物里恢复字节。
+
 ## 4. 全量事件 trace（异步 C++ 写入）
 
 | 开关 | 可选值 | 默认 | 功能 |

@@ -310,8 +310,9 @@ signer 通常持有 vm context / WASM 实例 / 请求序号计数器 / Cookie �
 2. 长 base64 禁止手工复制进代码——用程序注入（脚本读文件 → base64 → 替换占位符），或直接以独立文件加载（`result/wasm/main.wasm`），同时规避代码质量门禁对超长内联行的误判。
 3. 失败排查顺序："能跑的版本 vs 不能跑的版本"先逐字段 diff 差异点（单变量原则），再归因时间/会话/算法。
 4. 抓取侧纪律（`references/network/dynamic-resource.md`：二进制抓取、禁止文本解码写回、版本校验）与交付侧纪律闭环为**"抓取 → 内联 → 交付"全链路资源完整性**。
+5. **取证产物里的二进制资源默认先验完整性再使用**（match20 实测的第二形态）：ruyipage 旧版库层对二进制 body 做 UTF-8 replace 文本化，抓包落盘的 `.wasm`（FFFD×数千、编译报 `section ... extends past end of the module`）不可逆损坏；RuyiTrace 对 `instantiateStreaming` 流式源只记元数据（`dumpReason=no_bytes/metadata_only`）。正确动作不是从损坏产物里"修复"字节（信息已丢失），改走运行时二进制拉取 + hash 校验 + fixture 对拍（match9/match20 先例）；2.3.86 起 `forensic_ruyipage.py` 已改走 BiDi base64 无损通道（记录带 `response_body_lossless: true`），旧产物不受此修复追溯。
 
-**判定测试**：交付物内是否含内联 base64/二进制资源？若有，是否记录了源文件 hash 并在注入后重新核对？"能跑的临时脚本 vs 失败的交付脚本"出现差异时，是否先 diff 两个版本的差异点再归因外部因素？
+**判定测试**：交付物内是否含内联 base64/二进制资源？若有，是否记录了源文件 hash 并在注入后重新核对？"能跑的临时脚本 vs 失败的交付脚本"出现差异时，是否先 diff 两个版本的差异点再归因外部因素？取证落盘的二进制资源（wasm/图片/octet-stream）使用前是否编译/解析验证过完整性（而非只看文件存在与大小）？
 
 ---
 
@@ -350,6 +351,7 @@ $.ajax = function () {
 - **形态一：vm 沙箱内建经 window 取而缺失**。JSVMP 序言 `___.BigInt`（`___=window`）经 window 对象取内建，而 `vm.createContext(base)` 的内建（BigInt/Object/Math…）**不是 base 的自有属性**——`window.BigInt === undefined`，字节码 `TypeError` 自吞后解释器 0 步退出。用 window 级 Proxy 才看到 `get BigInt undefined`。
 - **形态二：自动化特征误做自有属性**。补环境把 `navigator.webdriver=false` 写成 plain object 的自有属性 → `navigator.hasOwnProperty('webdriver')` 返回 true；真实 Firefox 里该属性挂在 `Navigator.prototype` 上、`hasOwnProperty` 为 false——**属性位置本身是自动化检测信号**，值对位置不对照样被判定为 bot 而静默退出。同族：`window.external` 缺失、`documentElement.getAttribute('selenium')` 探测。
 - **形态三：交互事件门控未回放**。VM 启动即注册 `mousemove/mousedown/mouseup` 监听并等待真实鼠标（配合 `document.readyState`），不派发事件则 open 包装器执行到一半静默不产出签名。addEventListener 桩若只是 no-op（不捕获监听器），宿主根本无从派发。
+- **形态四：wasm-bindgen import 桩返回"合理"但语义错误的值**（match20 实证）。Node 沙箱里 `WebAssembly.instantiate` 成功、调用导出函数抛裸 `RuntimeError: unreachable`（无 JS 堆栈）。wasm-bindgen 的 get-global 初始化链（`self() → newnoargs("return this") → call(null) → instanceof_Window(global) → document → body`）在浏览器里 `globalThis instanceof Window === true`；`instanceof_Window` 桩"合理地"返回 false（Node 无 Window），Rust 端分支枚举全不匹配直接执行 unreachable 指令；`document`/`body` 桩返回 None 同样让 Rust 端 unwrap 进 unreachable。**桩调用日志（每桩一行打印名+实参，看序列停在哪个桩之后）是定位手段**，修复清单见 env-debug-loop「WASM trap：unreachable」专节。共同教训：桩的返回值语义要按"浏览器里会返回什么"对齐，不是按"Node 里什么是真的"。
 
 **为什么辩护不成立**："没报错就是环境够了，差的是算法/密钥"——JSVMP 字节码对每个环境访问都有 try/catch 或条件分支，环境语义不对时走的是**干净退出分支**，不会留任何错误痕迹；此时在算法层枚举输入组合（反模式 23 同族）或继续堆更多桩都是无解方向。共同根因：**环境对齐停留在"API 存在、值正确"层面，没有对齐属性位置（own vs prototype）、运行时行为（事件、readyState）这类语义**。
 

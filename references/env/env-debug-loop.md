@@ -265,6 +265,33 @@ Cannot read properties of undefined (reading 'userAgent')
 
 处理：优先结合 RuyiTrace NDJSON 判断浏览器真实路径；NDJSON 不足时再结合 Node trace，补齐缺失对象或属性。
 
+### WASM trap：unreachable（wasm-bindgen 模块在 Node 沙箱）
+
+**现象**：Node 原生 `WebAssembly.instantiate` 成功（imports/exports 对齐），但调用 wasm 导出函数时抛 `RuntimeError: unreachable`——没有 JS 堆栈、没有 glue 层异常，裸 trap。
+
+**机理**：wasm-bindgen 生成代码带标准 get-global 检测序列，每次导出函数调用都会重跑：
+
+```text
+self() → is_undefined → object_drop_ref
+→ newnoargs("return this") → call(null) → object_clone_ref
+→ instanceof_Window(global) → document(global) → body(document) → ...
+```
+
+浏览器里 `globalThis instanceof Window === true`。`instanceof_Window` 桩返回 false 时，Rust 端的分支枚举（Window / Worker / …）全部不匹配，执行 `unreachable!()` 指令——**值对 ≠ 对齐的 wasm 版**：桩"合理地"返回 false 反而是错误语义。
+
+**诊断**：给每个 import 桩加一行访问日志（桩名 + 实参），看序列停在哪个桩之后。上例序列停在 `instanceof_Window` 之后的 trap，即该桩返回值语义错误。
+
+**修复清单（按序核对）**：
+
+1. `instanceof_Window` 桩返回 `true`（对齐浏览器 `globalThis instanceof Window`）。
+2. `document` / `body` 桩返回**非空对象**（空壳 `{document: {body: {}}}` 即可）——Rust 端对 `None` unwrap 同样进 unreachable；签名本体是纯字符串计算时不消费 DOM 内容，空壳无服务端影响。
+3. heap 管理（32 槽数组 + `heap.push(undefined, null, true, false)`，`dropObject` 的 `idx < 36` 守卫）与原 glue 逐行一致——heap 槽位错位会让桩之间传参互相踩踏。
+4. Node 侧全局兜底桩（`self`/`window`/`global`）对 undefined 取属性前判空，别让桩自己抛 ReferenceError 掩盖 wasm 端真实分支。
+
+**红线**：这些桩只服务 wasm 内部的初始化链，禁止借机伪造 navigator/canvas 等指纹面——补环境最小集合原则不变（trace 未显示 sign 读取 DOM/指纹内容时，空壳即正确答案）。
+
+实战参照：match20（`cases/yuanrenxue-match20-wasm-bindgen-sign.md`）——3 组跨会话样本对拍 3/3 通过。
+
 ### 输出不一致
 
 如果不再报错但签名不一致，且已选择 ruyiPage + RuyiTrace，先回看目标请求前前的 NDJSON 调用，再检查：
