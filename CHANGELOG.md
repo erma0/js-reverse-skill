@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 2.3.83 - 2026-08-29
+
+### 经验固化（match18 案例入库：JSVMP 静默退出 + 反模式 28「环境语义级偏差」+ 规则 28 双层插桩定位法 + 流程补强四处）
+
+match18（「jsvmp - 洞察先机」）完整实战成果入库。本次的核心认知是**JSVMP 沙箱最贵的失败是"静默退出"**——字节码对每个环境访问都有 try/catch 或条件分支，环境语义不对时走干净退出分支：顶层代码正常生效、零报错，但 VM 的 hook 装不上、签名不产出。AI 在"缺什么补什么"的全量堆桩里空耗多轮，真正的根因是三个语义级环境偏差（修一层才露出下一层）。
+
+- **新案例 `cases/yuanrenxue-match18-jsvmp-mouse-gated-signature.md`** + `cases/index.json`（36 条）+ match 题号速查表第 18 行。技术指纹：真实接口 `GET /api/v/question/18data?page=N`（页面 `/api/match/18`、`/api/question/18`、`window.request` 连环诱饵，反模式 27 第四次实证）；内联 script #12 = `jsvmpzl v1.1.3` 自研 VM（34.5KB 单行，字面量全编码静态 grep 不可见），包装 `XMLHttpRequest.open` 追加 `&t=<服务器秒>&v=<非确定性 base64>`（`Date.now` 重写同步 `/api/getTime`；Math.pow 随机填充，v 无法重放比对只能服务端验收）；**VM 等真实鼠标**（mousemove/mousedown/mouseup 监听 + readyState=complete）；**VM 字节码对 page 字面值 1/5 不签名**——末页 UA=yuanrenxue 触发 token 强校验，明文+改 UA → 400 token failed，正确姿势 `page=05`（服务端数值解析，VM 照常签）；数据绑定 sessionid（答案 32036118）；提交 `POST /a/18` 表单编码 → `code=2` 通关。
+- **common-pitfalls 新增反模式 28（环境语义级偏差 → JSVMP 沙箱静默退出，三形态同根因合并为一条）**：① vm 沙箱内建经 window 取而非自有属性（`vm.createContext(base)` 的内建不在 base 上，`___.BigInt` 拿 undefined → 字节码自吞 TypeError 0 步退出）；② 探测类属性误做自有属性（`navigator.webdriver` 真实浏览器挂 `Navigator.prototype`、`hasOwnProperty` 为 false，own property 即被判定 bot——**属性位置是信号，值对位置不对照样拒**）；③ 交互事件门控未回放（监听器桩不捕获则宿主无从派发合成事件）。速查表 19 → 20 实条（达到封顶线，指针行同步）。四个新坑入案例踩坑记录：run_with_trace 0 events 的真实含义、取证副本须放 `result/src/target/original/` 质量豁免路径、Session 三件套按调用形态字面识别、NO_TARGET 输出的重采候选即 targets 校准材料。
+- **experience-rules 新增规则 28（JSVMP 静默退出双层插桩定位法）**并新增第十三节：定位三板斧（window 级记录 Proxy → VM 原语包装看解码串流 → 浏览器 RuyiTrace 按序提取 VM 栈帧操作序列逐条对照找首个分歧点）+ 语义级对齐清单（内建取用路径/属性位置/运行时行为三个层级，值对 ≠ 对齐）。**env-debug-loop 新增「静默退出（零报错）诊断」专节**：与既有"错误分类"（抛错场景）互补，含 Proxy 记录器代码骨架、根因-症状-动作对照表、过滤口径陷阱（同一 document 的内联脚本共享 file 字段，须按 VM 行号帧过滤）、收敛标准（Proxy 序列与浏览器 trace 收敛 + hook 挂载物出现 + 真实请求通过）。
+- **SKILL.md 流程补强四处（均为 match18 实测返工点）**：① §9 路径 B 补「JSVMP 整体黑盒执行的语义级对齐」三形态与症状识别，指向反模式 28 / 规则 28；② §10 Session 三件套补检测形态说明（`client.get(...)` / `httpAgent.destroy()` 字面形态计入，封装层 `agent: getAgent()` / `a.destroy()` 不计入）；③ §11 交付节补「取证 JS 副本放 `src/target/original/` 豁免路径 + sha256 校验」与「写交付文档前先读 final-summary.md（8 章模板 / FINAL_ARTIFACT_* 机器标记 / 验证记录 mode+attempts 契约）」；④ §4.2 补 NO_TARGET 处置（按取证输出末尾「动态 2xx 重采候选」校准 --targets，不凭记忆换路径再赌）。
+- 验证：`check_skill_consistency.js --project-dir .` 通过（0 问题）；`search_cases.js` 对 `match18`/`jsvmp`/`静默退出` 均命中新条目；新增/修改文件 `node --check` 通过（本轮无脚本改动）；match18 真实交付（`ai-js-reverse/match18/result`）在补强后的 check_final_artifact / check_code_quality 上 EXIT=0 复验通过。
+
 ## 2.3.82 - 2026-08-28
 
 ### 知识库瘦身（common-pitfalls 反模式同根因合并：27 编号 → 19 实条 + 8 指针）

@@ -308,7 +308,7 @@ node scripts/search_cases.js --domain <目标域名> --signal <参数名或SDK�
 python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root> --targets <最终业务接口关键词> --markdown
 ```
 
-终态目标请求未命中 = Step 1 缺失，禁止转源码搜索继续。JS 源码关键词定位只能作辅助假设；用户也可提供 cURL/HAR/原始请求文本；终态命中并落盘后再回 EVIDENCE_GATE。
+终态目标请求未命中 = Step 1 缺失，禁止转源码搜索继续。JS 源码关键词定位只能作辅助假设；用户也可提供 cURL/HAR/原始请求文本；终态命中并落盘后再回 EVIDENCE_GATE。**NO_TARGET 不是死路（match18 实证）**：取证脚本输出末尾的「本次实际观察到以下动态 2xx 接口（重采候选）」就是校准 `--targets` 的第一手材料——诱饵接口路径导致首次未命中时，按候选列表锁定真实接口（本例 `api/v/question/18data`）重采即 PASS，不要凭记忆换下一个猜测路径再赌一次。
 
 - **退出码语义**：`PARTIAL`（仅 OPTIONS/非 2xx）与 `NO_TARGET`（完全未命中）均非 0；任一非 OPTIONS 2xx 命中即 `PASS`、退出码 0。HTTP 2xx 只表示目标请求已取证，不表示业务成功（通用脚本不猜业务码）。
 - **重试型场景**：登录可能因验证码/校验失败重试时调大 `--target-settle`（单位秒，默认 3；建议 10~30，上限 120），保证重试仍在同一会话内。关联材料以最后一次有效终态向前回溯，验证码中间接口不是额外终态门禁（load → verify 由分析阶段从同一会话回溯）。
@@ -517,7 +517,7 @@ node scripts/run_with_trace.js --target <project-root>/case/js/original/<资源�
 实现路径按以下顺序降级：
 
 A. 纯算法：Node `crypto`、Python `hashlib`/成熟密码库和原始序列化规则。
-B. 最小 JS 沙箱：提取算法闭包，在隔离上下文提供已证实需要的对象和函数。**从 webpack/rollup 打包 bundle 抠模块黑盒执行时，必须复刻打包器注入的宿主对象**——webpack 的 `__webpack_require__` 桩要作为 `n` 传入且 `n.g = globalThis`，否则依赖 `n.g` 的 `try/catch` 兜底分支会静默走错分支，产出"格式全对但服务端全拒"的签名（反模式 26）；模块切片定界（模块体边界 = 下一模块起点 - 2，追加 0~5 个 `}` 逐个 `node --check`）、各模块隔离作用域并共享同一 `window`、反调试代码 try/catch 包住即可不必删，见规则 26。
+B. 最小 JS 沙箱：提取算法闭包，在隔离上下文提供已证实需要的对象和函数。**从 webpack/rollup 打包 bundle 抠模块黑盒执行时，必须复刻打包器注入的宿主对象**——webpack 的 `__webpack_require__` 桩要作为 `n` 传入且 `n.g = globalThis`，否则依赖 `n.g` 的 `try/catch` 兜底分支会静默走错分支，产出"格式全对但服务端全拒"的签名（反模式 26）；模块切片定界（模块体边界 = 下一模块起点 - 2，追加 0~5 个 `}` 逐个 `node --check`）、各模块隔离作用域并共享同一 `window`、反调试代码 try/catch 包住即可不必删，见规则 26。**JSVMP 整体黑盒执行时的语义级对齐（值对 ≠ 对齐，match18 实证）**：① VM 经 `window.XXX` 取内建（如 `___.BigInt`）时，宿主内建必须是 sandbox **自有属性**（`vm.createContext(base)` 的内建不在 base 对象上，缺失 → 字节码自吞 TypeError 后 0 步静默退出）；② 探测类属性（`navigator.webdriver`）必须挂**原型**——真实浏览器里 `hasOwnProperty('webdriver')` 为 false，自有属性即被判定自动化环境；③ VM 注册的交互监听（mousemove/mousedown/mouseup）要由 addEventListener 桩**捕获**并派发合成事件，`document.readyState` 给浏览器同款值——不派发事件则签名链路静默不产出。症状识别与"window 级 Proxy + VM 原语包装 + 浏览器 trace seq 对齐"定位法见反模式 28 / 规则 28 / env-debug-loop「静默退出诊断」专节。
 C. WASM：复现加载、内存、导入和导出调用，固定输入输出契约。**无外部导入的确定性 wasm 是最简形态**（如猿人学 match15 的 `main.wasm`，`WebAssembly.Module.imports()` 为空、`(i32,i32)->i32` 纯确定性）：Node 原生 `WebAssembly.instantiate(bytes)` 直接执行导出函数即可，无需任何补环境，同一实例可跨请求复用；wasm 进交付物用独立文件（`result/wasm/`）或程序注入 base64（禁止手贴长字符串），注入后 md5 核对原始证据，见 common-pitfalls 反模式 25。
 D. 环境伪装：仅补 trace 证明必要的 Web API、对象形状、Realm、时间、随机数和指纹行为。环境对齐的验收线是**服务端校验的自洽性**，不是与真实浏览器逐字节一致——多数站点只校验参数间自洽（解码指纹重算签名比对），vm 沙箱指纹与真实浏览器存在少量差异仍可通过（match14 实证：mz 指纹 53 字段中 4 处差异不影响通过）；先用最小沙箱 + 真实请求试探，按需对齐，不预先逐字节复刻。服务端校验签名内嵌环境检测结果时（403 但正反对照显示连接无问题），用对齐探针法定位差异位——注入导出 SDK 检测函数，浏览器采样 ground-truth 与沙箱采样逐位 diff（见 `references/env/env-detect-bypass.md`）。
 E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定向和动态资源预热。**不是每题都有签名**——请求侧参数全明文时走 A+E，不做补环境（match4/7/12/17 实证）。判定"无签名"必须过三条判据：① 网络层——`case/forensic/target-hits.json` 目标请求除业务参数外无动态字段，可疑参数名在 capture.json 全量反查 0 次；② trace writer 层——`XMLHttpRequest.open` / `fetch` / `Headers.set` 参数全文里没有该字段；③ Cookie/存储层——目标域无 JS 写入 cookie、无 WASM/JSVMP/混淆 SDK。三条全干净即收手，转查传输层（协议版本/ALPN、UA 红线、登录凭据）与响应层（内容还原）。**参数名存在 ≠ 参数生效**：`m:window.match17` 这类 hook 遗留参数恒为 `undefined`、被 `$.param` / `URLSearchParams` 静默丢弃，拿去逆算法是无解方向——生效性只看 trace writer 参数全文与 capture.json 真实 URL（反模式 27）。实现侧用 Node 原生 `node:http2`：一次 `http2.connect()` 建会话、多次 `client.request()` 复用、最后 `client.close()`（天然满足 Session 门禁三件套），`client.alpnProtocol === 'h2'` 自检，**不发 `accept-encoding`** 避免 br/zstd 额外解压。详见规则 27。
@@ -547,7 +547,7 @@ node scripts/compare_fixture.js --fixture case/fixtures/<样本>.fixture.json --
 - Cookie、Token、TLS、Header、Body 序列化和请求顺序不依赖浏览器状态。
 - 失败请求能区分签名错误、会话过期、资源过期、频率限制、IP 风控和业务参数错误。
 
-`REAL_VERIFY` 阶段就把联网入口写成**可复用的 Session + 显式关闭**，避免交付门禁返工：Python 用 `requests.Session()`（`session.get/post` + `session.close()`）；Node 用 `https.Agent({ keepAlive: true })`（复用 + `agent.destroy()`）或 `got/scraping` session。裸 `urllib.request`/每次独立连接会被 `check_final_artifact.js` 的 Session 门禁（创建/复用/清理三件套）判不合格。
+`REAL_VERIFY` 阶段就把联网入口写成**可复用的 Session + 显式关闭**，避免交付门禁返工：Python 用 `requests.Session()`（`session.get/post` + `session.close()`）；Node 用 `https.Agent({ keepAlive: true })`（复用 + `agent.destroy()`）或 `got/scraping` session。裸 `urllib.request`/每次独立连接会被 `check_final_artifact.js` 的 Session 门禁（创建/复用/清理三件套）判不合格。**门禁按调用形态字面识别（match18 实测返工）**：复用须以 `client/session.<get|post|request>` 或 `agent: <keepAlive变量>` 形态出现在 result 源码，清理须以 `agent/httpsAgent/httpAgent.destroy()`（或 `client.close()`）出现——封装在辅助模块里的 `agent: getAgent()` / 局部重命名 `a.destroy()` **不计入**；最稳妥是入口文件直接 `new https.Agent({ keepAlive: true })` 创建、请求统一走 `client.get(...)`、收尾 `httpAgent.destroy()`。
 
 至少保留一份脱敏验证摘要和可复现命令；不得输出完整 Authorization、Cookie、Token、密钥或验证码答案。401/403/412/429 先诊断，不得用浏览器自动化或硬编码成功样本绕过。验证码交付在此之上追加两项记录：手动成功样本基线（`node scripts/check_success_baseline.js`，要求与豁免条件见 `references/captcha/verification-workflow.md`）与逐次尝试 attempts 复盘（`node scripts/check_verification_attempts.js`）；成功标准以「verify 返回通过凭据且业务接口消费凭据返回正确业务数据」为准，视觉答案正确不算通过。
 
@@ -586,7 +586,9 @@ result/
 └── src/
 ```
 
-入口被 `require`/`import` 时只导出 API，命令行执行时才运行。交付前必跑：
+入口被 `require`/`import` 时只导出 API，命令行执行时才运行。**取证落盘的原始 JS 副本（字节码/混淆单行文件）放 `result/src/target/original/`**——这是 `check_code_quality.js` 的取证豁免路径（`src/target/{original,vendor,bundle,bundles}/` 不做压缩/单行长度检查），入口启动时对副本做 sha256 校验防站点改版（match18 实证：直接放 `src/` 会被质量门禁按"压缩代码 + debugger 字面量"判失败）。**写交付文档前先读 `references/quality/final-summary.md`**：最终总结 8 章模板、`FINAL_ARTIFACT_NETWORK_MODE` / `FINAL_ARTIFACT_TLS_FINGERPRINT` 机器标记、`验证记录.json` 的 `mode`/`attempts` 结构契约都在那里逐条定义——不读就写大概率返工（实测两次：总结缺 8 章、验证记录缺 mode/attempts 均被判不合格）。
+
+交付前必跑：
 
 ```powershell
 node scripts/check_final_artifact.js --case-dir <project-root> --markdown

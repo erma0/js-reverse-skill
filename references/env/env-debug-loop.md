@@ -367,6 +367,46 @@ if (require.main === module) {
 }
 ```
 
+## 静默退出（零报错）诊断：JSVMP 字节码环境分支判定失败
+
+「错误分类」覆盖的是**抛错**的场景；JSVMP 还有一类更隐蔽的失败：字节码对每个环境访问都有 try/catch 或条件分支，环境语义不对时走**干净退出分支**——顶层代码正常生效、无任何报错，但 VM 的挂载物（XHR hook、全局函数、命名空间）不出现。典型信号：`Date.now` 等全局重写已生效（说明目标脚本顶层跑了），但签名链路的 hook 装不上、签名不产出（match18 实证，反模式 28）。
+
+### 诊断三板斧（每修一层重跑一次，单变量原则）
+
+1. **window 级记录 Proxy**：把沙箱 `window`/`navigator`/`document` 包成记录 get/set/has 的 Proxy（只包 `window` 引用，**不要包整个 globalThis**——会破坏 vm 内建解析，`Date` 等经 `Reflect.get(base)` 拿不到），重放目标脚本，看最后访问的属性即退出点：
+
+```javascript
+const access = [];
+const winProxy = new Proxy(base, {
+  get(t, p, r) {
+    const v = Reflect.get(t, p, r);
+    if (typeof p === 'string') access.push(['get', p, typeof v]);
+    if (p === 'hasOwnProperty' && typeof v === 'function') {
+      return (k) => { const res = v.call(t, k); access.push(['hasOwn', String(k), res]); return res; };
+    }
+    return v;
+  },
+  set(t, p, v, r) { access.push(['set', String(p), typeof v]); return Reflect.set(t, p, v, r); },
+});
+base.window = winProxy; // VM 序言捕获的是 window 引用，包装它即可覆盖字节码的全局访问
+```
+
+2. **VM 原语包装**：脚本加载前包装 VM 序言捕获的原语（`String.fromCharCode`/`decodeURIComponent`/`parseInt`），记录解码串流——JSVMP 字符串全在运行时解码，检测词（webdriver/hasOwnProperty/selenium/事件名）直接暴露字节码意图，无需反编译。
+3. **浏览器 trace seq 对齐**：从 RuyiTrace NDJSON 按序提取含目标 VM 栈帧（如 `stack` 含 `line==727` 帧）的记录（interface/member/args/value），与沙箱 Proxy 记录逐条对照，第一个分歧点即缺失/偏差的环境项。注意过滤口径：**同一 document 的所有内联脚本共享同一 file 字段**，按"栈中含 VM 行号帧"过滤而不是按 file 过滤，否则页面辅助脚本的读取会混入。
+
+### 常见语义级根因（值对 ≠ 对齐）
+
+| 根因 | 症状（Proxy 记录特征） | 对齐动作 |
+|---|---|---|
+| `vm.createContext(base)` 内建不是 base 自有属性，VM 经 `window.BigInt` 等取内建 | `get BigInt undefined` 后序列终止 | 把宿主内建注入为 sandbox 自有属性（BigInt 纯算术跨 realm 安全） |
+| 探测类属性（`navigator.webdriver`）误做自有属性 | `hasOwn navigator.webdriver true` 后终止（真实浏览器挂原型、hasOwnProperty 为 false） | 属性挂原型，对齐 `hasOwnProperty` 语义而非属性值 |
+| 交互事件门控（mousemove/mousedown/mouseup 监听）+ `document.readyState` | 访问序列停在 `addEventListener` / 事件相关属性 | addEventListener 桩**捕获监听器**，宿主派发合成事件（坐标用取证 trace 实测值）；readyState 给浏览器同款值 |
+| `window.external` 缺失 / `getAttribute('selenium')` 探测 | 分歧点在 external / documentElement.getAttribute | external 给真值对象 `{}`；元素桩 getAttribute 返回 null |
+
+### 收敛标准
+
+Proxy 记录的属性访问序列与浏览器 trace 的 VM 帧序列一致 + VM 挂载物出现（hook 装上）+ 真实请求通过。`run_with_trace.js` 返回 0 事件不是"环境已足够"的信号——它只记录桩表面的访问，目标经 window 自有属性取内建、读写普通对象时产生 0 事件，此时应升级为手动 Proxy 插桩。
+
 ## trace 输出
 
 推荐临时文件：

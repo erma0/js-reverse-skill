@@ -131,6 +131,23 @@ match10 实测：sandbox 预填"看起来完整"的运行时状态快照后，�
 
 **反例**：三条判据已全干净却继续翻 JS 找"隐藏签名"、或把 `m:window.match17` 这类诱饵参数拿去逆算法（反模式 27）。收手不等于降低验证标准——真实请求、fixture 回归、多轮稳定性验证照样要做，只是工作量从"还原算法"转移到"对齐传输层与校验响应"。
 
+## 十三、JSVMP 沙箱静默退出
+
+### 28. VM 装不上 hook 且零报错 = 环境语义级偏差，用双层插桩对齐浏览器 trace，禁止全量堆桩
+
+JSVMP 字节码对每个环境访问都有 try/catch 或条件分支：环境语义不对时走**干净退出分支**——顶层代码（如 `Date.now` 重写）正常生效、无任何报错，但 VM 的挂载物（XHR hook、全局函数、命名空间）不出现，签名静默不产出。此时在算法层枚举输入或盲目堆桩都是无解方向（反模式 28，match18 实证三层语义偏差：vm 内建经 window 取而非自有属性 / `navigator.webdriver` 误做自有属性——hasOwnProperty 语义与浏览器相反 / 鼠标事件门控未回放）。
+
+**定位三板斧（按序执行，每修一层重跑一次）**：
+1. **window 级记录 Proxy**：把沙箱 `window`（及嵌套 `navigator`/`document`）包成记录 get/set/has 的 Proxy 再 `createContext`，重放目标脚本，看**最后访问的属性**——那就是退出点。注意两个坑：把整个 globalThis 包 Proxy 会破坏 vm 内建解析（`Date` 等经 `Reflect.get(base)` 拿不到），只包 `window` 引用；VM 序言捕获的是 `window` 引用，包装它即可覆盖字节码的全局访问。
+2. **VM 原语包装**：在脚本加载前包装 VM 序言捕获的原语（`String.fromCharCode`/`decodeURIComponent`/`parseInt`），记录解码串流——JSVMP 字符串全在运行时解码，检测词（webdriver/hasOwnProperty/selenium/debugger）会直接暴露字节码意图，无需反编译。
+3. **浏览器 trace seq 对齐**：从 RuyiTrace NDJSON 里按序提取目标 VM 栈帧（如 `stack` 含 `line==727` 帧）的操作序列（interface/member/args/value），与沙箱 Proxy 记录逐条对照，**第一个分歧点**即缺失/偏差的环境项。
+
+**语义级对齐清单（值对 ≠ 对齐）**：
+- **内建取用路径**：VM 若以 `window.XXX` 方式取内建（BigInt/Math/…），须把宿主内建注入为 sandbox **自有属性**（`vm.createContext` 的内建不在宿主侧 base 对象上，经 window 取到 undefined）。
+- **属性位置**：探测类属性（`navigator.webdriver`）必须挂在**原型**上——真实浏览器里它在 `Navigator.prototype`，自有属性会让 `hasOwnProperty` 探测返回 true 而被判定 bot；对齐的是 `hasOwnProperty` 语义，不是属性值。
+- **运行时行为**：`addEventListener` 桩要**捕获监听器**供宿主派发合成事件（mousemove/mousedown/mouseup，坐标用取证 trace 实测值）；`document.readyState` 要给到浏览器同款值（'complete'）——这些都是字节码分支的前置条件。
+- **验证收敛标准**：Proxy 记录的属性访问序列与浏览器 trace 的 VM 帧序列一致 + VM 挂载物出现（hook 装上）+ 真实请求通过。全量堆桩（一次加 10 个桩）会掩盖真正的分歧点，违反单变量原则（反模式 13/28）。
+
 ## 相关案例
 
 | 案例文件 | 关联点 |
@@ -148,3 +165,4 @@ match10 实测：sandbox 预填"看起来完整"的运行时状态快照后，�
 | `cases/yuanrenxue-match10-ruishu3-replay-defense.md` | 规则 24 实战验证（预填状态快照致引导脚本走旁路）+ 反模式 16/20/11 实战验证（插桩 while(1) 禁令 / VM 卡死转投浏览器 / 外部失败误归因通道层）+ 会话配套资源（dynamic-resource.md 专节）+ 元素语义真实化（env-object-model.md） |
 | `cases/yuanrenxue-match16-webpack-blackbox-branch.md` | 规则 26 实战验证（webpack 模块切片定界 + 隔离作用域 + require 桩 + 反调试处理）+ 反模式 26 实战验证（抠代码后分支漂移：格式全对却被拒） |
 | `cases/yuanrenxue-match17-http2-transport-plaintext.md` | 规则 27 实战验证（请求侧无签名三条判据 + 传输层 HTTP/2/UA/Cookie 对齐）+ 反模式 27 实战验证（诱饵参数 `m` 恒 undefined 被 `$.param` 丢弃）+ 反模式 22 二次实证（`--targets "question/17"` 误命中静态资源） |
+| `cases/yuanrenxue-match18-jsvmp-mouse-gated-signature.md` | 规则 28 实战验证（JSVMP 静默退出双层插桩定位 + 语义级环境对齐：内建自有属性 / webdriver 挂原型 / 鼠标事件门控）+ 反模式 28 实证 + 反模式 27 四次实证（`window.match18` 连环诱饵）+ 末页 page=05 双重校验 |
