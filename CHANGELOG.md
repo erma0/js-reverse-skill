@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2.3.76 - 2026-08-28
+
+### 经验固化（match14 案例入库：指纹 Cookie m/mz 双参数题型 + 速查表/索引补齐）
+
+match14（备而后动-勿使有变）完整实战成果入库。此前 2.3.72/73 已把工具链缺陷与通用经验（反模式 23/24、规则 25、引擎检测预警、fixture 多序号纪律）固化，本次补齐案例侧：
+
+- **新案例 `cases/yuanrenxue-match14-fingerprint-cookie-m-mz.md`** + `cases/index.json`（32 条）+ match 题号速查表第 14 行。技术指纹：静态混淆 m.js（553KB，jsencrypt 公钥内嵌）+ `GET /api2/14` 每请求前下发动态 JS eval 定义 `v14/v142`；`mz=btoa(53 字段指纹数组)`、`m=md5hex|b|a|n`（n 为 window.n 计数器，须持久沙箱递增）；服务端只校验 mz↔m 自洽性，指纹与真实浏览器 4 处差异照样接受；page5 UA=yuanrenxue 且指纹 UA 必须同步；Firefox/ruyipage 全 API 400（UA 检测）→ MCP 真实 Chrome 兜底取证；数据绑定 sessionid（答案 31256141）。
+- **速查表底部「相关参考」补反模式 23/24 与规则 25 引用**（match14 双实证），与 common-pitfalls / experience-rules 引用链闭合。
+- 验证：`node --check` 语法 + `search_cases.js match14` 命中新条目；check_skill_consistency 引用一致性复查。
+
 ## 2.3.75 - 2026-08-28
 
 ### 优化（交付语言定单规则简化：默认 Node + 用户指定优先）

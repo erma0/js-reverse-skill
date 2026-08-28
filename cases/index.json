@@ -610,6 +610,31 @@
       "strategy": "A 纯算还原：每页前 GET /api2/13，用定向表达式求值器（四类混淆原子查表，不执行 eval）解出 yuanrenxue_cookie=<ts>|<随机串> 写入 cookie jar；请求侧无签名参数，末页 UA=yuanrenxue，POST /a/13 表单编码提交",
       "file": "yuanrenxue-match13-eval-cookie.md",
       "verifiedAt": "2026-08-26"
+    },
+    {
+      "title": "指纹数组 Cookie m/mz + 确定性哈希签名（猿人学第14题）",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match14",
+        "m/mz",
+        "fingerprint cookie",
+        "指纹 cookie",
+        "btoa 指纹数组",
+        "api2/14",
+        "m.js",
+        "jsencrypt",
+        "window.n 计数器",
+        "持久沙箱",
+        "动态 cookie",
+        "token failed",
+        "末页 UA=yuanrenxue",
+        "自洽性校验"
+      ],
+      "strategy": "B vm 沙箱补环境：静态混淆 m.js 只执行一次（持久沙箱），每页 GET /api2/14 eval 动态 JS 后调 sp() 递增 window.n，取 m/mz 双 cookie（mz=btoa(53字段指纹数组)，m=md5hex|ts|ts*8|n），Node 原生 fetch 直连；page5 UA=yuanrenxue 且指纹 UA 同步",
+      "file": "yuanrenxue-match14-fingerprint-cookie-m-mz.md",
+      "verifiedAt": "2026-08-28"
     }
   ]
 }
