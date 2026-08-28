@@ -635,6 +635,26 @@
       "strategy": "B vm 沙箱补环境：静态混淆 m.js 只执行一次（持久沙箱），每页 GET /api2/14 eval 动态 JS 后调 sp() 递增 window.n，取 m/mz 双 cookie（mz=btoa(53字段指纹数组)，m=md5hex|ts|ts*8|n），Node 原生 fetch 直连；page5 UA=yuanrenxue 且指纹 UA 同步",
       "file": "yuanrenxue-match14-fingerprint-cookie-m-mz.md",
       "verifiedAt": "2026-08-28"
+    },
+    {
+      "title": "WASM 确定性签名 + 纯协议直跑（猿人学第15题）",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match15",
+        "main.wasm",
+        "wasm base64",
+        "WASM 直跑",
+        "确定性签名",
+        "encode(t1,t2)",
+        "api/question/15",
+        "yuanrenxue UA",
+        "token failed"
+      ],
+      "strategy": "C WASM 加载：main.wasm（3854B、无导入、md5 0c602212）纯确定性，Node 原生 WebAssembly.instantiate 直跑 encode；t1=floor(now/1000/2)、t2=t1-random(1..50) 拼 m 参数，末页 UA=yuanrenxue（否则返回中文提示数组），sessionid 外置 config.json；wasm 独立文件加载不内联 base64，真实 https.Agent keepAlive 会话",
+      "file": "yuanrenxue-match15-wasm-deterministic-signature.md",
+      "verifiedAt": "2026-08-28"
     }
   ]
 }

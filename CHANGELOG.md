@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 2.3.77 - 2026-08-28
+
+### 经验固化（match15 案例入库：WASM 确定性签名题型 + 反模式 25 封顶 + 路径 C 最简形态）
+
+match15（WASM 确定性签名）完整实战成果入库。skill 首次以"路径 C 最简形态"实证：无导入、纯确定性的 wasm 无需任何补环境，Node 原生 `WebAssembly.instantiate` 直跑；同时补齐交付侧黑盒资源完整性纪律，与抓取侧纪律闭环：
+
+- **新案例 `cases/yuanrenxue-match15-wasm-deterministic-signature.md`** + `cases/index.json`（33 条）+ match 题号速查表第 15 行。技术指纹：页面内联 JS 直接 `fetch('/static/new_match/question/15/main.wasm')` 加载（无混淆/JSVMP/环境检测，签名构造完整暴露在 document.html:712-769）；`m=encode(t1,t2)+'|'+t1+'|'+t2`（t1=floor(now/1000/2)、t2=t1-random(1..50)）；服务端重算 encode 比对 + t1 时效校验；wasm 3854B、无导入、md5 `0c602212...`，实例可跨请求复用；page5 UA=yuanrenxue 否则返回中文提示数组；数据绑定 sessionid（答案 26550965）；提交 `POST /a/15` 表单编码。坑点：wasm 内联 base64 手贴易损坏（token failed 且易误归因时间/会话）、Node 全局 fetch 禁混用 https.Agent。
+- **common-pitfalls 新增反模式 25（主条目封顶）**：交付物内联的黑盒二进制/base64 资源未与原始证据 hash 核对 → 失败后先归因时间/会话/算法（match15 实证："临时脚本 200、final.js 400"，实为内联 base64 被写坏）。正确做法：长 base64 程序注入或独立文件加载 + 注入后 md5 核对；"能跑 vs 不能跑"两版本先 diff 差异点（单变量原则）再归因外部因素。与 `dynamic-resource.md` 抓取侧纪律闭环为"抓取→内联→交付"全链路资源完整性。
+- **SKILL.md §9 路径 C 补确定性 wasm 最简形态**：无导入确定性 wasm 直接 `WebAssembly.instantiate(bytes)` 原生执行、实例复用，无需补环境；wasm 进交付物用独立文件或程序注入 base64 + md5 核对（反模式 25），同时规避代码质量门禁对超长内联行的误判。
+- 验证：`node --check` + `check_skill_consistency` 引用一致性复查 + `search_cases.js match15` 命中新条目。
+
 ## 2.3.76 - 2026-08-28
 
 ### 经验固化（match14 案例入库：指纹 Cookie m/mz 双参数题型 + 速查表/索引补齐）

@@ -518,7 +518,7 @@ node scripts/run_with_trace.js --target <project-root>/case/js/original/<资源�
 
 A. 纯算法：Node `crypto`、Python `hashlib`/成熟密码库和原始序列化规则。
 B. 最小 JS 沙箱：提取算法闭包，在隔离上下文提供已证实需要的对象和函数。
-C. WASM：复现加载、内存、导入和导出调用，固定输入输出契约。
+C. WASM：复现加载、内存、导入和导出调用，固定输入输出契约。**无外部导入的确定性 wasm 是最简形态**（如猿人学 match15 的 `main.wasm`，`WebAssembly.Module.imports()` 为空、`(i32,i32)->i32` 纯确定性）：Node 原生 `WebAssembly.instantiate(bytes)` 直接执行导出函数即可，无需任何补环境，同一实例可跨请求复用；wasm 进交付物用独立文件（`result/wasm/`）或程序注入 base64（禁止手贴长字符串），注入后 md5 核对原始证据，见 common-pitfalls 反模式 25。
 D. 环境伪装：仅补 trace 证明必要的 Web API、对象形状、Realm、时间、随机数和指纹行为。环境对齐的验收线是**服务端校验的自洽性**，不是与真实浏览器逐字节一致——多数站点只校验参数间自洽（解码指纹重算签名比对），vm 沙箱指纹与真实浏览器存在少量差异仍可通过（match14 实证：mz 指纹 53 字段中 4 处差异不影响通过）；先用最小沙箱 + 真实请求试探，按需对齐，不预先逐字节复刻。服务端校验签名内嵌环境检测结果时（403 但正反对照显示连接无问题），用对齐探针法定位差异位——注入导出 SDK 检测函数，浏览器采样 ground-truth 与沙箱采样逐位 diff（见 `references/env/env-detect-bypass.md`）。
 E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定向和动态资源预热。
 
