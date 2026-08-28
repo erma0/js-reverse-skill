@@ -677,6 +677,28 @@
       "strategy": "B 最小 JS 沙箱：从 webpack 单行 bundle（310882B）切出模块 127（混淆 MD5→window.md5）与模块 732（126 字符变形 base64→window.btoa），new Function 隔离作用域执行并共享同一 window，传入 require 桩（n.g=globalThis）才能走对 case 1 的 try 分支；m=d(15)+md5(btoa(t))+d(10) 定长 57（中间 32 位才是签名本体），t=Date.parse(new Date).toString() 秒级；末页 UA=yuanrenxue 且须校验 data 元素类型（普通 UA 返回 HTTP 200 + 中文提示数组），sessionid 外置 config.json",
       "file": "yuanrenxue-match16-webpack-blackbox-branch.md",
       "verifiedAt": "2026-08-28"
+    },
+    {
+      "title": "HTTP/2 传输层约束 + 请求侧全明文（猿人学第17题）",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match17",
+        "http2",
+        "http2.connect",
+        "天杀的 Http2.0",
+        "请求侧全明文",
+        "无签名",
+        "诱饵参数",
+        "window.match17",
+        "undefined 参数被丢弃",
+        "api/question/17",
+        "yuanrenxue UA"
+      ],
+      "strategy": "A 纯算还原（无可还原算法）+ E 传输层对齐：GET /api/question/17?page=N&pageSize=10&kw= 全明文，m:window.match17 是诱饵（/api/match/17 从未被请求，值恒 undefined 被 jQuery $.param 丢弃）；约束在传输层=HTTP/2 + 末页 UA=yuanrenxue + sessionid；Node 原生 http2 单 Session 复用 5 页后 close，不发 accept-encoding；末页须校验 data 元素类型；提交 POST /a/17 表单编码（code=2 通关）",
+      "file": "yuanrenxue-match17-http2-transport-plaintext.md",
+      "verifiedAt": "2026-08-28"
     }
   ]
 }

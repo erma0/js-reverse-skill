@@ -116,6 +116,21 @@ match10 实测：sandbox 预填"看起来完整"的运行时状态快照后，�
 ### 25. 环境指纹对齐的验收线是"参数自洽"，不是"逐字节复刻真实浏览器"——先最小沙箱试探再按需对齐
 多数站点的服务端校验是**参数间自洽性**：解码指纹参数、重算签名比对（如 mz 解码后重算 md5 与 m 比对），而不是拿指纹与某个"真实浏览器基线"逐字段比对。因此 vm 沙箱生成的指纹与真实浏览器存在少量差异（UA 版本号、colorDepth 等）通常**不影响通过**——match14 实证：mz 指纹 53 字段中 4 处与真实 Chrome 不同，5 页全部 200。**反例**：为"保险"预先逐字节复刻真实浏览器指纹、大量补环境后才敢发真实请求，成本高且多数对齐是无用功。正确做法：先用最小沙箱 + 真实请求试探（低成本验证自洽性假设）；被拒且双对照定位为签名内容层后，再用对齐探针法（`references/env/env-detect-bypass.md`）逐位 diff 定位**被校验**的差异位按需对齐；有真实浏览器成功样本时，把样本指纹解码后与沙箱生成值做结构 diff，可快速区分"结构性缺失"（必须补）与"取值性差异"（通常无需对齐）。
 
+## 十二、无签名 / 传输层题型
+
+### 27. 不是每题都有签名——请求侧"无签名"要走三条判据确认后收手，转查传输层与响应层
+默认假设"存在待还原签名"会让简单题变成无解题：猿人学 match 系列已有多题请求侧全明文（match4/7/12/17），把诱饵参数当签名去逆是纯浪费（反模式 27）。IDENTIFY 阶段按下面三条判据确认，全部干净即**明确判定"请求侧无签名"并收手**：
+1. **网络层**：`case/forensic/target-hits.json` 里目标请求的 URL / 请求体，除业务参数（`page`/`pageSize`/`kw`/分页/搜索词）外**没有任何动态字段**；把可疑参数名拿去 capture.json 全量反查，出现 0 次即未生效。
+2. **trace writer 层**：`XMLHttpRequest.open` / `fetch` / `Headers.set` 的**参数全文**里没有该字段（`search_trace.js --keyword <目标URL>` 直接检索 URL 字面量最快——trace 里的 XHR 记录常被第三方 SDK 淹没，match17 实测前两名高频栈是 transcend-cdn 与 mozilla 站点脚本，目标域脚本只排第三）。
+3. **Cookie/存储层**：`case/ruyi-trace/logs/cookie/*.ndjson` 里目标域**无 JS 写入的 cookie**（只有 `Hm_*` 之类统计 cookie 即视为干净），无 WASM/JSVMP/混淆 SDK 调用，`crypto` 类 trace 条数为个位数且不来自目标域脚本。
+
+三条都干净后，**约束只可能在三个地方**，逐项落实为交付实现（match17 实证：HTTP/2 + 末页 UA=yuanrenxue + sessionid）：
+1. **传输层**：协议版本（HTTP/2、ALPN）、TLS 指纹、连接复用与顺序——Node 侧用原生 `node:http2`：一次 `http2.connect()` 建会话、多次 `client.request()` 复用、最后 `client.close()`（交付门禁 Session 三件套天然满足，`client.alpnProtocol === 'h2'` 可作协议自检）；**不要发 `accept-encoding`**，避免 br/zstd 需额外解压，同时保留 zlib 解压兜底。协议要求以取证响应头（如 `x-firefox-spdy: h2`）与题面为准，不要用 HTTP/1.1 反向上报惩罚计数。
+2. **请求头语义**：UA（末页 UA 红线是站点惯例）、Referer、`X-Requested-With`、Cookie 里的登录凭据——这些不是"签名"，但缺一项就取不到数据，且失败常表现为 **HTTP 200 + `data` 非数值**（必须对每页做元素类型校验，不能只看状态码）。
+3. **响应层**：数据加密/字体映射/图片拼装（内容还原型，Step 2 可豁免）。
+
+**反例**：三条判据已全干净却继续翻 JS 找"隐藏签名"、或把 `m:window.match17` 这类诱饵参数拿去逆算法（反模式 27）。收手不等于降低验证标准——真实请求、fixture 回归、多轮稳定性验证照样要做，只是工作量从"还原算法"转移到"对齐传输层与校验响应"。
+
 ## 相关案例
 
 | 案例文件 | 关联点 |
@@ -132,3 +147,4 @@ match10 实测：sandbox 预填"看起来完整"的运行时状态快照后，�
 | `cases/yuanrenxue-match9-dynamic-cookie2.md` | 规则 22 实战验证（RSA 循环加密禁缓存）+ 规则 23 实战验证（随机边缘拒绝需大样本判别）+ 数据绑定会话（反模式 19）+ 黑盒 SDK 定期更新（dynamic-resource.md 专节） |
 | `cases/yuanrenxue-match10-ruishu3-replay-defense.md` | 规则 24 实战验证（预填状态快照致引导脚本走旁路）+ 反模式 16/20/11 实战验证（插桩 while(1) 禁令 / VM 卡死转投浏览器 / 外部失败误归因通道层）+ 会话配套资源（dynamic-resource.md 专节）+ 元素语义真实化（env-object-model.md） |
 | `cases/yuanrenxue-match16-webpack-blackbox-branch.md` | 规则 26 实战验证（webpack 模块切片定界 + 隔离作用域 + require 桩 + 反调试处理）+ 反模式 26 实战验证（抠代码后分支漂移：格式全对却被拒） |
+| `cases/yuanrenxue-match17-http2-transport-plaintext.md` | 规则 27 实战验证（请求侧无签名三条判据 + 传输层 HTTP/2/UA/Cookie 对齐）+ 反模式 27 实战验证（诱饵参数 `m` 恒 undefined 被 `$.param` 丢弃）+ 反模式 22 二次实证（`--targets "question/17"` 误命中静态资源） |
