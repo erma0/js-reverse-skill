@@ -248,7 +248,15 @@ function statePath(caseDir) {
 function readState(caseDir) {
   const p = statePath(caseDir);
   if (!exists(p)) return null;
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+    // 无 node 视为未初始化；字段缺失则补齐，避免下游渲染/--set 崩在字段访问上
+    if (!parsed || typeof parsed !== 'object' || !parsed.node) return null;
+    parsed.visited = Array.isArray(parsed.visited) && parsed.visited.length ? parsed.visited : [parsed.node];
+    parsed.history = Array.isArray(parsed.history) ? parsed.history : [];
+    parsed.blocks = Array.isArray(parsed.blocks) ? parsed.blocks : [];
+    return parsed;
+  } catch { return null; }
 }
 
 function writeState(caseDir, state) {
@@ -300,6 +308,37 @@ function detectSplitStates(caseDir) {
     if (exists(statePath(dir))) found.push(statePath(dir));
   }
   return found;
+}
+
+// 标准布局下 state.json 必须落在 <project-root>/case/state.json，与后续所有脚本的
+// paths.resolveCaseDir 结果一致。而 --init 通常早于取证脚本、此时 case/ 还不存在，
+// resolveCaseDir 会退回输入目录本身 → state.json 写到项目根；等取证脚本建好 case/ 后再 --set，
+// 解析结果切到 <project-root>/case，就读不到刚才写的文件（match16 实测"未找到状态文件"）。
+// 因此 --init 阶段主动按标准布局固定到 <input>/case；仅当输入本身已带证据子目录
+// （非标准布局的历史 case 目录）时才原样使用，避免凭空多套一层。
+const CASE_MARKER_SUBDIRS = paths.CASE_EVIDENCE_SUBDIRS || ['notes', 'fixtures', 'ruyi-trace', 'js', 'forensic', 'requests', 'tmp'];
+function resolveStateDir(input) {
+  const p = path.resolve(input || '.');
+  if (path.basename(p).toLowerCase() === 'case') return p;
+  const caseSub = path.join(p, 'case');
+  try { if (fs.statSync(caseSub).isDirectory()) return caseSub; } catch {}
+  if (CASE_MARKER_SUBDIRS.some((n) => exists(path.join(p, n)))) return p;
+  try { fs.mkdirSync(caseSub, { recursive: true }); return caseSub; } catch { return p; }
+}
+
+// 自愈既有项目的分裂：标准路径缺失、但父/子目录存在遗留 state.json 时迁移过来，
+// 免得每次都靠人工挪文件。仅在 readState 为空时调用。
+function migrateLegacyState(caseDir) {
+  const legacy = detectSplitStates(caseDir);
+  if (!legacy.length) return '';
+  const from = legacy[0];
+  const to = statePath(caseDir);
+  try {
+    fs.mkdirSync(caseDir, { recursive: true });
+    fs.copyFileSync(from, to);
+    fs.rmSync(from, { force: true });
+    return `检测到遗留状态文件 ${from}，已迁移到 ${to}`;
+  } catch { return ''; }
 }
 
 function stepCount(state) {
@@ -461,6 +500,37 @@ function main() {
     fs.writeFileSync(statePath(path.join(tmp, 'case')), '{}\n', 'utf8');
     if (!detectSplitStates(tmp).includes(statePath(path.join(tmp, 'case')))) fail('未检出并存的第二份 state.json');
     fs.rmSync(tmp, { recursive: true, force: true });
+
+    // 标准布局：--init 早于取证脚本、case/ 尚不存在时，state.json 必须落到 <project-root>/case/，
+    // 且与后续 paths.resolveCaseDir 的解析结果一致（取证脚本建好 case/ 后不会读不到，match16 实测）
+    const lay = fs.realpathSync(fs.mkdtempSync(path.join(require('os').tmpdir(), 'state-layout-')));
+    try {
+      const resolved = resolveStateDir(lay);
+      if (path.basename(resolved) !== 'case' || path.dirname(resolved) !== lay) fail('case/ 不存在时 --init 应落到 <project-root>/case');
+      initState(resolved, 'INTENT_CONFIRM');
+      if (!exists(statePath(resolved))) fail('标准布局下 state.json 未落到 <project-root>/case/state.json');
+      if (paths.resolveCaseDir(lay) !== resolved) fail('--init 与后续 --set 解析到了不同的 case 目录');
+    } finally {
+      fs.rmSync(lay, { recursive: true, force: true });
+    }
+    // 非标准布局：输入本身已带证据子目录时不应再套一层 case/
+    const custom = fs.realpathSync(fs.mkdtempSync(path.join(require('os').tmpdir(), 'state-custom-')));
+    try {
+      fs.mkdirSync(path.join(custom, 'fixtures'), { recursive: true });
+      if (resolveStateDir(custom) !== custom) fail('输入已是 case 目录时不应再创建 <input>/case');
+    } finally {
+      fs.rmSync(custom, { recursive: true, force: true });
+    }
+    // 遗留状态自愈：<root>/state.json 存在且已建好 <root>/case 时，--set 前应自动迁移
+    const legacy = fs.realpathSync(fs.mkdtempSync(path.join(require('os').tmpdir(), 'state-legacy-')));
+    try {
+      fs.mkdirSync(path.join(legacy, 'case'), { recursive: true });
+      fs.writeFileSync(statePath(legacy), JSON.stringify({ node: 'TRACE_ANALYZE' }), 'utf8');
+      if (!migrateLegacyState(paths.resolveCaseDir(legacy))) fail('遗留 state.json 未迁移');
+      if (!exists(statePath(path.join(legacy, 'case'))) || exists(statePath(legacy))) fail('迁移后应只剩 <project-root>/case/state.json');
+    } finally {
+      fs.rmSync(legacy, { recursive: true, force: true });
+    }
     console.log('state_machine.js self-test: PASS');
     return 0;
   }
@@ -470,7 +540,10 @@ function main() {
     console.error(usage());
     return 1;
   }
-  const caseDir = paths.resolveCaseDir(args.caseDir);
+  // --init 时 case/ 可能尚未创建，按标准布局固定到 <project-root>/case，
+  // 避免"先写项目根、后读 case 目录"的路径分裂（match16 实测）。
+  const caseDir = args.init ? resolveStateDir(args.caseDir) : paths.resolveCaseDir(args.caseDir);
+  const migrated = args.init ? '' : migrateLegacyState(caseDir);
 
   if (args.init) {
     const { state, created } = initState(caseDir, args.node);
@@ -490,6 +563,7 @@ function main() {
     return 0;
   }
 
+  if (migrated) console.error(`[state-machine] ${migrated}`);
   let state = readState(caseDir);
   if (!state) {
     console.error(`未找到状态文件 ${statePath(caseDir)}；请先运行 --init 初始化状态机跟踪`);

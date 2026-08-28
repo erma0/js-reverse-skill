@@ -260,16 +260,23 @@ const DOC_SIGN_ONLY_PATTERNS = [
   /\bno-real-request\b/i,
 ];
 
+// 否定式声明必须被排除：「不需要 TLS 指纹」「TLS 指纹一律不需要」里的「需要」属于否定表述，
+// 直接匹配会把"明确不需要"判成 required（match16 实测：case/notes 写「明确不需要……TLS 指纹」
+// 导致门禁强制要求 TLS 兼容客户端，只能靠显式 marker 绕过）。
+// required 侧用 lookbehind/lookahead 拦否定词，not-required 侧补齐否定式写法，两边互为兜底。
 const DOC_TLS_REQUIRED_PATTERNS = [
   /FINAL_ARTIFACT_TLS_FINGERPRINT\s*[=:]\s*required/i,
-  /(?:需要|要求|强制|依赖)[^\n]{0,20}TLS\s*(?:指纹|兼容客户端)/i,
-  /TLS\s*(?:指纹|兼容客户端)[^\n]{0,20}(?:需要|要求|强制|必需)/i,
+  /(?<![不无未非没])(?:需要|要求|强制|依赖)[^\n]{0,20}TLS\s*(?:指纹|兼容客户端)/i,
+  /TLS\s*(?:指纹|兼容客户端)(?![^\n]{0,20}[不无未非]需要)[^\n]{0,20}(?:需要|要求|强制|必需)/i,
 ];
 
 const DOC_TLS_NOT_REQUIRED_PATTERNS = [
   /FINAL_ARTIFACT_TLS_FINGERPRINT\s*[=:]\s*not-required/i,
   /无\s*TLS\s*指纹(?:检测)?|未涉及\s*TLS|不涉及\s*TLS|TLS\s*[：:]\s*未涉及/,
   /目标(?:网站|站点|接口|服务)?\s*(?:无|无需|不需要|不要求)\s*TLS/,
+  /(?:不需要|无需|不必|用不到|无要求)[^\n]{0,20}TLS/,
+  /TLS\s*(?:指纹|兼容客户端)?[^\n]{0,10}(?:不需要|无需|不必|无要求)/,
+  /明确\s*不(?:需要|要求)[^\n]{0,40}TLS/,
 ];
 
 const NO_REAL_REQUEST_PATTERNS = [
@@ -832,11 +839,16 @@ function check(args) {
     : networkMarkers.includes('sign-only') || docSignOnlyHits.length
       ? 'sign-only'
       : null;
-  const tlsFingerprint = tlsMarkers.includes('required') || docTlsRequiredHits.length
-    ? 'required'
-    : tlsMarkers.includes('not-required') || docTlsNotRequiredHits.length
-      ? 'not-required'
-      : null;
+  // 显式 marker 优先于自然语言：marker 是用户的明确声明，自然语言只是兼容旧文档的启发式，
+  // 不能反过来否决 marker（match16 实测：文档已写 not-required，仍被自然语言命中判成 required）。
+  const tlsFingerprint = tlsMarkers.includes('required') ? 'required'
+    : tlsMarkers.includes('not-required') ? 'not-required'
+      : docTlsRequiredHits.length && !docTlsNotRequiredHits.length ? 'required'
+        : docTlsNotRequiredHits.length ? 'not-required'
+          : null;
+  if (!tlsMarkers.length && docTlsRequiredHits.length && docTlsNotRequiredHits.length) {
+    warnings.push('文档中同时出现「需要 TLS 指纹」与「不需要 TLS 指纹」的表述，已按"需要"保守判定；确认不需要时用 FINAL_ARTIFACT_TLS_FINGERPRINT: not-required 显式声明消除歧义。');
+  }
   const docNoRealRequest = networkMode === 'sign-only';
   // 请求/会话分析变量提升到 primary 块外：验证记录检查必须以"代码真实请求"为准，
   // 不能只依赖文档声明的 networkMode（文档未声明时联网项目会把验证记录检查整个跳过）。
@@ -1161,6 +1173,18 @@ function runSelfTest() {
     const dynNatural = dynamicSessionHits(naturalSession);
     if (!dynNatural.reuse.length || !dynNatural.cleanup.length) {
       throw new Error('keepAlive Agent 自然命名（agent）的复用与清理应被识别');
+    }
+
+    // TLS 声明：否定式表述不得被判成 required（match16 实测：case/notes 的「明确不需要……TLS 指纹」被误判）
+    const tlsNegatives = ['不需要 TLS 指纹', 'TLS 指纹一律不需要', '一律不需要 TLS 指纹兼容客户端', '明确不需要：canvas、WebGL、TLS 指纹'];
+    for (const text of tlsNegatives) {
+      if (findMatches(text, DOC_TLS_REQUIRED_PATTERNS).length) throw new Error(`否定式 TLS 声明不应判为 required：${text}`);
+      if (!findMatches(text, DOC_TLS_NOT_REQUIRED_PATTERNS).length) throw new Error(`否定式 TLS 声明应命中 not-required：${text}`);
+    }
+    const tlsPositives = ['需要 TLS 指纹兼容客户端', 'TLS 指纹兼容客户端为必需', '目标强制 TLS 指纹校验'];
+    for (const text of tlsPositives) {
+      if (!findMatches(text, DOC_TLS_REQUIRED_PATTERNS).length) throw new Error(`肯定式 TLS 声明应判为 required：${text}`);
+      if (findMatches(text, DOC_TLS_NOT_REQUIRED_PATTERNS).length) throw new Error(`肯定式 TLS 声明不应命中 not-required：${text}`);
     }
 
     // trace 覆盖声明兜底：summary 出现未命中信号时，最终总结必须有声明

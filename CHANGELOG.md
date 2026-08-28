@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2.3.78 - 2026-08-28
+
+### 工具链（match16 复盘回归：状态文件标准布局 + TLS 声明否定式不再误判）
+
+match16 实战中撞到两个 skill 自身缺陷，均已在脚本层修复并补回归用例：
+
+- **`state_machine.js`：state.json 固定落到标准布局 `<project-root>/case/`**。`paths.resolveCaseDir` 只在 `<input>/case` 已存在时才返回它，而 `--init` 通常早于取证脚本、此时 `case/` 还没建 → state.json 写到项目根；等取证脚本建好 `case/` 后 `--set` 又去读 `<root>/case/state.json`，报"未找到状态文件"（此前只能手动挪文件）。现在 `--init` 主动创建并使用 `<input>/case/`（输入本身已带证据子目录时视为非标准 case 目录，不额外套一层）；已存在的 `<root>/state.json` 遗留文件在读取前自动迁移到标准路径并打印提示；`readState` 对残缺状态补齐 `visited/history/blocks`，无 `node` 视为未初始化，避免渲染崩在字段访问上。
+- **`check_final_artifact.js`：TLS 自然语言声明排除否定式**。原正则把「不需要 TLS 指纹」「TLS 指纹一律不需要」「明确不需要……TLS 指纹」里的「需要」当成肯定表述，判成 `required` 并强制要求 TLS 兼容客户端（match16 实测：case/notes 的黑盒声明被误判，只能靠显式 marker 绕过）。现在 required 侧用 lookbehind/lookahead 拦否定词，not-required 侧补齐否定式写法；**显式 marker 优先于自然语言**（marker 是明确声明，不应被模糊文本否决），两种自然语言同时命中时给出告警并提示显式化。
+- 验证：两脚本 `--self-test` 各补回归用例（否定/肯定 TLS 表述双向断言、标准布局落点、非标准布局不套娃、遗留状态迁移），均 PASS；另在临时目录端到端复现"init → 建 case/ → set"时序确认不再分裂。
+
 ## 2.3.77 - 2026-08-28
 
 ### 经验固化（match15 案例入库：WASM 确定性签名题型 + 反模式 25 封顶 + 路径 C 最简形态）
