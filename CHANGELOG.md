@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2.3.75 - 2026-08-28
+
+### 优化（交付语言定单规则简化：默认 Node + 用户指定优先）
+
+语言选择从倾向表收敛为一句总则：交付语言默认 Node.js，用户显式指定（如 Python）时遵从并写入最终总结；补环境题型（B/C/D）选 Python 入口须声明 JS 执行桥接方式，禁止静默包 Node 子进程。语言在进入 IMPLEMENT 时确定、中途不更换，默认 Node 天然消解"补环境题型 Python 包 Node 子进程"与"中途换语言"两个问题。SKILL.md §9 与 decision-tree.md 语言选择策略同步（顺带修正过时的 execjs 桥接表述）。门禁 check_final_artifact.js 本就语言无关（唯一入口 + 双入口互斥），无需改动。
+
 ## 2.3.74 - 2026-08-28
 
 ### 文档（README 同步 MCP 兜底通道 + 来源表补 js-reverse-mcp）

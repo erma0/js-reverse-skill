@@ -107,11 +107,13 @@
 
 ## 语言选择策略
 
+> 交付语言默认 Node.js；用户显式指定（如 Python）时遵从并写入最终总结（SKILL.md §9）。下表仅供默认 Node 下偏好的补充参考。
+
 | 维度 | Node.js | Python |
 |---|---|---|
 | 加密逻辑复杂度 | 自定义逻辑可直接 `vm` 沙箱执行 | 标准算法直接用库还原 |
-| JSVMP 场景 | vm 可直接加载 | 需 `execjs` 桥接 |
-| TLS 指纹需求 | 需额外配置（curl-cffi-node） | `curl_cffi` 一行搞定 |
+| JSVMP / 补环境 | vm 可直接加载目标 JS（默认路线） | 不推荐（核心为 JS 沙箱，Python 入口需声明桥接方式） |
+| TLS 指纹需求 | 可用 curl-cffi-node | `curl_cffi` 一行搞定，更成熟（用户未指定且此需求显著时优先） |
 
 ## 相关案例
 

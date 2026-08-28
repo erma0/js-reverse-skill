@@ -512,6 +512,8 @@ node scripts/run_with_trace.js --target <project-root>/case/js/original/<资源�
 
 ## 9. IMPLEMENT
 
+**交付语言（进入本节点即定，中途不更换）**：默认 Node.js，不按路径预判；用户显式指定其他语言（如 Python）时遵从并写入最终总结。补环境题型（B/C/D）核心为执行目标 JS 算法，选 Python 入口时须在总结声明 JS 执行桥接方式，禁止静默包 Node 子进程充当"Python 交付"。
+
 实现路径按以下顺序降级：
 
 A. 纯算法：Node `crypto`、Python `hashlib`/成熟密码库和原始序列化规则。
