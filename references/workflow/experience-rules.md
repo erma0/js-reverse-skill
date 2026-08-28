@@ -126,7 +126,20 @@ match10 实测：sandbox 预填"看起来完整"的运行时状态快照后，�
 
 三条都干净后，**约束只可能在三个地方**，逐项落实为交付实现（match17 实证：HTTP/2 + 末页 UA=yuanrenxue + sessionid；match19 实证：服务端 TLS ClientHello 黑名单 + 末页 UA 分流）：
 1. **传输层**：协议版本（HTTP/2、ALPN）、TLS 指纹、连接复用与顺序——Node 侧用原生 `node:http2`：一次 `http2.connect()` 建会话、多次 `client.request()` 复用、最后 `client.close()`（交付门禁 Session 三件套天然满足，`client.alpnProtocol === 'h2'` 可作协议自检）；**不要发 `accept-encoding`**，避免 br/zstd 需额外解压，同时保留 zlib 解压兜底。协议要求以取证响应头（如 `x-firefox-spdy: h2`）与题面为准，不要用 HTTP/1.1 反向上报惩罚计数。
-   **传输层失败先做跨客户端栈对照（match19 实证）**：同一请求用三个不同 TLS 栈各发一次——Node（`https`/`http2`）、curl（schannel/openssl）、Python `requests`（OpenSSL）——再叠加逐项复刻浏览器头/UA/开窗时序。判读：全部 400 → 内容/会话层（回 DIAGNOSE 双对照）；仅 Node 400 → **服务端 TLS ClientHello 指纹黑名单**（match19："token failed" 文案 ≠ 令牌参数缺失——同文案在 match9 是 m-cookie 缺失，在 match19 是客户端栈被拉黑，**错误文案不指示病因层**）；此时给 Node 做 TLS 伪装脆弱且不可持续，**按证据切换交付语言**（Python `requests.Session` 的 `session.get/close` 同样满足 Session 三件套门禁），并在最终总结声明切换依据。
+   **传输层失败先做「三级客户端阶梯」对照（match19 实证起点）**：以取证浏览器（ruyipage 成功样本）为 ground truth 锚点，协议客户端按代价从低到高逐级测——**每升一级只改"客户端栈"这一个变量**（同一份请求、同样的头/UA/时序）：
+   - 第一级 · Node 默认栈：原生 `https` / `node:http2`（默认交付客户端）。
+   - 第二级 · 跨栈普通客户端：curl（schannel/openssl）、Python `requests`（OpenSSL）——**指纹族不同但都非浏览器指纹**，用来区分"窄黑名单"与"更宽的过滤"。
+   - 第三级 · 指纹客户端：Python `curl_cffi`（`impersonate` 固定到具体浏览器档位如 chrome/firefox）、Node `CycleTLS` / `impers` / `curl-cffi`——伪装浏览器 JA3/JA4/HTTP2 指纹（工具探测与安装见 `references/network/tls-validation.md`，`check_tls_clients.js` 自动检测本机可用性；`curl_cffi.requests.Session` 与 requests 同形 `session.get/close`，Session 三件套门禁已识别）。
+
+   **判读矩阵**（前提：浏览器取证样本 200）：
+   | Node 默认栈 | 普通跨栈 | 指纹客户端 | 结论 | 交付选择 |
+   |---|---|---|---|---|
+   | 200 | — | — | 无传输层约束 | Node 默认栈 |
+   | 400 | 200 | — | **窄黑名单**（仅 Node 系/常见 bot 指纹被拉，match19 实证） | 通过验证的普通客户端即可，不上指纹伪装 |
+   | 400 | 400 | 200 | **浏览器指纹白名单**（JA3/JA4/HTTP2 校验） | `curl_cffi`/`CycleTLS` 交付，**固定 impersonate 档位并写入验证记录** |
+   | 400 | 400 | 400 | 非 TLS 层：h2 帧指纹细节、头序/大小写、会话武装、或内容层 → 回 DIAGNOSE 双对照 | — |
+
+   三条纪律：① **"错误文案不指示病因层"**——同是 `token failed`，match9 是 m-cookie 缺失、match19 是 Node 指纹被拉黑；先阶梯定位再对症。② **最低可用栈交付**：第二级通过就不上指纹客户端（少依赖、少一个可被指纹检测/档位过期的伪装面；match19 交付即普通 requests）；第三级通过才用指纹客户端，且 impersonate 档位会随浏览器版本漂移，必须固定并记录。③ 第二级全拒**不等于**回内容层——必须先测完第三级把"白名单"排除，才能下内容层/会话层结论。
 2. **请求头语义**：UA（末页 UA 红线是站点惯例）、Referer、`X-Requested-With`、Cookie 里的登录凭据——这些不是"签名"，但缺一项就取不到数据，且失败常表现为 **HTTP 200 + `data` 非数值**（必须对每页做元素类型校验，不能只看状态码——match19 末页 UA 未过时返回 200 + `["请","将","UA",...]` 提示数组）。
 3. **响应层**：数据加密/字体映射/图片拼装（内容还原型，Step 2 可豁免）。
 

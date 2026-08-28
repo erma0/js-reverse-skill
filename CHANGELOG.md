@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 2.3.85 - 2026-08-29
+
+### 方法论修正（跨客户端栈对照升级为三级客户端阶梯 + 判读矩阵 + 最低可用栈交付原则）
+
+2.3.84 的「跨客户端栈对照」只写了 Node vs curl/requests 两级普通栈，存在两个问题（用户复盘指正）：① 缺第三级**指纹客户端**——若服务端是浏览器指纹白名单（JA3/JA4/HTTP2 校验），普通栈全 400 会被旧判读误导回"内容层排查"，而正确动作是上指纹客户端区分；② 与 `tls-validation.md` 的指纹客户端体系（CycleTLS/impers/curl_cffi/cyCronet + `check_tls_clients.js` 自动探测）脱节，两处文档各说各话。
+
+- **experience-rules 规则 27 升级「三级客户端阶梯」+ 判读矩阵**：第一级 Node 默认栈 → 第二级跨栈普通客户端（curl/requests，指纹族不同但都非浏览器指纹）→ 第三级指纹客户端（Python `curl_cffi` 固定 impersonate 档位 / Node `CycleTLS`、`impers`、`curl-cffi`）。判读矩阵四行：Node ✓ → 无约束；Node ✗ + 普通 ✓ → 窄黑名单（match19，普通客户端交付）；Node ✗ + 普通 ✗ + 指纹 ✓ → 浏览器指纹白名单（curl_cffi/CycleTLS 交付，**固定 impersonate 档位写入验证记录**）；三者全 ✗ → 非 TLS 层回 DIAGNOSE。三条纪律：错误文案不指示病因层 / **最低可用栈交付**（第二级通过就不上指纹伪装）/ 第二级全拒不等于回内容层（必须先排除白名单）。
+- **tls-validation.md 定位修订**：开头补「与规则 27 阶梯的关系」专段——探测与安装提前做，**是否使用由阶梯判定**；"不要等普通失败后才临时切换"收窄为"可用性探测提前"，不是要求所有站点一律用指纹客户端发请求；"不要默认退回普通 requests"收窄为"阶梯已判定需要指纹客户端时不要用普通客户端硬试"。消除与规则 27 的双头指导冲突。
+- **SKILL.md 两处同步**：① §10 正向对照判读改为阶梯表述，明确"普通栈全 400 ≠ 回内容层，必须先用指纹客户端排除浏览器指纹白名单"；② §9 交付语言例外的表述从"语言切换"修正为"**客户端栈切换**"——换的是被拉黑的客户端栈，语言以哪个生态指纹客户端可用且满足 Session 门禁为准（Node 生态有 CycleTLS/impers，Python 生态有 curl_cffi/cffi_curl/cyCronet，`curl_cffi.requests.Session` 与 requests 同形、Session 门禁已识别）。
+- **match19 案例踩坑 3 同步**：补第三级说明——本题第二级通过属窄黑名单（普通客户端交付正确）；普通栈全拒时先上指纹客户端区分白名单，再定交付栈。
+- 验证：`check_skill_consistency.js --project-dir .` 通过（0 问题）；`check_routing_benchmarks.js` 全量通过（26/26，exit 0）；`check_tls_clients.js` 实测本机 Python curl_cffi 0.16.0 可用、Node 侧未安装（阶梯第三级的前置探测路径可用）。
+
 ## 2.3.84 - 2026-08-29
 
 ### 经验固化（match19 案例入库：全明文 + Node TLS 指纹黑名单 + 跨客户端栈对照法 + 反模式 27 机理修正 + 取证工具三处补强）

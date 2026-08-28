@@ -513,7 +513,7 @@ node scripts/run_with_trace.js --target <project-root>/case/js/original/<资源�
 
 ## 9. IMPLEMENT
 
-**交付语言（进入本节点即定；确需更换须凭证据）**：默认 Node.js，不按路径预判；用户显式指定其他语言（如 Python）时遵从并写入最终总结。两类合法的例外/更换，均须在最终总结声明依据：① 用户显式指定（任意阶段）；② **服务端封锁证据驱动的切换**——REAL_VERIFY/DIAGNOSE 用跨客户端栈对照法证明默认语言客户端被服务端传输层指纹黑名单拦截（match19 实证：Node https/http2 全 400 token failed，curl/Python requests 同参数 200），此时切 Python `requests.Session` 是正确处置而非违规，语言切换记录写入总结 §6 与经验沉淀。补环境题型（B/C/D）核心为执行目标 JS 算法，选 Python 入口时须在总结声明 JS 执行桥接方式，禁止静默包 Node 子进程充当"Python 交付"。
+**交付语言（进入本节点即定；确需更换须凭证据）**：默认 Node.js，不按路径预判；用户显式指定其他语言（如 Python）时遵从并写入最终总结。两类合法的例外/更换，均须在最终总结声明依据：① 用户显式指定（任意阶段）；② **服务端封锁证据驱动的客户端栈/语言切换**——REAL_VERIFY/DIAGNOSE 按规则 27 三级客户端阶梯证明默认栈被服务端传输层指纹策略拦截（match19 实证：Node https/http2 全 400 token failed，跨栈普通客户端 200 → 切 Python requests；若普通栈也全拒而指纹客户端 200，则白名单成立，可选 Python `curl_cffi` 固定 impersonate 档位或 Node `CycleTLS`——换的是被拉黑的客户端栈，语言以哪个生态指纹客户端可用且满足 Session 门禁为准）。补环境题型（B/C/D）核心为执行目标 JS 算法，选 Python 入口时须在总结声明 JS 执行桥接方式，禁止静默包 Node 子进程充当"Python 交付"。
 
 实现路径按以下顺序降级：
 
@@ -554,7 +554,7 @@ node scripts/compare_fixture.js --fixture case/fixtures/<样本>.fixture.json --
 
 **403/风控码分层定位协议（硬约束：下「连接层拦截 / 纯协议不可绕过」结论前必须完成）**：用「签名来源 × 连接来源」双对照定位拦截层，完整矩阵见 `references/network/ip-risk-control.md`：
 
-1. **正向对照**：浏览器**新鲜**签名 + 纯协议客户端（curl_cffi 等）重放 → 200 ⇒ 连接层无问题，问题在自己的签名内容；403 ⇒ 连接层嫌疑才成立。内嵌 serverTime/时间戳的签名有有效期，对照必须用采集后立即重放的新鲜样本并记录采集→重放延迟；**用过期样本得到的 403 不构成任何结论**（实战误判：拼多多 40002 被误判为连接层风控）。**对照客户端本身也可能是变量（match19 实证）**：同一份请求用多个不同 TLS 栈各发一次（curl / Python requests / Node https+http2），若浏览器 200、curl/requests 200、唯独 Node 400 → 是服务端 TLS ClientHello 黑名单而非签名内容——"错误文案不指示病因层"（同是 `token failed`，match9 是 m-cookie 缺失、match19 是客户端栈被拉黑）；详见规则 27 跨客户端栈对照法。
+1. **正向对照**：浏览器**新鲜**签名 + 纯协议客户端（curl_cffi 等）重放 → 200 ⇒ 连接层无问题，问题在自己的签名内容；403 ⇒ 连接层嫌疑才成立。内嵌 serverTime/时间戳的签名有有效期，对照必须用采集后立即重放的新鲜样本并记录采集→重放延迟；**用过期样本得到的 403 不构成任何结论**（实战误判：拼多多 40002 被误判为连接层风控）。**对照客户端本身也可能是变量（match19 实证）**：按三级客户端阶梯逐级测——Node 默认栈 → 跨栈普通客户端（curl/requests）→ 指纹客户端（Python `curl_cffi` 固定 impersonate 档位 / Node `CycleTLS`、`impers`）——若浏览器 200、唯独 Node 400 是窄黑名单；普通栈全 400 **不等于**回内容层，必须先用指纹客户端排除"浏览器指纹白名单"才能下内容层结论；交付遵循最低可用栈。判读矩阵与交付选择见规则 27；"错误文案不指示病因层"（同是 `token failed`，match9 是 m-cookie 缺失、match19 是 Node 指纹被拉黑）。
 2. **反向对照**：自己的签名 + 真实浏览器连接（取证阶段 ruyipage `add_preload_script` hook XHR.open 替换目标参数，hook 必须带执行标记并验证）→ 403 ⇒ 服务端校验签名内容，与连接无关。
 3. 定位为「签名内容被校验」后，用**对齐探针法**测量 SDK 实际内嵌的环境检测并逐位对齐（见 `references/env/env-detect-bypass.md`），不要先假设需要复现 canvas/行为轨迹等完整浏览器指纹。
 4. **对照必须在健康 session 下做，且一次只改一个变量**：连续失败会触发站点惩罚机制（惩罚期内连浏览器基线请求都被拒，对照数据全部作废）；每组对照前先复刻一次确定成功的基线请求，失败即冷却后重做。HTTP 200 + 业务层风控文案时先按 `references/network/ip-risk-control.md` 会话状态类风控专节（蜜月期窗口/"频率墙"误判警示/失败惩罚）排查。

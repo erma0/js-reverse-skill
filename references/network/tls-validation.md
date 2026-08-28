@@ -1,6 +1,8 @@
 # 最终请求验证与 TLS 指纹兼容
 
-本文件在新 case 需要最终发送真实请求、交付 `final.js` / `final.py`，或用户提到 CycleTLS、impers、curl-cffi-node、curl_cffi、cffi_curl、cyCronet 时读取。TLS 指纹兼容客户端从前置阶段开始自动探测（Node curl-cffi-node → impers → Python curl_cffi / cffi_curl），不要等普通 `fetch` / `requests` 失败后才临时切换，也不要求用户选择；最终请求一律使用 Session 模式。
+本文件在新 case 需要最终发送真实请求、交付 `final.js` / `final.py`，或用户提到 CycleTLS、impers、curl-cffi-node、curl_cffi、cffi_curl、cyCronet 时读取。TLS 指纹兼容客户端从前置阶段开始自动探测（Node curl-cffi-node → impers → Python curl_cffi / cffi_curl），也不要求用户选择；最终请求一律使用 Session 模式。
+
+**与规则 27「三级客户端阶梯」的关系（match19 修订）**：探测提前做（保证需要时客户端可用），**是否使用由阶梯判定**——普通客户端（Node 默认栈 / curl / requests）通过验证时按**最低可用栈**直接交付，不上指纹伪装（少依赖、少一个可被指纹检测与档位过期的伪装面，match19 即普通 requests 交付）；只有阶梯判定进入第三级（浏览器指纹白名单：普通栈全拒、指纹客户端通过）时，指纹客户端才成为交付客户端。"不要等失败后才临时切换"指的是**可用性探测与安装**要提前，不是要求所有站点一律用指纹客户端发请求。
 
 ## 使用边界
 
@@ -27,7 +29,7 @@ node scripts/check_tls_clients.js --markdown
 node scripts/check_tls_clients.js --python python --markdown
 ```
 
-如果当前可用的 TLS 指纹兼容库未安装，不要默认退回普通 `fetch` / `requests` 发真实请求。默认自动安装优先客户端（Node curl-cffi-node / Python curl_cffi）；安装失败时才报告阻塞或按交付语言降级说明，不要求用户选择。
+如果当前可用的 TLS 指纹兼容库未安装，而本 case 阶梯判定**已需要**指纹客户端（普通栈被拒、疑似浏览器指纹白名单），不要默认退回普通 `fetch` / `requests` 硬试已证明会拒的站点。默认自动安装优先客户端（Node curl-cffi-node / Python curl_cffi）；安装失败时才报告阻塞或按交付语言降级说明，不要求用户选择。普通客户端可通过的站点（阶梯第二级）无需安装，直接普通客户端交付。
 
 ## 工具选择
 
