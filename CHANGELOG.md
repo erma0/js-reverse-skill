@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 2.3.79 - 2026-08-28
+
+### 经验固化（match16 案例入库：webpack 混淆包黑盒执行 + 反模式 26「分支漂移」+ 规则 26）
+
+match16（webpack 打包 + obfuscator.io 混淆，URL 查询参数签名）完整实战成果入库。本次的核心教训是**"签名格式全对却被服务端全拒"的第三类根因——分支漂移**：此前反模式 23 覆盖"签名含随机量 ⇒ 走错分支"，但 match16 的 catch 分支产出的是**完全确定、格式完全正常**的签名，信号不同、处置不同，故单列反模式 26。
+
+- **新案例 `cases/yuanrenxue-match16-webpack-blackbox-branch.md`** + `cases/index.json`（34 条）+ match 题号速查表第 16 行。技术指纹：webpack 单行 bundle（310882B，sha256 `61db4701...`）只需模块 127（混淆 MD5→`window.md5`）与模块 732（126 字符变形 base64→`window.btoa`）；`m = d(15) + md5(变形base64(t)) + d(10)` 定长 57，**前后缀随机服务端不校验、中间 32 位 MD5 才是签名本体**；`t = Date.parse(new Date).toString()` 秒级（相邻秒会碰撞出相同 MD5 段，服务端同算法重算故不影响）；接口已从老版 `/api/match/16` 改为 `/api/question/16`；page5 UA=yuanrenxue 且必须校验 `data` 元素类型（普通 UA 返回 HTTP 200 + 9 条中文提示）；数据绑定 sessionid（答案 25052175）。三个坑：① 模块 732 `case 1` 靠 `n.g` 选 try/catch 分支，抠代码裸跑 `n` 缺失 → 静默走 catch；② `charAt` 索引 259 > 字母表 126，越界返回空串是算法语义，改数组下标会拿到 `undefined`；③ 模块切片边界 = 下一模块起点 - 2，多一个 `}` 就 SyntaxError。
+- **common-pitfalls 新增反模式 26**：抠出的代码在沙箱里静默走错分支（分支漂移）。打包器注入的宿主对象（`__webpack_require__` 的 `n`、`n.g = globalThis`）在抠代码后不会自动存在，原代码若用 `try/catch`、`typeof`、`if (n.g)` 兜底，缺失即静默切到另一条确定性分支——无报错、无 undefined、格式全对。正确做法：抠前先扫分支条件 → 按打包器语义补宿主对象 → 沙箱禁止静默吞错（catch 命中即信号）→ 用**两组取证样本**反证分支；"格式正确但被拒"排查顺序：分支 → 输入量精度 → 状态生命周期（反模式 24）→ 会话/TLS。**顺带补齐速查表漏登记的 24、25 两行**。
+- **experience-rules 新增规则 26（webpack bundle 模块切片黑盒执行要点）**：模块定界（正则扫 `\d+:function(...){` 起点按偏移排序，追加 0~5 个 `}` 逐个 `node --check`）、隔离作用域（`new Function` 逐个执行 + 共享同一 `window`）、require 桩（`n.g = globalThis`，反模式 26 的防线）、反调试代码 try/catch 包住不必删、语义不可"优化"（`charAt` 越界空串 / 秒级时间戳）。
+- **SKILL.md §9 路径 B 补黑盒执行的宿主对象纪律**：抠模块执行必须复刻打包器注入对象，并指向规则 26 / 反模式 26。
+- 验证：`check_skill_consistency` 引用一致性 131 条目 0 问题 + `search_cases.js match16` 命中新条目 + 两脚本 self-test PASS。
+
 ## 2.3.78 - 2026-08-28
 
 ### 工具链（match16 复盘回归：状态文件标准布局 + TLS 声明否定式不再误判）

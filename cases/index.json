@@ -655,6 +655,28 @@
       "strategy": "C WASM 加载：main.wasm（3854B、无导入、md5 0c602212）纯确定性，Node 原生 WebAssembly.instantiate 直跑 encode；t1=floor(now/1000/2)、t2=t1-random(1..50) 拼 m 参数，末页 UA=yuanrenxue（否则返回中文提示数组），sessionid 外置 config.json；wasm 独立文件加载不内联 base64，真实 https.Agent keepAlive 会话",
       "file": "yuanrenxue-match15-wasm-deterministic-signature.md",
       "verifiedAt": "2026-08-28"
+    },
+    {
+      "title": "webpack 混淆包黑盒执行 + 分支漂移（猿人学第16题）",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match16",
+        "webpack 模块切片",
+        "__webpack_require__",
+        "n.g",
+        "try/catch 双分支",
+        "分支漂移",
+        "变形 base64",
+        "charAt 越界",
+        "api/question/16",
+        "m 参数 57 字符",
+        "yuanrenxue UA"
+      ],
+      "strategy": "B 最小 JS 沙箱：从 webpack 单行 bundle（310882B）切出模块 127（混淆 MD5→window.md5）与模块 732（126 字符变形 base64→window.btoa），new Function 隔离作用域执行并共享同一 window，传入 require 桩（n.g=globalThis）才能走对 case 1 的 try 分支；m=d(15)+md5(btoa(t))+d(10) 定长 57（中间 32 位才是签名本体），t=Date.parse(new Date).toString() 秒级；末页 UA=yuanrenxue 且须校验 data 元素类型（普通 UA 返回 HTTP 200 + 中文提示数组），sessionid 外置 config.json",
+      "file": "yuanrenxue-match16-webpack-blackbox-branch.md",
+      "verifiedAt": "2026-08-28"
     }
   ]
 }
