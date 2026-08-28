@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## 2.3.81 - 2026-08-28
+
+### 经验固化（match17 案例入库：请求侧全明文 + HTTP/2 传输层题型 + 反模式 27「诱饵参数」+ 规则 27）
+
+match17（「天杀的 Http2.0」）完整实战成果入库。本次的核心认知是**"不是每题都有签名"**——页面里能看到参数名不等于它进了真实请求，把诱饵参数当签名去逆是无解方向；同站 match7 / match13 已有两次同源形态，本次第三次，故单列反模式 27 并配规则 27 给出"无签名"的收手判据。
+
+- **新案例 `cases/yuanrenxue-match17-http2-transport-plaintext.md`** + `cases/index.json`（35 条）+ match 题号速查表第 17 行。技术指纹：`GET /api/question/17?page=N&pageSize=10&kw=` **请求侧零签名**（无 token/时间戳/随机量/指纹）；`m:window.match17` 是诱饵——`$.ajax` hook 只在有人请求 `/api/match/17` 时才赋值，而该接口从未被请求（25 个包全量核对），值恒 `undefined` 被 jQuery `$.param` 丢弃，trace writer 参数全文 `["GET","/api/question/17?page=1&pageSize=10&kw=",true,"undefined","undefined"]` 可佐证；真正约束在传输层（HTTP/2 + 末页 UA=yuanrenxue + sessionid）；无 JS 写入的挑战 cookie（仅百度统计 `Hm_*`）；数据绑定 sessionid（答案 25585231，各页小计 3,999,783 / 4,317,740 / 6,280,131 / 5,662,478 / 5,325,099）；4 轮 20 次真实请求全 200 且协议 h2，page1/page2 与取证样本逐元素一致；提交 `POST /a/17` 表单编码 → `code=2` 通关。三个工具坑：① `--targets` 不能用 `question/17`（静态资源 `static/new_match/question/17/webpack.js` 误命中），用 `page=1`/`page=2`；② trace 里 XHR 记录被 transcend/mozilla 第三方脚本淹没，直接检索 URL 字面量定位 writer（`jquery.js:2391:23`）；③ 自动 `--import-after` 只收进 823B 空壳（已在 2.3.80 修复）。
+- **common-pitfalls 新增反模式 27（诱饵参数：参数名存在 ≠ 参数生效）**：源码里写了参数名只证明有人写过这个字面量，不证明它进入真实请求；四类"写了但没生效"路径——赋值依赖的接口从未被调用、值恒 undefined 被 `$.param`/`URLSearchParams`/axios/JSON.stringify 静默丢弃、赋值在不可达分支、老版本遗留而接口已改版。正确做法：生效性一律看 trace writer 参数全文与 capture.json 真实 URL；发现"待还原参数恒为 undefined"先查赋值路径可达性而不是找算法；用参数名在 capture.json 反查出现次数。**顺带补强反模式 22**：新增同源形态「静态资源路径含接口子串」（`--targets "question/17"` 命中 `static/new_match/question/17/webpack.js`），解法是用带 `?` 参数的片段锁定。**封顶说明同步更新**：原定 25 封顶，26/27 因不同根因顺延，已超线，后续新增前应先考虑分卷重构。
+- **experience-rules 新增规则 27（无签名/传输层题型）** 并新增第十二节：请求侧"无签名"的三条判据（网络层 target-hits 无动态字段 + 可疑参数名全量反查 0 次；trace writer 参数全文无该字段；Cookie/存储层无 JS 写入 cookie 且无 WASM/JSVMP/混淆 SDK）；三条全干净即收手，转查传输层（协议/ALPN、UA 红线、登录凭据，失败常表现为 HTTP 200 + `data` 非数值，必须做元素类型校验）与响应层。Node 原生 `node:http2` 实现要点：一次 `connect()` + 多次 `request()` + `close()`、`alpnProtocol === 'h2'` 自检、不发 `accept-encoding`。
+- **SKILL.md §9 路径 E 补「不是每题都有签名」**：请求侧全明文走 A+E 不做补环境 + 三条判据 + 参数名存在 ≠ 参数生效 + Node http2 实现要点，指向规则 27 / 反模式 27。**速查卡 Step 1/Step 2 两行补齐硬提示**：`--targets` 只写唯一子串（优先带 `?` 参数片段）；Step 2 结束后必须核对 `case/ruyi-trace/logs/domtrace/` 各文件体积与摘要"合并文件数"是否一致。
+- 验证：`check_skill_consistency` 引用一致性 131 条目 0 问题；`search_cases.js match17` / `http2` / `诱饵参数` 均命中新条目；全量脚本 `--self-test` 无回归。
+
+## 2.3.80 - 2026-08-28
+
+### 工具链（match17 复盘回归：http2 Session 检测 + trace 日志漏导入）
+
+- **`check_final_artifact.js`：`SESSION_CREATE_PATTERNS` 补 `/\bhttp2\.connect\s*\(/i`**。HTTP/2 客户端的 `http2.connect()` 与 `https.Agent` / `requests.Session` 同语义（建立可复用会话），此前缺失导致 Node 原生 http2 交付被判「未检测到 Session 创建」——match17 只能靠显式封装一个 `createRequestSession(host)` 函数绕过（`client.request(` / `client.close(` 本来就命中复用与清理检测）。self-test 补 http2 三件套回归用例。
+- **`capture_ruyitrace_log.js`：`--import-after` 漏导入大进程日志**。根因是 `waitForTraceFlush` "一轮签名稳定即返回"（最快 250ms），而 content 进程日志常在浏览器 kill 后数十秒才刷盘——match17 实测：823B 的小 tab 日志先落盘，1.8MB / 2.5MB / 1.2MB 三个真正的业务进程日志分别在 10s / 32s / 33s 后才写出，自动导入只收进那个空壳，页面 JS 证据全部丢失，只能手动合并。三条修复：① **写日志的 trace 浏览器进程仍存活时不进入静默期判定**（每 3s 探测一次，进程还在就还会有日志）；② 改为**连续静默 `--flush-quiet`**（默认 8000ms）才返回，`--flush-timeout` 默认 3000 → 45000ms；③ 导入阶段新增**体积抢救分支**：已选 domtrace 之外若存在 ≥2 倍且 >32KB 的更大 domtrace 文件，忽略 mtime 过滤一并合并导入并记录原因。报告新增「日志刷盘等待」行；新增 `--flush-timeout` / `--flush-quiet` 两个参数（usage 已同步）；`runSelfTest` 改 async 并补「静默期内新刷盘的日志不得被漏掉」回归（19 → 20 断言）。
+- 验证：`capture_ruyitrace_log.js --self-test` 20 项 PASS、`check_final_artifact.js --self-test` PASS、`node --check` 通过；用 match17 真实交付在「移除 `createRequestSession` 封装、只留原生 `http2.connect`」的改造版上做对照——旧脚本报「未检测到 Session 创建」（EXIT=1），新脚本 EXIT=0。
+
 ## 2.3.79 - 2026-08-28
 
 ### 经验固化（match16 案例入库：webpack 混淆包黑盒执行 + 反模式 26「分支漂移」+ 规则 26）

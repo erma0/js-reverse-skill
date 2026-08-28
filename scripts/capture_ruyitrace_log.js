@@ -12,7 +12,8 @@ const KNOWN_FLAGS = [
   '--url', '--input', '--case-dir', '--dir', '--out-dir', '--profile-dir', '--ruyitrace-home',
   '--ruyitrace-exe', '--project-dir', '--cookie', '--cookie-domain', '--duration', '--limit',
   '--ptype', '--trace-env', '--target-signal', '--trace-signal', '--evidence-signal',
-  '--end-signal', '--signal-policy', '--dry-run', '--import-after', '--json', '--markdown',
+  '--end-signal', '--signal-policy', '--flush-timeout', '--flush-quiet',
+  '--dry-run', '--import-after', '--json', '--markdown',
   '--self-test', '--help',
 ];
 
@@ -63,6 +64,8 @@ function parseArgs(argv) {
     evidenceSignals: [],
     endSignals: [],
     signalPolicy: 'strict',
+    flushTimeout: 45000,
+    flushQuiet: 8000,
     dryRun: false,
     importAfter: false,
     json: false,
@@ -109,6 +112,16 @@ function parseArgs(argv) {
       const v = needVal('strict 或 advisory');
       if (!['strict', 'advisory'].includes(v)) throw new Error(`--signal-policy 只接受 strict 或 advisory，收到：${v}`);
       args.signalPolicy = v;
+    }
+    else if (a === '--flush-timeout') {
+      const v = Number(needVal('毫秒，如 45000'));
+      if (!Number.isFinite(v) || v < 0) throw new Error('--flush-timeout 需为非负毫秒数');
+      args.flushTimeout = v;
+    }
+    else if (a === '--flush-quiet') {
+      const v = Number(needVal('毫秒，如 8000'));
+      if (!Number.isFinite(v) || v < 0) throw new Error('--flush-quiet 需为非负毫秒数');
+      args.flushQuiet = v;
     }
     else if (a === '--dry-run') args.dryRun = true;
     else if (a === '--import-after') args.importAfter = true;
@@ -174,6 +187,8 @@ function usage() {
 --end-signal <信号>（可多次）：仅用于自动采集提前结束；不传时只在用户关闭或 duration 到期时结束。
 --target-signal <信号>（兼容旧参数）：同时作为 evidence-signal 和 end-signal；新流程不要使用。
 --signal-policy strict|advisory：strict 未命中退出非 0；advisory 只记录覆盖不足，适合用户手动结束或信号尚未确定的采集。
+--flush-timeout <ms>（默认 45000）：结束后等待日志刷盘的上限。content 进程日志常在浏览器 kill 后数十秒才写出（match17 实测 33s），过短会只收进空壳小文件。
+--flush-quiet <ms>（默认 8000）：连续静默多久才判定刷盘完成；只按「一轮稳定」返回会漏掉后刷盘的大进程日志。
 --ptype <list>：启用 trace 的进程类型（逗号分隔，透传 MOZ_DOM_TRACE_PTYPE），不传则全部进程类型；大页面可只留主/content 进程减少无关日志。
 --trace-env KEY=VALUE（可多次）：透传 RuyiTrace 定向 trace 开关（仅 MOZ_DOM_ 前缀；KEY=VALUE 里的值含空格时整体加引号）。
   定向组合示例（先判题型再选最小开关，避免日志过大，完整清单见 references/tooling/ruyitrace-cheatsheet.md）：
@@ -496,7 +511,7 @@ function scanSignalsIncremental(files, signals, state) {
   return observed.size === signals.length;
 }
 
-function runSelfTest() {
+async function runSelfTest() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capture-trace-signal-'));
   const file = path.join(root, 'trace.ndjson');
   const state = { offsets: new Map(), carry: new Map(), observed: new Set() };
@@ -541,11 +556,29 @@ function runSelfTest() {
     threw = false;
     try { parseTraceEnv(['MOZ_DOM_TRACE=0']); } catch { threw = true; }
     if (!threw) throw new Error('覆盖脚本管理的 key 应被拒绝');
+    // 日志刷盘等待：静默期内新出现的日志不得被漏掉（match17 实测：3 个真正的 tab 进程日志
+    // 在浏览器 kill 后才刷盘，旧实现“一轮稳定即返回”只收进 823B 空壳）
+    const flushDir = path.join(root, 'flush', 'domtrace');
+    fs.mkdirSync(flushDir, { recursive: true });
+    const flushSince = Date.now() - 1000;
+    fs.writeFileSync(path.join(flushDir, 'trace_process_1.ndjson'), `${JSON.stringify({ process_type: 'tab' })}\n`, 'utf8');
+    const lateTimer = setTimeout(() => {
+      fs.writeFileSync(path.join(flushDir, 'trace_process_2.ndjson'), `${JSON.stringify({ process_type: 'tab' })}\n`, 'utf8');
+    }, 600);
+    let flushResult;
+    try {
+      flushResult = await waitForTraceFlush(flushDir, flushSince, { timeoutMs: 8000, quietMs: 1000 });
+    } finally {
+      clearTimeout(lateTimer);
+    }
+    if (flushResult.files.length < 2) throw new Error('静默期内新刷盘的日志应被 waitForTraceFlush 收集');
+    if (flushResult.timedOut) throw new Error('日志已稳定时不应耗尽 flush 超时');
     // walkNdjson 应同时发现 .ndjson 与 .jsonl（jscall 派生日志）
     const jscallDir = path.join(root, 'jscall');
     fs.mkdirSync(jscallDir, { recursive: true });
     fs.writeFileSync(path.join(jscallDir, 'trace_jscall_process_1.jsonl'), '{"kind":"jscall"}\n', 'utf8');
-    if (walkNdjson(root).length !== 5) throw new Error('walkNdjson 应匹配 .ndjson 与 .jsonl');
+    const walkAll = walkNdjson(root).filter((f) => !/[\\/]flush[\\/]/.test(f));
+    if (walkAll.length !== 5) throw new Error('walkNdjson 应匹配 .ndjson 与 .jsonl');
     // 参数报错精细化：缺值 / 非法枚举 / 拼错参数名各给出定向提示，不再回落全量 usage
     threw = '';
     try { parseArgs(['node', 'x', '--trace-signal']); } catch (e) { threw = e.message; }
@@ -559,7 +592,7 @@ function runSelfTest() {
     threw = '';
     try { parseArgs(['node', 'x', '--trace-signal', 'ab']); } catch (e) { threw = e.message; }
     if (!/最少 3 字符/.test(threw)) throw new Error('信号过短应告知最短长度');
-    return { clean: true, tests: 19 };
+    return { clean: true, tests: 20 };
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -574,13 +607,28 @@ function mainTraceFiles(files) {
   return content.length ? content : dom;
 }
 
-async function waitForTraceFlush(outDir, sinceMs, timeoutMs = 3000) {
-  const deadline = Date.now() + timeoutMs;
+// 等待日志刷盘完成。
+// 旧实现只要“某一轮与上轮签名一致且所有文件以 LF 结尾”就立刻返回（最快 250ms），导致
+// 后刷盘的大进程日志被整体漏掉——match17 实测：浏览器 kill 时只有 823B 的 tab 日志在盘上，
+// 另外三个真正的业务进程日志（1.8MB / 2.5MB / 1.2MB）分别在 10s / 32s / 33s 后才写出，
+// 自动 --import-after 只收进了那个 823B 文件，页面 JS 证据全部丢失，只能手动合并导入。
+// 两条硬约束：① 写日志的 trace 浏览器进程仍存活时不进入静默期判定（进程还在就还会有日志）；
+// ② 必须连续静默 quietMs 才返回，不是“一轮稳定”就返回。
+async function waitForTraceFlush(outDir, sinceMs, options = {}) {
+  const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs >= 0 ? options.timeoutMs : 45000;
+  const quietMs = Number.isFinite(options.quietMs) && options.quietMs >= 0 ? options.quietMs : 8000;
+  const firefoxExe = options.firefoxExe || '';
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
   let previous = '';
+  let lastChangeAt = startedAt;
+  let lastProcCheckAt = 0;
+  let alive = null;
+  let files = [];
   while (Date.now() < deadline) {
     // 进程退出后某些 content 进程可能才创建/关闭自己的 NDJSON；每轮重新发现文件，
     // 不把“第一次扫描时尚不存在的日志”漏掉。
-    const files = listNdjsonFiles(outDir, sinceMs);
+    files = listNdjsonFiles(outDir, sinceMs);
     let signature = '';
     let allStable = true;
     for (const file of files) {
@@ -598,10 +646,26 @@ async function waitForTraceFlush(outDir, sinceMs, timeoutMs = 3000) {
         }
       } catch { allStable = false; }
     }
-    if (signature === previous && allStable) return;
-    previous = signature;
-    await wait(250);
+    if (signature !== previous || !allStable) {
+      previous = signature;
+      lastChangeAt = Date.now();
+    }
+    // 进程存活探测较重（起 powershell），每 3s 一次即可；查询不可用（非 Windows）时跳过该判据。
+    if (firefoxExe && Date.now() - lastProcCheckAt >= 3000) {
+      lastProcCheckAt = Date.now();
+      const count = await kernelFirefoxAlive(firefoxExe);
+      if (count !== null) alive = count;
+    }
+    if (alive !== null && alive > 0) lastChangeAt = Date.now();
+    if (Date.now() - lastChangeAt >= quietMs) break;
+    await wait(500);
   }
+  return {
+    waitedMs: Date.now() - startedAt,
+    timedOut: Date.now() >= deadline,
+    remainingFirefoxProcesses: alive,
+    files: listNdjsonFiles(outDir, sinceMs),
+  };
 }
 
 async function waitForKernelStopped(firefoxExe, timeoutMs = 5000) {
@@ -877,9 +941,18 @@ async function capture(args, plan) {
       }
     }
   }
-  result.logs = listNdjsonFiles(plan.outDir, startedAt);
-  await waitForTraceFlush(plan.outDir, startedAt, 3000);
-  result.logs = listNdjsonFiles(plan.outDir, startedAt);
+  const flush = await waitForTraceFlush(plan.outDir, startedAt, {
+    timeoutMs: args.flushTimeout,
+    quietMs: args.flushQuiet,
+    firefoxExe: plan.firefoxExe,
+  });
+  result.logs = flush.files;
+  result.flushWaitedMs = flush.waitedMs;
+  result.flushTimedOut = flush.timedOut;
+  // 刷盘等待结束时的存活数是更晚的观测值，用于报告；kill 判定维持 kill 阶段结论（不回溯改写）
+  if (flush.remainingFirefoxProcesses !== null) {
+    result.remainingFirefoxProcesses = flush.remainingFirefoxProcesses;
+  }
   result.finishedAt = new Date().toISOString();
   result.elapsedSeconds = Math.round((Date.now() - startedAt) / 100) / 10;
   if (args.importAfter && result.logs.length) {
@@ -899,6 +972,20 @@ async function capture(args, plan) {
       if (rescued.length) {
         domFiles = rescued;
         result.mainTraceRescued = `按采集起点（mtime 容差 10s）未发现 domtrace 主日志，已忽略时间过滤抢救 ${rescued.length} 个 domtrace 文件参与导入`;
+      }
+    } else {
+      // 抢救分支二（match17 教训）：静默期判定仍可能早于部分 content 进程刷盘，只剩小文件在盘上。
+      // 此处按体积补齐——未被 mtime 放行（或静默期后才写出）的 domtrace 文件里若存在明显更大的候选，
+      // 说明真正的业务日志被漏掉，忽略时间过滤一并合并导入，避免只导进 823B 空壳。
+      const sizeOf = (f) => { try { return fs.statSync(f).size; } catch { return 0; } };
+      const freshSet = new Set(domFiles.map((f) => path.resolve(f)));
+      const maxFresh = domFiles.reduce((m, f) => Math.max(m, sizeOf(f)), 0);
+      const staleBigger = walkNdjson(plan.outDir).filter(
+        (f) => isDomtrace(f) && !freshSet.has(path.resolve(f)) && sizeOf(f) > Math.max(32768, maxFresh * 2)
+      );
+      if (staleBigger.length) {
+        domFiles = domFiles.concat(staleBigger);
+        result.mainTraceRescued = `已导入 domtrace 最大仅 ${maxFresh} 字节，另发现 ${staleBigger.length} 个明显更大的 domtrace 文件（最大 ${Math.max(...staleBigger.map(sizeOf))} 字节），已忽略时间过滤一并合并导入`;
       }
     }
     const mainFiles = domFiles.filter((f) => {
@@ -997,6 +1084,9 @@ function renderMarkdown(obj) {
   if (result.exitedEarly) lines.push('- 浏览器在 duration 前已被关闭/退出，采集提前结束（NDJSON 日志保留，需结合结束原因判断是否为用户正常结束）');
   if (result.pid) lines.push(`- 进程 PID：${result.pid}`);
   if (typeof result.elapsedSeconds === 'number') lines.push(`- 命令实际耗时：${result.elapsedSeconds} 秒`);
+  if (typeof result.flushWaitedMs === 'number') {
+    lines.push(`- 日志刷盘等待：${(result.flushWaitedMs / 1000).toFixed(1)} 秒${result.flushTimedOut ? '（已到 --flush-timeout 上限，可能仍有日志未刷盘）' : ''}`);
+  }
   lines.push(`- 是否尝试结束进程：${result.killAttempted ? '是' : '否'}`);
   if (result.killAttempted) lines.push(`- 结束方式：${result.killMethod}，是否成功：${result.killOk ? '是' : '否'}${result.killError ? `（${result.killError}）` : ''}`);
   if (result.killAttempted && !result.killOk) lines.push('- [警告] **浏览器未能自动关闭，请手动关闭残留的 trace Firefox（profile: ' + plan.profileDir + '）**');
@@ -1044,7 +1134,7 @@ async function main() {
     return;
   }
   if (args.selfTest) {
-    const result = runSelfTest();
+    const result = await runSelfTest();
     console.log(`capture_ruyitrace_log.js 自测通过：${result.tests} 项断言`);
     return;
   }

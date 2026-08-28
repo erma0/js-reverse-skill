@@ -201,6 +201,9 @@ const SESSION_CREATE_PATTERNS = [
   /\bnew\s+Session\s*\(/i,
   /\bnew\s+https?\.Agent\s*\(/i,
   /\bnew\s+Agent\s*\([^)]*keepAlive/i,
+  // HTTP/2 客户端：http2.connect 建立的就是可复用会话，与 https.Agent / requests.Session 同语义
+  // （match17 实测：Node 原生 http2 交付因该模式缺失被判「未检测到 Session 创建」，只能靠显式封装绕开）
+  /\bhttp2\.connect\s*\(/i,
 ];
 
 const SESSION_REUSE_PATTERNS = [
@@ -1173,6 +1176,24 @@ function runSelfTest() {
     const dynNatural = dynamicSessionHits(naturalSession);
     if (!dynNatural.reuse.length || !dynNatural.cleanup.length) {
       throw new Error('keepAlive Agent 自然命名（agent）的复用与清理应被识别');
+    }
+
+    // HTTP/2 原生客户端（match17 实测）：http2.connect 即 Session 创建，
+    // 之前只能靠显式封装 createRequestSession() 绕开，现在应直接命中三件套。
+    const http2Session = [
+      "const http2 = require('node:http2');",
+      "const client = http2.connect(`https://${host}`, { settings: { enablePush: false } });",
+      "const stream = client.request(headers);",
+      "client.close();",
+    ].join('\n');
+    if (!findMatches(http2Session, SESSION_CREATE_PATTERNS).length) {
+      throw new Error('http2.connect( 应被识别为 Session 创建');
+    }
+    if (!findMatches(http2Session, SESSION_REUSE_PATTERNS).length) {
+      throw new Error('client.request( 应被识别为 Session 复用');
+    }
+    if (!findMatches(http2Session, SESSION_CLEANUP_PATTERNS).length) {
+      throw new Error('client.close( 应被识别为 Session 清理');
     }
 
     // TLS 声明：否定式表述不得被判成 required（match16 实测：case/notes 的「明确不需要……TLS 指纹」被误判）
