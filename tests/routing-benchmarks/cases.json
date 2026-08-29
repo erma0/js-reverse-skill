@@ -545,6 +545,51 @@
       "args": [],
       "files": {},
       "expectExit": 0
+    },
+    {
+      "id": "RB-027",
+      "title": "match21 实证：DIAGNOSE 阶段确认取证浏览器毒化 → 允许回 BLOCKED_FORENSIC 补登记（反模式 29）",
+      "skillAnchors": [
+        "DIAGNOSE → BLOCKED_FORENSIC",
+        "环境分支诱饵变体"
+      ],
+      "script": "state_machine.js",
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--set",
+        "BLOCKED_FORENSIC",
+        "--note",
+        "match21: Firefox 内核毒化证据齐备(同输入真机对拍不一致), 用户确认走 Chrome MCP 对照"
+      ],
+      "files": {
+        "state.json": "{\"version\": 1, \"node\": \"DIAGNOSE\", \"updatedAt\": \"2026-08-29T01:06:16.483Z\", \"visited\": [\"INTENT_CONFIRM\", \"ENV_READY\", \"EVIDENCE_GATE\", \"FORENSIC_CAPTURE\", \"TRACE_CAPTURE\", \"CASE_LOOKUP\", \"IDENTIFY\", \"TRACE_ANALYZE\", \"IMPLEMENT\", \"REAL_VERIFY\", \"DIAGNOSE\"], \"history\": [], \"blocks\": [], \"stepCount\": {}, \"todo\": {}}"
+      },
+      "expectExit": 0,
+      "stdoutIncludes": [
+        "BLOCKED_FORENSIC"
+      ]
+    },
+    {
+      "id": "RB-028",
+      "title": "BLOCKED_FORENSIC 补登记后回 DIAGNOSE，--guard mcp 放行双对照浏览器侧",
+      "skillAnchors": [
+        "引擎检测 case 的双对照浏览器侧"
+      ],
+      "script": "state_machine.js",
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--guard",
+        "mcp"
+      ],
+      "files": {
+        "state.json": "{\"version\": 1, \"node\": \"DIAGNOSE\", \"updatedAt\": \"2026-08-29T01:06:16.483Z\", \"visited\": [\"INTENT_CONFIRM\", \"ENV_READY\", \"EVIDENCE_GATE\", \"FORENSIC_CAPTURE\", \"TRACE_CAPTURE\", \"CASE_LOOKUP\", \"IDENTIFY\", \"TRACE_ANALYZE\", \"IMPLEMENT\", \"REAL_VERIFY\", \"DIAGNOSE\", \"BLOCKED_FORENSIC\", \"DIAGNOSE\"], \"history\": [], \"blocks\": [], \"stepCount\": {}, \"todo\": {}}"
+      },
+      "expectExit": 0,
+      "stdoutIncludes": [
+        "mcp 守卫通过"
+      ]
     }
   ]
 }

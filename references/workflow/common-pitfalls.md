@@ -364,6 +364,26 @@ $.ajax = function () {
 
 **判定测试**：沙箱"跑通"但目标 hook/挂载物未出现且无报错时，是否先做了 window 级 Proxy 记录？补桩前是否回答了"VM 在哪个属性访问上与浏览器分歧"？全量堆桩（一次加 10 个桩）即违反单变量原则。
 
+## 反模式 29：环境分支诱饵变体——黑盒输出自洽但服务端拒绝，且外部情报对拍失败被误判"情报过期"
+
+**实战案例**：match21（match3.js，match2023 第三题移植）。黑盒沙箱一字不改执行 525KB JSVMP，包装 `window.sm3Digest` 观测到 token = `sm3Digest(t + page)`、格式 64hex 完全正确，发真实请求 400 `{"error":"token failed"}`；ruyipage（Firefox 内核）浏览器自己发的 token 也 400；扫遍 Accept-Time ±1500ms 窗口找不到浏览器 token 对应输入。AI 先后怀疑时间窗口、拼接格式、TLS 黑名单（curl_cffi chrome124 也试了）、外部情报过期——每个方向都空耗多轮。真正根因：**match3.js 初始化时用 `Function.prototype.toString` 对 Object/Document/Window/Location/FocusEvent/Node/HTMLDocument/print 及 DOM 方法做 native 自检，非 Chrome 内核或不完整沙箱检测不过，走入"诱饵算法变体"**——同一个 `sm3Digest`，诱饵分支的 IV 数组退化为重复值（`IV[1]=IV[4]=7370067d`）、strToBytes 不做字节偶数化，产出的 token 与真分支**结构同构但常量全不同**。
+
+**为什么辩护不成立**：
+- "黑盒观测到输入输出了，算法就是对的"——观测到的是**诱饵分支**的输入输出，自洽 ≠ 与真实浏览器一致；
+- "外部文章的 mask 对拍不上，情报过期了"——用诱饵分支观测反推的常量去验证外部情报必然失败，**先怀疑自己环境分支，再怀疑情报过期**，本例文章值（ssr=0xFCFFFFFF 等）恰好就是真分支的正确值；
+- "反模式 23 说过分支漂移，我已经用输入输出对拍了"——反模式 23 的对拍对象是 fixture/内部一致性，本题必须与**真实浏览器成功样本**同输入对拍才算数。
+
+**正确做法**：
+1. **分支指纹快速判定**：SDK 暴露构造器/入口对象时（`window.SM3`/`window.sm3Digest` 等），对比 `new XXX().reg`（IV 类常量数组）与探针函数输出（`strToBytes('abc')`）——诱饵分支常出现"数组某项重复"（IV[1]=IV[4]）或"魔改特征消失"（偶数化变标准 ASCII）；一次调用即可判定，不用等真实请求。
+2. **真机成功样本同输入对拍**：MCP 连用户真实浏览器取一个成功请求样本（token + 其 Accept-Time），在沙箱/纯算里用同一输入重算对比——不一致即分支差异，停止在算法层枚举。
+3. **检测清单获取**：Chrome MCP `navigate_page` 的 `initScript` 在文档脚本前包装 `Function.prototype.toString` 记录被检测目标（match3.js 检测 Object/Document/Window/Location/FocusEvent/Node/HTMLDocument/print 及 DOM 方法，各 ×3 一致性三连测），diff 沙箱与真机的目标集，缺失项即环境修复点。
+4. **桩 nativize**：每个桩函数 `defineProperty` 伪装 `name` 与自有 `toString`（返回 `function X() { [native code] }`）；缺失构造器（Window/print/FocusEvent 等）用 native 样式空壳补齐；`document instanceof HTMLDocument` 等 instanceof 分支需补原型链（`HTMLDocProto = Object.create(Document.prototype)` + `setPrototypeOf(document, HTMLDocProto)`，注意 `HTMLDocument.prototype = document` 会循环 __proto__）。
+5. **修复判定用分支指纹而非真实请求**：每次补环境后先看 `new SM3().reg` 是否收敛到真机值（不消耗请求额度），全部收敛再上真实请求。
+
+**判定测试**：黑盒输出格式正确但服务端拒绝时，是否做过"沙箱输出 vs 真机输出同输入对拍"？SDK 暴露构造器时是否对比过 IV/reg 与探针函数输出？用"自己环境的观测值"否定外部情报前，是否排除过环境分支？
+
+---
+
 ---
 
 ## 已合并条目指针（旧编号 → 主条目）

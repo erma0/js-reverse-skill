@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 2.3.87 - 2026-08-29
+
+### 经验固化（match21 案例入库：SM3 变体 + JSVMP 环境分支诱饵变体 + Firefox 内核毒化）
+
+match21（match2023 第三题「守心」移植）完整实战成果入库。token = `sm3Digest(str(服务器毫秒)+str(page))`（Accept-Time 头传同值），SM3 变体常量自 Chrome 真机 `window.SM3` 行为提取后纯算还原通关（答案 29083835，`code=2`）。本题的核心不是算法难度，而是 **同一 match3.js 在不同环境产出不同算法结果**（环境分支诱饵变体）引发的长时间误诊，以及 **Firefox 内核被针对性屏蔽** 时状态机的转移死路——两者均已固化为流程规则与基准。
+
+- **新案例 `cases/yuanrenxue-match21-sm3-variant-decoy-branch.md`** + `cases/index.json`（39 条）+ match 题号速查表第 21 行。技术指纹：match3.js（525KB JSVMP，暴露 `window.SM3/sm3Digest/call`）+ 页面五重 hook（XHR 改写/Accept-Time 记录/send 拦截/indexOf('match') 骗检/Date.now→getTime）；token=sm3Digest(t+page) 与 Accept-Time **必须同源**（浏览器里 Date.now hook 与直接 getTime 双轨错位，浏览器自身都 400）；SM3 变体常量全套（IV/T/SSR=0xFCFFFFFF/M1=0xFFFFFFFA/M2=0xFFAFFFFF/strToBytes 字节偶数化/Tj 先 rotl j 位）；踩坑 8 条。
+- **新反模式 29（common-pitfalls）**：环境分支诱饵变体——黑盒输出自洽但服务端拒绝，且**外部情报对拍失败被误判"情报过期"**（用诱饵分支观测反推的常量去否定外部情报是双重错误；本例文章 mask 值恰好就是真分支的正确值）。正确做法：分支指纹快速判定（`new XXX().reg` IV 数组 + 探针函数输出，诱饵分支特征 = 常量数组项重复 + 魔改变换消失）、真机成功样本同输入对拍、检测清单 initScript 记录器、桩 nativize。
+- **env-debug-loop 新专节「环境分支诱饵变体：Function.toString native 自检与桩 nativize」**：检测清单获取法（initScript 记录器）、桩 nativize 实现（name + toString 伪装 native）、DOM 原型链修复（instanceof 分支，避免循环 __proto__）、分支指纹收敛判定（先指纹后请求，不消耗额度）、记录器作用域陷阱（VM globalThis ≠ Node globalThis、`^` 带符号、`hex(undefined)=0x0` 误导）。
+- **state_machine.js 转移表修复（match21 死路实证）**：取证浏览器被引擎级毒化的证据常在 **DIAGNOSE 阶段**（双对照/分支对拍）才齐备，原转移表只允许 FORENSIC_CAPTURE → BLOCKED_FORENSIC，导致 `DIAGNOSE → BLOCKED_FORENSIC` 判非法跳转、`--guard mcp` 因未过 BLOCKED_FORENSIC 拒绝，Chrome MCP 对照无法合法启动。现在 `DIAGNOSE → BLOCKED_FORENSIC`（补登记）与 `BLOCKED_FORENSIC → DIAGNOSE`（登记后回诊断做对照）均为合法转移；新增路由基准 RB-027（转移断言）/ RB-028（登记后 --guard mcp 放行断言）。
+- **SKILL.md 三处同步**：状态机图 DIAGNOSE 分支补毒化登记线；§10 引擎检测双对照条款补「取证浏览器毒化证据常在分析阶段才齐备」的 match21 实证与转移路径；IMPLEMENT 路径 B 补「黑盒输出自洽 ≠ 与真实浏览器一致」+ 分支指纹判定 + 反模式 29 引用。
+
 ## 2.3.86 - 2026-08-29
 
 ### 经验固化（match20 案例入库：WASM wasm-bindgen 签名 + 取证工具四处修复）

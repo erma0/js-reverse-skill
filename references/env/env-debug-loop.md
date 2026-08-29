@@ -430,6 +430,42 @@ base.window = winProxy; // VM 序言捕获的是 window 引用，包装它即可
 | 交互事件门控（mousemove/mousedown/mouseup 监听）+ `document.readyState` | 访问序列停在 `addEventListener` / 事件相关属性 | addEventListener 桩**捕获监听器**，宿主派发合成事件（坐标用取证 trace 实测值）；readyState 给浏览器同款值 |
 | `window.external` 缺失 / `getAttribute('selenium')` 探测 | 分歧点在 external / documentElement.getAttribute | external 给真值对象 `{}`；元素桩 getAttribute 返回 null |
 
+### 环境分支诱饵变体：Function.toString native 自检与桩 nativize（match21 实证）
+
+**症状**：沙箱黑盒执行产出「格式完全正确、内部自洽」的签名/token，但服务端拒绝；同一 JS 文件在真实 Chrome 里产出的结果与沙箱**不同**（同输入对拍即现形）。与反模式 28 的静默退出不同——这里**有产出，产出的是诱饵分支结果**。
+
+**根因**：目标 JS 初始化时用 `Function.prototype.toString` 对一批构造器/DOM 方法做 native 自检（`String(fn)` 应为 `function X() { [native code] }`），检测不过则算法走**诱饵分支**（常量不同/魔改缺失），格式同构但服务端重算必然失败。match3.js（match21）的检测目标清单：`Object`、`Document`、`Window`、`Location`、`FocusEvent`、`Node`、`HTMLDocument`、`print` 及 DOM 方法（`getElementsByClassName`/`querySelectorAll`/`matches`/`compareDocumentPosition`），每个目标 ×3 一致性三连测。
+
+**检测清单获取法**（Chrome MCP `navigate_page` 的 `initScript`，文档脚本前注入后 reload）：
+
+```js
+window.__ts = [];
+const _fts = Function.prototype.toString;
+Function.prototype.toString = function () {
+  try { window.__ts.push(this.name || 'anon'); } catch (e) {}
+  return _fts.call(this);
+};
+// reload 后读 window.__ts 去重即为检测目标清单；
+// initScript 还可 hook navigator 各 getter 记录 match3.js 实际读取的环境属性
+```
+
+**桩 nativize 修复**（对每个桩函数）：
+
+```js
+function nativizeFn(fn, name) {
+  Object.defineProperty(fn, 'name', { value: name, configurable: true });
+  Object.defineProperty(fn, 'toString', {
+    value: () => 'function ' + name + '() { [native code] }',
+    writable: true, enumerable: false, configurable: true,
+  });
+}
+```
+
+- 元素/文档/XHR 桩的全部方法、window 顶层函数（含 `print` 这类易缺项）、缺失构造器（`Window`/`FocusEvent` 等，native 样式空壳 `nativeStyleCtor(name)`）逐一处理
+- **分支指纹收敛判定**（不消耗请求额度）：`new SM3().reg`（IV 类常量数组）+ 探针函数输出（`strToBytes('abc')`）与真机值比对——诱饵分支特征是"常量数组某项重复"与"魔改变换消失"；每补一层环境看一次指纹，全部收敛后再上真实请求
+- instanceof 分支需补原型链：`HTMLDocProto = Object.create(Document.prototype)` + `setPrototypeOf(document, HTMLDocProto)`（直接 `HTMLDocument.prototype = document` 会循环 __proto__）；构造器方法以 native 样式挂到 `Xxx.prototype`（真浏览器里 createElement 定义在 Document.prototype 上）
+- 记录器陷阱：VM 里的全局与 Node 的 `globalThis` 不互通，记录 sink 要用模块级变量桥接；JS 的 `^`/`|` 返回带符号值，比对前统一 `(x >>> 0)`
+
 ### 收敛标准
 
 Proxy 记录的属性访问序列与浏览器 trace 的 VM 帧序列一致 + VM 挂载物出现（hook 装上）+ 真实请求通过。`run_with_trace.js` 返回 0 事件不是"环境已足够"的信号——它只记录桩表面的访问，目标经 window 自有属性取内建、读写普通对象时产生 0 事件，此时应升级为手动 Proxy 插桩。
