@@ -470,6 +470,21 @@ function nativizeFn(fn, name) {
 
 Proxy 记录的属性访问序列与浏览器 trace 的 VM 帧序列一致 + VM 挂载物出现（hook 装上）+ 真实请求通过。`run_with_trace.js` 返回 0 事件不是"环境已足够"的信号——它只记录桩表面的访问，目标经 window 自有属性取内建、读写普通对象时产生 0 事件，此时应升级为手动 Proxy 插桩。
 
+## 自引用解码与原码执行纪律（match23 实证）
+
+**适用形态**：obfuscator.io 家族 + 自保护陷阱（`'newState'`/`MKZrLm`）+ 解码器内 `q=o+g`（g 自身 toString 源码作解码密钥表）+ `charCodeAt(变量+常量)` 求和偏移。解码正确性逐字节依赖原始文件——AST 重写 g 即解出垃圾（轮转 IIFE 死循环）。detect-patterns.js 对该形态输出 `[WARN]`（ob-io 家族 + 自引用告警），命中后流程约束：
+
+1. **执行只用原始字节文件**：分析期沙箱与最终交付都加载原始 JS；AST/pretty 产物仅用于阅读。交付副本放 `result/src/target/original/`（check_code_quality 取证豁免路径）并在旁记录 patch 说明 + sha256。
+2. **打补丁的位置约束**：导出桩/记录器可以加在任何位置，但**不得改变被 toString 引用函数的 body 字节**（g/VVKAGE/MKZrLm 等）；toString 内容与函数在文件中的位置无关，因此"在 g 之前插入代码"安全、"改写 g 内部"必炸。
+3. **导出桩时序**：导出语句按字节序执行，先于它的加载期崩溃（内嵌 axios 读 navigator、`createElement('a')` 锚点 URL 解析、meta querySelector 等）会让导出永不发生。先补齐 prelude 桩让加载走到导出点；包裹 `try/catch` 时只在"导出缺失"时重抛，容忍尾部页面逻辑崩溃。
+4. **写保护沙箱的覆盖通道**：run_with_trace.js 等 bootstrap 对 window/document/navigator 等做只读 getter 写保护，环境模块直接赋值被静默拦截（目标仍拿到默认桩 → instanceof 分支错位）。用 `--env-module` 注入环境模块 + `__overrideGlobal(name, value)` 受控覆盖（覆盖后保持只读 getter 语义）；分支关键场景配 `--bootstrap-mode minimal`（提供 `--env-module` 时自动生效）跳过默认桩——**默认桩的半真半假状态本身就是环境分支的干扰源**（match23：bootstrap 的 XHR/HTMLElement 桩让内嵌 axios 走错适配器、md5 IV 错位，token 全错）。
+
+## 环境分支证据的"缺席读法"（match23 实证）
+
+环境分派代码常见 `typeof X !== 'undefined' ? (a instanceof X ? V1 : V2) : V3` 三层形态。**trace 中 instanceof 记录的缺席就是 typeof fallback 分支的直接证据**：RuyiTrace 会记录每次 instanceof（lhs/rhs/result），若某探测点在真机 trace 中**没有**对应 instanceof 记录，说明 `typeof X === 'undefined'` 短路——沙箱必须保持 X 未定义走 fallback，而不是按"标准浏览器常识"补上 X。match23 实证：md5 IV `_v` 的 WindowProperties 探测在 Firefox trace 中无 instanceof 记录 → `_v=0x20d90fe7e` fallback；按 Chrome 常识注入 WindowProperties 反而产出错误 token（16 字节错 5 字节，差一点误导成"再加桩"）。
+
+操作序列：① 从 trace 提取该次哈希调用窗口内的全部 `type:'instanceof'` 记录（按 seq 与调用栈过滤）；② 与源码中的探测点清单逐一核对——**有记录**的取记录里的 rhs/result 定分支，**无记录**的取 typeof fallback 常量；③ 把最终 IV/分支常量在沙箱里 dump 出来与清单闭环（match23 用 `__iv=[0x188a7ae93,0x127794fb3,0x20d90fe7e,0x4a5bc3c6]` 验收）。
+
 ## trace 输出
 
 推荐临时文件：

@@ -231,7 +231,10 @@ function extractSessionVarNames(source) {
   while ((m = agentRe.exec(source))) {
     if (/keepAlive/i.test(m[2])) names.add(m[1]);
   }
-  const sessionRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*new\s+Session\s*\(/g;
+  const sessionRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:(?:requests|creq|curl_cffi)\.)?Session\s*\(/g;
+  // match22 实测：curl_cffi 交付写成 `session = creq.Session(impersonate=...)`，
+  // 旧正则只认 `new Session(` 导致该变量名的复用/清理动态检测失效（sess.get 不匹配
+  // 静态 `session\.` 模式）→ 扩展为 requests/creq/curl_cffi 前缀均可提取变量名。
   while ((m = sessionRe.exec(source))) names.add(m[1]);
   return Array.from(names);
 }

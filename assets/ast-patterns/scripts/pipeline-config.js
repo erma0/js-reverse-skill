@@ -38,6 +38,28 @@ const BASE_PIPELINE = [
 
 const PATTERNS = [
   {
+    id: "ob-io",
+    displayName: "obfuscator.io family (no _0x prefix)",
+    reference: "string-array-and-minimal-eval.md",
+    hintTokens: ["obfuscator", "ob-io"],
+    // 不依赖 _0x 命名的 obfuscator.io 识别（短名混淆 a1/Q/zk 同样命中）：
+    // 字符串表轮转 IIFE / 自保护陷阱(newState + \w+ *\(\) 正则源) / 小写在前 base64 字母表 /
+    // 解码器 charCodeAt 求和偏移（toString 自引用特征）
+    contentRegexes: [
+      /\[\s*['"]push['"]\s*\]\(\s*\w+\[\s*['"]shift['"]\s*\]\(\)\s*\)/,
+      /['"]newState['"]/,
+      /\\x5cw\+\\x20\*\\x5c\(\\x5c\)\\x20\*\\x5c\{/,
+      /['"]abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\+\/=['"]/,
+      /\[\s*['"]charCodeAt['"]\s*\]\(\s*\w+\s*\+\s*(?:0x[0-9a-fA-F]+|\d+)\s*\)/
+    ],
+    families: ["string-array", "self-defending"],
+    notes: [
+      "String-array + decoder family; short-name variants carry no _0x markers.",
+      "Run pipeline passes for readability only; never execute rewritten output when a toString self-referencing decoder is present (see warnings)."
+    ],
+    steps: BASE_PIPELINE
+  },
+  {
     id: "generic",
     displayName: "generic layered pipeline",
     reference: null,
@@ -236,6 +258,38 @@ const PATTERNS = [
   }
 ];
 
+/**
+ * 检测 toString 自引用解码器（match23 实证的反模式 31 形态）：
+ * 解码函数内 `q = o + g`（q 为自身 toString 源码）+ `charCodeAt(索引 + 常量)` 读取自身字节，
+ * 解码正确性逐字节依赖原始文件 —— AST 重写会静默产出垃圾（字符串表解出乱码 → 轮转 IIFE 死循环）。
+ * 只做静态标记识别，不做 AST 分析；命中即给出「产物仅可阅读、禁止执行」的操作约束。
+ */
+function detectSelfReferencingDecoder(sourceText) {
+  const warnings = [];
+  if (!sourceText) {
+    return warnings;
+  }
+  const summedOffsetCharCodeAt = /\[\s*['"]charCodeAt['"]\s*\]\(\s*\w+\s*\+\s*(?:0x[0-9a-fA-F]+|\d+)\s*\)/.test(sourceText);
+  const concatSelf = /=\s*\w*\s*\+\s*\w+\s*[,;]\s*\w+\s*=\s*['"]{2}/.test(sourceText)
+    || /\w+\['toString'\]\(\)|=\s*\w+\s*\+\s*(\w+)\s*[,;].{0,600}?\1\s*\[\s*['"]charCodeAt['"]/.test(sourceText);
+  const selfDefenseTrap = /['"]newState['"]/.test(sourceText)
+    && /\\x5cw\+\\x20\*\\x5c\(\\x5c\)\\x20\*\\x5c\{/.test(sourceText);
+
+  if (summedOffsetCharCodeAt && (concatSelf || selfDefenseTrap)) {
+    warnings.push(
+      "疑似 toString 自引用解码器（charCodeAt 求和偏移读取函数自身源码）：解码正确性逐字节依赖原始文件。"
+      + "AST 反混淆产物只能用于阅读结构，禁止用于执行/对拍；执行与打桩一律用原始字节文件，"
+      + "补丁不得改写任何被 toString 引用的函数体（common-pitfalls 反模式 31）。"
+    );
+  } else if (selfDefenseTrap) {
+    warnings.push(
+      "检测到 obfuscator.io 自保护陷阱（newState + Function.toString 正则自检）："
+      + "产物中该类函数体被重排可能触发反调试分支，执行请以原始字节文件为准。"
+    );
+  }
+  return warnings;
+}
+
 function normalizeHint(value) {
   return String(value || "").toLowerCase();
 }
@@ -278,6 +332,7 @@ function detectPatterns({ inputPath, hint = "", sourceText }) {
   return {
     bestId,
     detections,
+    warnings: detectSelfReferencingDecoder(sourceText),
     selected: getPattern(bestId)
   };
 }

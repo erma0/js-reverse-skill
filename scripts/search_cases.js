@@ -14,6 +14,7 @@ function parseArgs(argv) {
     signals: [],
     strategies: [],
     json: false,
+    markdown: false,
     includeTemplates: false,
   };
   for (let i = 2; i < argv.length; i++) {
@@ -26,6 +27,7 @@ function parseArgs(argv) {
     else if (arg === '--signal' || arg === '-s') args.signals.push(nextVal());
     else if (arg === '--strategy') args.strategies.push(nextVal());
     else if (arg === '--json') args.json = true;
+    else if (arg === '--markdown') args.markdown = true;
     else if (arg === '--include-templates') args.includeTemplates = true;
     else if (arg === '--help' || arg === '-h') args.help = true;
     else if (arg.startsWith('-')) throw new Error(`未知参数：${arg}`);
@@ -147,6 +149,19 @@ function main() {
   const result = search(loadIndex(), args);
   if (args.json) {
     process.stdout.write(`${JSON.stringify({ count: result.length, cases: result }, null, 2)}\n`);
+  } else if (args.markdown) {
+    const lines = [`匹配 ${result.length} 个案例：`, ''];
+    for (const item of result) {
+      lines.push(`## ${item.file.replace(/\.md$/, '')}`);
+      lines.push('');
+      lines.push(`- 域名：${item.domains.join(', ') || '*'}`);
+      lines.push(`- 信号：${item.signals.join(', ')}`);
+      lines.push(`- 策略：${item.strategy}`);
+      lines.push(`- 验证日期：${item.verifiedAt}`);
+      lines.push('');
+    }
+    if (!result.length) lines.push('未找到匹配案例。');
+    process.stdout.write(`${lines.join('\n')}\n`);
   } else {
     process.stdout.write(`${renderTable(result)}\n`);
   }

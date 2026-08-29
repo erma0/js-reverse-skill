@@ -364,6 +364,14 @@ $.ajax = function () {
 
 **判定测试**：沙箱"跑通"但目标 hook/挂载物未出现且无报错时，是否先做了 window 级 Proxy 记录？补桩前是否回答了"VM 在哪个属性访问上与浏览器分歧"？全量堆桩（一次加 10 个桩）即违反单变量原则。
 
+## 反模式 30：沙箱 [Unforgeable] 绑定探针 + base64 字母表环境分支（match22 实证）
+
+**形态一（[Unforgeable] 探针）**：混淆类初始化埋 `w=window → delete window → window=w` —— 真浏览器 delete 返回 false、赋值静默忽略（window 为只读 accessor），vm 沙箱 data 属性会被真删/真换 → 走诱饵分支。**症状**：同输入下关键中间值（如 AES 调度表）逐字漂移但格式全对。**修复**：`window/self/top/parent/frames` 定义为不可配置 accessor（get 返回全局、set 空、configurable:false）；验收 = 同 now 断点比状态机变量（i/z/b/x/D）逐个一致。
+
+**形态二（base64 字母表环境分支）**：AES 输出（Z.ciphertext）双侧**逐字节一致**但密文串不同 → 差异只在编码层：base64 字母表（编码表组装状态机）随环境分叉（如"混元表 abcd…hiA-Z…j-z" vs "a-z,A-Z,0-9"）。**检测**：同 Z.ct 双侧密文串逐字符 diff——若仅大小写/字母置换差异即字母表分支。**修复**：用已知 (Z.ct↔密文串) 配对 + blob 结构假设（如 OpenSSL "Salted__"‖salt‖ct）反推两侧字母表全排列，源码补丁暴露哈希器与密文串（inject `globalThis.__hd=this,globalThis.__hs=String(i),` 于编码调用点前），桥内位置翻译（sb[i]→ch[i]）后重算摘要，token 与真机一致闭环。
+
+**采样纪律（match22 实证）**：此类代码第 2 次计算在调试器挂接时反调试死循环（渲染进程卡死）——MCP 调试采样**一次/会话**，采样前规划全部 dump 项；卡死先查进程 CommandLine 确认 MCP 专属 profile 再杀渲染进程；MCP 断点跨 reload 易丢；evaluateOnCallFrame 的 objectId 在 resume 后失效（单次 pause 内完成全部取值）；文本锚点断点用函数**尾部唯一长片段**反向定位（通用序言 find() 会命中别的函数）。
+
 ## 反模式 29：环境分支诱饵变体——黑盒输出自洽但服务端拒绝，且外部情报对拍失败被误判"情报过期"
 
 **实战案例**：match21（match3.js，match2023 第三题移植）。黑盒沙箱一字不改执行 525KB JSVMP，包装 `window.sm3Digest` 观测到 token = `sm3Digest(t + page)`、格式 64hex 完全正确，发真实请求 400 `{"error":"token failed"}`；ruyipage（Firefox 内核）浏览器自己发的 token 也 400；扫遍 Accept-Time ±1500ms 窗口找不到浏览器 token 对应输入。AI 先后怀疑时间窗口、拼接格式、TLS 黑名单（curl_cffi chrome124 也试了）、外部情报过期——每个方向都空耗多轮。真正根因：**match3.js 初始化时用 `Function.prototype.toString` 对 Object/Document/Window/Location/FocusEvent/Node/HTMLDocument/print 及 DOM 方法做 native 自检，非 Chrome 内核或不完整沙箱检测不过，走入"诱饵算法变体"**——同一个 `sm3Digest`，诱饵分支的 IV 数组退化为重复值（`IV[1]=IV[4]=7370067d`）、strToBytes 不做字节偶数化，产出的 token 与真分支**结构同构但常量全不同**。
@@ -381,6 +389,21 @@ $.ajax = function () {
 5. **修复判定用分支指纹而非真实请求**：每次补环境后先看 `new SM3().reg` 是否收敛到真机值（不消耗请求额度），全部收敛再上真实请求。
 
 **判定测试**：黑盒输出格式正确但服务端拒绝时，是否做过"沙箱输出 vs 真机输出同输入对拍"？SDK 暴露构造器时是否对比过 IV/reg 与探针函数输出？用"自己环境的观测值"否定外部情报前，是否排除过环境分支？
+## 反模式 31：toString 自引用解码器被 AST 重写破坏——产物能跑但解出的全是垃圾，或轮转死循环（match23 实证）
+
+**形态一（重写破坏自引用）**：obfuscator.io 家族的 base64 解码器内含 `q = o + g`（q 为解码函数**自身 toString 源码**），解码条件形如 `q['charCodeAt'](u+0xa)-0xa!==0x0 ? String.fromCharCode(...) : r`——解码结果逐字节依赖函数源码原文。AST 反混淆流水线重排/重写该函数体后，字符串表解出垃圾 → `parseInt` 得 NaN → 字符串表轮转 IIFE（`while(!![]){...push(shift())...}`）**永不收敛死循环**。**症状**：流水线 status=ok，产物在沙箱一加载就超时；或"能跑但所有解码串都是乱码"。**识别信号**：RuyiTrace 中 Function.toString 对同一解码函数高频调用（match23 对 g/MKZrLm 调用 3121 次）；源码含 `['charCodeAt'](变量+十六进制常量)` 求和偏移（detect-patterns 已内置该形态告警）。
+
+**修复纪律**：
+1. 凡 obfuscator 家族（含**短名混淆**——a1/Q/zk 等，无 `_0x` 前缀），一律"**原码执行 + diff 魔改点**"，AST 产物只用于阅读结构，**禁止用于执行/对拍**。
+2. 给原始文件打补丁（导出桩/记录器）时，改动点**不得落入任何被 toString 引用的函数 body**（g/VVKAGE/MKZrLm 等）；注入在函数定义之前/之后都安全（toString 内容与所在位置无关）。
+3. 导出桩按**字节序**执行，函数声明提升只保证"可调用"不保证"已导出"——若目标在导出点之前崩（内嵌 axios 的 navigator/锚点解析等加载期依赖），先补齐 prelude 桩让加载走到导出点，再 `catch(e){ if(导出缺失) throw e; }` 容忍尾部页面逻辑崩溃。
+
+**形态二（环境分派算法的多分支叠加）**：单一函数内多处环境探测（instanceof IV 分派 / typeof 移位表分派 / createElement instanceof Node 加法器分派）叠加时，任一分支错位都产出"结构极像但错误"的输出（16 字节可错 5 字节或仅错 1 字节）。**修复**：逐分支对齐——每个探测点在真机 trace 中找执行证据（**instanceof 记录的缺席同样是证据**：无第 4 次 instanceof 记录 = `typeof X === 'undefined'` 走 fallback 分支）；沙箱环境模块用 detect-patterns 告警 + 同输入对拍闭环验收（IV 值可直接 dump 比对）。
+
+**判定测试**：反混淆产物你是否只"读过"而从没"执行过"？补丁 diff 是否逐字节避开了 toString 引用的函数体？每个环境探测分支是否有真机 trace 证据（存在或缺席）？
+
+---
+
 
 ---
 

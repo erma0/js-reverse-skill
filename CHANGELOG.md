@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## 2.3.88 - 2026-08-29
+
+### 经验固化（match23 案例入库：toString 自引用解码 + 环境分派魔改 MD5 + 工具三处补强）
+
+match23（js混淆源码乱码）完整实战成果入库。token = `md5变体('/api/question/23' + now + page)`（now 来自 /api/getTime 服务器毫秒文本），原始 23.js 原码进 Node vm 沙箱 + 4 处环境分支对齐后与浏览器逐字节一致，5 页求和通关（答案 29674800，`code=2`）。本题暴露的不是算法难度，而是 **AST 反混淆破坏 toString 自引用解码器**（产物能跑但解出垃圾/轮转死循环）、**环境分派 IV 的"缺席证据"读法**（Firefox 不暴露 WindowProperties，trace 无第 4 次 instanceof 记录即 fallback 证据）、以及 **官方沙箱默认桩泄漏改变目标环境分支** 三个新坑——均已固化为工具告警与流程规则。
+
+- **新案例 `cases/yuanrenxue-match23-selfref-decoder-env-dispatch.md`** + `cases/index.json`（41 条）+ match 题号速查表补 22/23 两行（22 此前仅在文末 bullet）。技术指纹：obfuscator 短名混淆（无 `_0x` 前缀）+ 解码器 `q=o+g` 读自身源码字节 + 自保护陷阱 `newState/MKZrLm`；环境分派 IV（EventTarget/Window/WindowProperties-absent/Document）、successAlert 移位表分派、createElement instanceof Node 掩码加法器、魔改 T 常量 11 处；低雪崩 token（不同输入仅个位 nibble 变化甚至同输出）；诱饵 m 第六次实证；Node https 直连可用（与 match19/22 TLS 白名单对照）。踩坑 8 条。
+- **detect-patterns.js / pipeline-config.js 补强**：① 新增 `ob-io` 家族识别——不依赖 `_0x` 命名的 obfuscator.io 特征（轮转 IIFE / newState 陷阱 / 小写在前 base64 字母表 / charCodeAt 求和偏移），match23 的短名混淆此前 bestId=generic、detections 为空；② 新增 `detectSelfReferencingDecoder` 静态告警——命中即 `[WARN]`「AST 产物仅可阅读、禁止执行」，同步进 detect-patterns CLI 与 run-pipeline 的 pipeline-report.json（warnings 字段）；普通 jQuery/标准 md5 不误报。
+- **run_with_trace.js 扩展点**：① 新增 `--env-module`（可重复/逗号分隔）——目标执行前按序注入自定义环境模块（instanceof 类层次、锚点元素 URL 语义等分支对齐需求官方桩不覆盖）；② 新增 `--bootstrap-mode full|minimal`，提供 `--env-module` 时自动 minimal——默认桩的半真半假状态是环境分支干扰源（match23 实测：bootstrap 的 XHR/HTMLElement 桩泄漏致内嵌 axios 走错适配器、md5 IV 错位、token 全错）；③ bootstrap 新增 `__overrideGlobal(name, value)` 受控覆盖 API——写保护沙箱里环境模块直接赋值被静默拦截（目标仍拿默认桩），覆盖后保持只读 getter 语义并记 `env-module-override` 事件。端到端验证：match23 目标 + 6 个环境模块 → token 与浏览器样本一致。
+- **check_env_prerequisites.js 正则放宽**：证据来源标记接受 `RuyiTrace seq<N>` / `trace 证据` 形态（match23 实测「RuyiTrace seq7664」被判 BLOCK 返工）；自测 6 项通过。
+- **search_cases.js**：新增 `--markdown` 输出（与其他脚本 CLI 风格对齐；此前 `--markdown` 直接报"未知参数"）。
+- **文档四处**：① common-pitfalls 新增**反模式 31**（toString 自引用解码器：AST 产物禁执行 / 补丁位置约束 / 导出桩时序 / 环境分派叠加分支对齐 + 判定测试）；② experience-rules 新增**第十四节「混淆识别与执行纪律」**（低雪崩 token 扩散判别 / 短名混淆识别 / 同站邻题不迁移算法假设 / trace 折叠与调用计数反推）；③ env-debug-loop 新增「自引用解码与原码执行纪律」+「环境分支证据的缺席读法」两专节（`__overrideGlobal` 用法、IV dump 验收）；④ ruyitrace-cheatsheet 新增「折叠/省略（elision）与调用计数反推」节（543≈2×260 反推 md5 两次调用，勿以读数会话数下结论）。
+- 验证：`node --check` 全部改动脚本通过；`check_env_prerequisites.js --self-test` 6 项通过；`search_cases.js` 对 match23 / "toString 自引用" 均命中；`detect-patterns.js` 对 match23 23.js 报 ob-io 家族 + 自引用 WARN，对 jquery/标准 md5 无误报。
+
+
+### 同批入库（上一会话成果，一并提交）：match22 案例入库
+
+- 新案例 `cases/yuanrenxue-match22-openssl-salted-alphabet-branch.md`：OpenSSL Salted
+  格式 + EvpKDF-MD5 三块链 + base64 字母表环境分支 + TLS 指纹白名单（curl_cffi
+  chrome131）+ [Unforgeable] 沙箱探针 + 第 2 次计算反调试死循环；通关（code=2）。
+- SKILL.md：识别表增 OpenSSL Salted/EvpKDF 行；实现路径增 F（[Unforgeable] 对齐 +
+  字母表环境分支 + 桥式交付）；403 分层定位增 1a（MCP 断点采样路线与反调试纪律）。
+- common-pitfalls.md：反模式 30（[Unforgeable] 探针 + 字母表环境分支 + 采样纪律）。
+- env-detect-bypass.md：[Unforgeable] 全局绑定探针专节（accessor 化代码模板）。
+- check_final_artifact.js：Session 变量提取扩展 requests/creq/curl_cffi 前缀
+  （match22 实测 `session = creq.Session(...)` 变量名提取失效）。
+
 ## 2.3.87 - 2026-08-29
 
 ### 经验固化（match21 案例入库：SM3 变体 + JSVMP 环境分支诱饵变体 + Firefox 内核毒化）

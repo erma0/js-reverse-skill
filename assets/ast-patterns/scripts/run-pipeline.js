@@ -73,12 +73,17 @@ function main() {
       notes: pattern.notes
     },
     detections: detection.detections,
+    warnings: detection.warnings || [],
     steps: [],
     status: "ok",
     failedStep: null,
     lastGoodFile: "00_source.js",
     finalMetrics: null
   };
+
+  for (const warning of report.warnings) {
+    console.error(`[WARN] ${warning}`);
+  }
 
   const sourceCopyPath = path.join(absoluteOutputDir, "00_source.js");
   copyFile(absoluteInput, sourceCopyPath);

@@ -6,17 +6,31 @@ const path = require('path');
 const vm = require('vm');
 
 function parseArgs(argv) {
-  const args = { target: '', entry: '', fixture: '', trace: '', summary: '', output: '', timeout: 5000, json: false, markdown: false };
+  const args = { target: '', entry: '', fixture: '', trace: '', summary: '', output: '', envModules: [], timeout: 5000, json: false, markdown: false };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     const nextVal = (fb) => (i + 1 < argv.length && typeof argv[i + 1] === 'string' && !argv[i + 1].startsWith('-')) ? argv[++i] : fb;
     if (a === '--target') args.target = nextVal('');
     else if (a === '--entry') args.entry = nextVal('');
     else if (a === '--fixture') args.fixture = nextVal('');
-    else if (a === '--trace') args.trace = nextVal('');
+    else if (a === '--trace') args.trace = args.trace || nextVal('');
     else if (a === '--summary') args.summary = nextVal('');
     else if (a === '--output') args.output = nextVal('');
+    else if (a === '--env-module' || a === '--env-modules') {
+      // 可重复或逗号分隔：目标 JS 执行前按序注入的自定义环境模块（bootstrap 之后、目标之前运行）。
+      // 用于官方 bootstrap 桩覆盖不了的场景：如需要 instanceof 类层次（EventTarget/Window/Document/Node）、
+      // createElement('a') 锚点 URL 语义、successAlert 这类页面级函数分支对齐（match23 实证）。
+      for (const item of nextVal('').split(',')) {
+        const trimmed = item.trim();
+        if (trimmed) args.envModules.push(trimmed);
+      }
+    }
     else if (a === '--timeout') args.timeout = Number(nextVal('5000'));
+    else if (a === '--bootstrap-mode') {
+      const mode = nextVal('full');
+      if (mode !== 'full' && mode !== 'minimal') throw new Error(`--bootstrap-mode 仅支持 full|minimal：${mode}`);
+      args.bootstrapMode = mode;
+    }
     else if (a === '--json') args.json = true;
     else if (a === '--markdown') args.markdown = true;
     else if (a === '--help' || a === '-h') args.help = true;
@@ -29,18 +43,23 @@ function parseArgs(argv) {
 function usage() {
   return `用法：
   node scripts/run_with_trace.js --target case/js/original/app.js --entry window.makeSign --fixture case/fixtures/sample.fixture.json --trace case/tmp/env-trace.jsonl --summary case/tmp/missing-env.json --output case/tmp/node-output.json
+  node scripts/run_with_trace.js --target app.js --env-module src/env/browser-objects/window.js --env-module src/env/browser-objects/document.js --entry __token
 
-说明：该脚本用于探测模式。默认在 vm 探测上下文内定义浏览器桩函数，避免把宿主 require/process/Buffer 以及 Node 自带 navigator/performance/localStorage 等 Web API 兼容层暴露给目标 JS；正式交付不强制只能使用 vm。`;
+说明：该脚本用于探测模式。默认在 vm 探测上下文内定义浏览器桩函数，避免把宿主 require/process/Buffer 以及 Node 自带 navigator/performance/localStorage 等 Web API 兼容层暴露给目标 JS；正式交付不强制只能使用 vm。
+--env-module（可重复或逗号分隔）：目标 JS 之前按序注入的自定义环境模块源码（在 bootstrap 桩之后运行），用于官方桩覆盖不了的场景——instanceof 类层次（EventTarget/Window/Document/Node）、createElement('a') 锚点 URL 语义、successAlert 等页面级函数分支（match23 实证）。模块文件应为可在 vm 全局直接执行的纯 JS（不得 require）。`;
 }
 
 function readJson(p) { return p ? JSON.parse(fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '')) : {}; }
 function ensureParent(p) { if (p) fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true }); }
 
-function bootstrapSource(fixture) {
+function bootstrapSource(fixture, options) {
+  const opts = options || {};
+  const minimal = !!opts.minimal;
   const fixtureText = JSON.stringify(JSON.stringify(fixture || {}));
   return `
 'use strict';
 const __fixture = JSON.parse(${fixtureText});
+const __minimalEnv = ${minimal ? 'true' : 'false'};
 Object.defineProperty(globalThis, '__events', { value: [], enumerable: false, configurable: true });
 function __safe(v) {
   if (v == null || ['string', 'number', 'boolean'].includes(typeof v)) return v;
@@ -148,6 +167,12 @@ class URL {
   toString() { return this.href; }
 }
 globalThis.URL = URL;
+
+// minimal 模式（--bootstrap-mode minimal 或提供 --env-module 时推荐）：
+// 跳过全部默认浏览器桩——它们的半真半假状态会改变目标的环境分支（instanceof/typeof 探测），
+// 环境完全交给 --env-module 提供（match23 实证：bootstrap 的 XHR/HTMLElement/performance
+// 桩泄漏进目标导致 axios 走错适配器分支、md5 环境分派 IV 错位）。
+if (!__minimalEnv) {
 
 class TextEncoder {
   encode(input) {
@@ -284,6 +309,8 @@ if (runtime.now) {
   globalThis.Date = FixedDate;
 }
 
+} // end of if (!__minimalEnv)
+
 // 全局对象写保护：浏览器里 window / navigator / document 是宿主不可写属性，目标 JS 内部的
 // window = {} 这类赋值在浏览器中静默失效；vm 里普通赋值会真的顶掉全局对象、连带丢失已注册模块。
 // 改为只读 getter + 记账被拦截的写入，避免把「环境被目标自己破坏」误诊成「算法没搞对」。
@@ -297,6 +324,19 @@ for (const __protectedName of ['window', 'self', 'top', 'parent', 'frames', 'nav
     configurable: true,
   });
 }
+
+// 受控覆盖 API：--env-module 环境模块替换默认桩的唯一合法通道（match23 实证：
+// 模块直接赋值会被上面的写保护拦截，目标仍拿到官方桩 → instanceof 分支错位、token 全错）。
+// 覆盖后保持同一只读 getter 语义（写保护不因覆盖而丢失），并记 env-module-override 事件。
+Object.defineProperty(globalThis, '__overrideGlobal', { value: function __overrideGlobal(name, value) {
+  __push({ type: 'env-module-override', path: String(name), valueType: typeof value });
+  Object.defineProperty(globalThis, String(name), {
+    get() { return value; },
+    set(v) { __push({ type: 'set-blocked', path: String(name), valueType: typeof v }); },
+    enumerable: true,
+    configurable: true,
+  });
+}, enumerable: false, configurable: true });
 
 function __resolveEntry(entry) {
   const parts = String(entry || '').split('.').filter(Boolean);
@@ -423,13 +463,29 @@ function run(args) {
   if (!args.target) throw new Error('必须提供 --target');
   const targetFiles = args.target.split(',').map(s => s.trim()).filter(Boolean).map(p => path.resolve(p));
   for (const f of targetFiles) if (!fs.existsSync(f)) throw new Error(`目标 JS 文件不存在：${f}`);
+  const envModuleFiles = (args.envModules || []).map(p => path.resolve(p));
+  for (const f of envModuleFiles) if (!fs.existsSync(f)) throw new Error(`环境模块文件不存在：${f}`);
   const fixture = readJson(args.fixture);
   const context = vm.createContext({}, { name: 'web-js-env-patcher' });
   const errors = [];
   let entryResult;
   let entryFound = false;
 
-  new vm.Script(bootstrapSource(fixture), { filename: 'web-js-env-patcher-bootstrap.js' }).runInContext(context, { timeout: args.timeout });
+  // 提供了环境模块但未显式指定模式时默认 minimal：默认桩会改变目标环境分支（match23 实证）
+  const bootstrapMinimal = args.bootstrapMode === 'minimal'
+    || (args.bootstrapMode !== 'full' && (args.envModules || []).length > 0);
+  new vm.Script(bootstrapSource(fixture, { minimal: bootstrapMinimal }), { filename: 'web-js-env-patcher-bootstrap.js' }).runInContext(context, { timeout: args.timeout });
+
+  // 自定义环境模块：bootstrap 之后、目标之前按序注入（match23 实证扩展点：
+  // instanceof 类层次 / 锚点元素语义等分支对齐需求官方桩不覆盖）
+  for (const file of envModuleFiles) {
+    try {
+      const script = new vm.Script(fs.readFileSync(file, 'utf8'), { filename: file });
+      script.runInContext(context, { timeout: args.timeout });
+    } catch (err) {
+      errors.push(Object.assign(classifyError(err), { phase: 'env-module', file }));
+    }
+  }
 
   for (const file of targetFiles) {
     try {
@@ -460,7 +516,7 @@ function run(args) {
   if (args.trace) { ensureParent(args.trace); fs.writeFileSync(args.trace, events.map(e => JSON.stringify(e)).join('\n') + (events.length ? '\n' : ''), 'utf8'); }
   if (args.summary) { ensureParent(args.summary); fs.writeFileSync(args.summary, JSON.stringify(summary, null, 2) + '\n', 'utf8'); }
   if (args.output) { ensureParent(args.output); fs.writeFileSync(args.output, JSON.stringify(output, null, 2) + '\n', 'utf8'); }
-  return { targetFiles, fixture: args.fixture || '', trace: args.trace || '', summaryFile: args.summary || '', outputFile: args.output || '', output, summary };
+  return { targetFiles, envModuleFiles, fixture: args.fixture || '', trace: args.trace || '', summaryFile: args.summary || '', outputFile: args.output || '', output, summary };
 }
 
 function renderMarkdown(result) {
@@ -468,6 +524,7 @@ function renderMarkdown(result) {
   lines.push('# Node.js 缺失环境追踪结果');
   lines.push('');
   lines.push(`- 目标 JS：${result.targetFiles.join(', ')}`);
+  lines.push(`- 环境模块：${result.envModuleFiles && result.envModuleFiles.length ? result.envModuleFiles.join(', ') : '未注入'}`);
   lines.push(`- fixture：${result.fixture || '未提供'}`);
   lines.push(`- 入口函数：${result.output.entry || '未指定'}`);
   lines.push(`- 入口是否找到：${result.output.entry ? (result.output.entryFound ? '是' : '否') : '未指定'}`);

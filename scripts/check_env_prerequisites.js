@@ -75,10 +75,11 @@ function checkMissingEnvPriority(text) {
   if (!/优先级|P[012]\b/i.test(text)) {
     problems.push('missing-env-priority.md 未发现优先级标记（「优先级」或 P0/P1/P2）；补齐必须有先后依据');
   }
-  const hasEvidenceMark = /RuyiTrace\s*证据|Node\s*trace\s*补充|推断/.test(text);
+  // match23 实测放宽：「RuyiTrace seq7664」这类带 seq 号的引用也应视为 RuyiTrace 证据标记
+  const hasEvidenceMark = /RuyiTrace\s*(证据|seq)|Node\s*trace\s*补充|trace\s*证据|推断/.test(text);
   const hasBlackboxDecl = /黑盒执行，不逐项精确复现/.test(text);
   if (!hasEvidenceMark && !hasBlackboxDecl) {
-    problems.push('missing-env-priority.md 未发现证据来源标记（「RuyiTrace 证据 / Node trace 补充 / 推断」），也没有黑盒声明（「黑盒执行，不逐项精确复现」）');
+    problems.push('missing-env-priority.md 未发现证据来源标记（「RuyiTrace 证据/seq / Node trace 补充 / 推断」），也没有黑盒声明（「黑盒执行，不逐项精确复现」）');
   }
   return problems;
 }

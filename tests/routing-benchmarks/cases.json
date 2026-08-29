@@ -590,6 +590,28 @@
       "stdoutIncludes": [
         "mcp 守卫通过"
       ]
+    },
+    {
+      "id": "RB-029",
+      "title": "match23 实证：证据标记 RuyiTrace seq<N> 形态应放行（不因缺『证据』字样 BLOCK）",
+      "skillAnchors": [
+        "check_env_prerequisites.js",
+        "两文件缺一不得开始补环境"
+      ],
+      "script": "check_env_prerequisites.js",
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--markdown"
+      ],
+      "files": {
+        "case/notes/entry-chain.md": "入口 md5（token writer）\n请求链 XMLHttpRequest.open ← d ← RRFUA\n关键 stack https://match.yuanrenxue.cn/match/23/js/23.js:1:146955",
+        "case/notes/missing-env-priority.md": "| 模块 | api | 优先级 | 证据 |\n|---|---|---|---|\n| window | instanceof EventTarget | P0 | RuyiTrace seq7664（result=True） |\n| document | createElement instanceof Node | P1 | RuyiTrace seq7759 |"
+      },
+      "expectExit": 0,
+      "stdoutIncludes": [
+        "可开始补环境"
+      ]
     }
   ]
 }

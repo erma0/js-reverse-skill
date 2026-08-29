@@ -444,3 +444,27 @@ JSON.stringify({
 | `cases/jsvmp-xhr-interceptor-env-emulation.md` | 环境检测绕过（navigator.webdriver / plugins / DOM 布局） |
 | `cases/pdd-anti-content-fbez-blackbox.md` | 签名内嵌环境检测对齐探针法（Wt() flag 浏览器采样 + 沙箱 diff） |
 | `cases/modified-md5-xhr-done-yuanrenxue.md` | 内核级差异检测（eval.toString() 分支检测，Node 天然匹配 Chrome 格式） |
+
+
+## [Unforgeable] 全局绑定探针（match22 实证）
+
+AES/加密类初始化常埋 `delete window` / `window=任意值` 探针：真浏览器中 `window` 等
+`[Unforgeable]` 绑定（window/self/top/parent/frames）为**不可配置 accessor**——
+`delete` 返回 false、赋值被静默忽略（sloppy mode）；vm 沙箱的普通 data 属性会被
+真删/真换，后续全局读取返回 undefined/0 → 诱饵分支。
+
+**正确姿势**（vm.createContext 之后立即执行）：
+
+```js
+for (const prop of ['window', 'self', 'top', 'parent', 'frames']) {
+  Object.defineProperty(sandbox, prop, {
+    get() { return sandbox; },
+    set() {},                 // 赋值静默忽略, 与浏览器一致
+    configurable: false,      // delete 返回 false
+    enumerable: true,
+  });
+}
+```
+
+**对齐验收**：同 now 下断点比状态机变量（如 i/z/b/x/D/w）逐个一致；
+比"表内容"更早暴露分歧的是**状态机跳转序列**。关联：反模式 30。

@@ -27,6 +27,7 @@ function main() {
       families: result.selected.families,
       notes: result.selected.notes
     },
+    warnings: result.warnings || [],
     detections: result.detections
   };
 
@@ -35,6 +36,9 @@ function main() {
     fs.writeFileSync(outputPath, json, "utf8");
   } else {
     process.stdout.write(`${json}\n`);
+  }
+  for (const warning of serializable.warnings) {
+    console.error(`[WARN] ${warning}`);
   }
 }
 
