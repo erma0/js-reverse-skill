@@ -203,6 +203,31 @@ VM 读取页面运行时产生的随机量（match24：jQuery expando `jQuery341
 2. **先判断校验维度**：用"一个随机值 + 一次真实请求"验证服务端是否接受——接受则只保格式，拒绝才考虑固定对齐或找其他分歧。
 3. 与"固定对齐类"环境值（UA、时区、构建时钟）区分：后者服务端可能精确校验（match24 的 UA 绑定），前者只保随机性结构。
 
+## 十七、环境桩执行位置与时间窗口量化（match25 实证）
+
+### 33. 环境桩必须在沙箱内执行——self-reference 自检失败会产出"格式全对但服务端全拒"的签名
+
+环境桩里凡涉及自引用的赋值（`win.window = globalThis`、`win.self = winProxy` 等），**执行上下文必须是沙箱本身**：
+桩代码在 Node **主 realm** 定义时，`globalThis` 绑定的是主进程全局对象；目标混淆 JS 在沙箱里执行
+`function(){return this}()` 拿到沙箱 globalThis，两者不等 → `window.window == function(){return this}()`
+自检判 false → 误走错误分支（match25 是 `_$VM=111`）→ token 全错 → 403 token failed。
+症状与反模式 26（webpack `n.g` 缺失）一模一样，但根因在运行位置。纪律：
+
+1. 环境桩写成独立脚本文件，随目标代码一起 `vm.runInContext(envCode, sandbox)`（或 `run_with_trace.js --env-module`）执行；
+   模块间用 `globalThis.__M25_*` 之类命名空间传递对象。
+2. **同输入双环境对比定位**：同一环境桩分别"沙箱内执行"与"主 realm 执行后注入"，同输入各跑一次目标函数，
+   输出逐字节比对——不一致即命中运行位置问题（match25 一锤定音，比逐环节排查省十几轮）。
+3. 环境桩文件**不要用 IIFE 包裹**：check_code_quality 把 IIFE 主体当单函数，行数=文件行数必超 90；
+   >500 行 + 多类 WebAPI 判「补环境主体堆叠」。用顶层代码 + 具名函数（<90 行）+ `Object.assign` 合并方法集，
+   拆 `src/env/browser-objects/{dom,window,jquery,webapi}.js` 按职责分文件。
+
+### 34. 签名内时间戳先做 T 偏移矩阵量化服务端窗口，再决定是否补偿
+
+token 含 `+new Date`/`Date.now()` 派生时间戳且服务端 403 时，对 now 做 ±N 偏移（如 −100s~+30s 十几档）
+各生成 token 请求，看通过区间：**全过** = 服务端不校验时间窗口 → 直接冻结 Date=getTime 返回的服务器时间戳最稳，
+无需时间补偿/重试（match25 实测 ±100s 全 200）；存在窗口则按区间中值冻结并保持 getTime→生成→请求 <1s。
+与规则 31 同精神：先量边界再动手，不凭直觉加 LEAD_MS 类补偿。
+
 ## 相关案例
 
 | 案例文件 | 关联点 |
@@ -224,3 +249,4 @@ VM 读取页面运行时产生的随机量（match24：jQuery expando `jQuery341
 | `cases/yuanrenxue-match19-tls-fingerprint-blocklist.md` | 规则 27 扩充实证（跨客户端栈对照法定位 TLS ClientHello 黑名单 + 交付语言切换依据；末页 UA 提示数组按元素类型判别）+ 反模式 27 五次实证并修正机理（丢弃在 `k.extend` 深拷贝 `copy!==undefined` 守卫，非 `$.param`——debug 文本含参数 ≠ wire URL 含参数） |
 | `cases/yuanrenxue-match24-jsvmp-blackbox-tl-xor30.md` | 规则 30 实战验证（逐位 diff 判分布→常量偏移 XOR 30 就地修正；VM 探针直达路径/沙箱 realm 钩子/按页构建时效窗口）+ 规则 31 实证（LEAD_MS 补偿伪需求：先测 age 窗口 2~4s，慢的根源是逐页点击派发非时间补偿）+ 规则 32 实证（jQuery expando 随机值：格式正确+运行时随机，服务端只验结构自洽）+ 反模式 32/33 实证 |
 | `cases/yuanrenxue-match26-sm3-blackbox-page-drive.md` | 反模式 29/31 同族实证（SM3 魔改 8 组环境分派 IV，Firefox 取证内核 403 诱饵分支）+ 页面自驱动翻页（jq 桩 on() 记录 handler + 手动触发 click）+ 成对相同 token 的字节级折叠诊断（strToBytes `k & 0xfe` 偶数化）+ 会话验活（数据接口 200 ≠ 登录态存活）+ detect-patterns 自引用检测补强（拼接结果被 charCodeAt 形态漏报） |
+| `cases/yuanrenxue-match25-cfa-vm-blackbox-env-realm.md` | 规则 33 实战验证（环境桩必须在沙箱内执行：主 realm 定义 `win.window=globalThis` → self-reference 自检失败 → `_$VM=111` 分支 → 403 token failed；同输入双环境对比定位）+ 规则 34 实证（T 偏移矩阵 now±100s 全过 = 服务端不校验时间窗口，冻结 Date=now 即可，无需补偿）+ 反模式 34 实证 + IIFE 门禁坑（环境桩拆 browser-objects 顶层代码，check_code_quality 单函数上限） |

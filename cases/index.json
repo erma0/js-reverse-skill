@@ -776,7 +776,8 @@
       ],
       "strategy": "C WASM 加载 + B 最小沙箱：sign=wasmSign(page+|+t)（t=同步 GET /api/getTime 服务器毫秒文本），wasm 从 /api2/20 运行时二进制拉取（取证通道 streaming 无字节+旧抓包文本化损坏，反模式 25 第二形态）；glue 原样还原，Node 沙箱桩语义陷阱——wasm-bindgen get-global 链 instanceof_Window 须返回 true、document/body 须非空对象否则 wasm trap unreachable（反模式 28 形态四，桩调用日志定位）；全部 5 页求和（题面试炼步骤区块为唯一口径来源，勿按 3 页假设）+ 末页 UA=yuanrenxue；数据绑定 sessionid（答案 27713926）；提交 POST /a/20 表单编码 code=2 通关",
       "file": "yuanrenxue-match20-wasm-bindgen-sign.md",
-      "verifiedAt": "2026-08-29"
+      "verifiedAt": "2026-08-29",
+      "id": "yuanrenxue-match20-wasm-bindgen-sign"
     },
     {
       "id": "yuanrenxue-match21-sm3-variant-decoy-branch",
@@ -884,6 +885,64 @@
       ],
       "strategy": "B vm 沙箱黑盒执行（Node vm + 24.js 原码 + 最小环境桩 + TL[11..] XOR 30 修正探针）+ E 桥式交付（Python requests），按页构建+即时请求",
       "file": "yuanrenxue-match24-jsvmp-blackbox-tl-xor30.md",
+      "verifiedAt": "2026-08-31",
+      "id": "yuanrenxue-match24-jsvmp-blackbox-tl-xor30"
+    },
+    {
+      "id": "yuanrenxue-match26-sm3-blackbox-page-drive",
+      "title": "猿人学 match26 SM3 魔改 token：8 组环境分派 IV + 页面自驱动翻页（26.js 原码黑盒执行）",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match26",
+        "api/question/26",
+        "api/getTime",
+        "SM3 魔改",
+        "环境分派 IV",
+        "reg[0..7]",
+        "strToBytes 偶数化",
+        "k & 0xfe",
+        "页面自驱动翻页",
+        "jq 桩",
+        "match_num",
+        "yuanrenxue",
+        "token failed"
+      ],
+      "strategy": "B vm 沙箱黑盒执行原 26.js（8 组环境分派 IV 逐项对齐 + strToBytes 偶数化）+ 页面自驱动翻页签名（jq 桩按 selector 缓存 + on() 记录 handler + 手动触发 click，复用页面页码计数器）；token=SM3 魔改('/api/question/26'+now+page)，now=GET /api/getTime 服务器毫秒文本；取证浏览器 token 必 403（Firefox 内核走诱饵分支）不改签名正确性结论；提交 POST /a/26 表单编码 code=2 通关（答案 29597657）",
+      "file": "yuanrenxue-match26-sm3-blackbox-page-drive.md",
+      "verifiedAt": "2026-08-31"
+    },
+    {
+      "id": "yuanrenxue-match25-cfa-vm-blackbox-env-realm",
+      "title": "猿人学 match25 控制流扁平化 VM 混淆 token：x 黑盒执行 + 环境桩必须在沙箱内运行（403 根因）",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match25",
+        "api/question/25",
+        "api/getTime",
+        "控制流扁平化",
+        "VM 混淆",
+        "for(;;) if(_$XX==",
+        "Huffman 编码",
+        "char/frequency/left/right",
+        "+new Date 参与编码",
+        "window.window",
+        "function(){return this}()",
+        "self-reference 自检",
+        "_$VM=111",
+        "pgxList",
+        "typeof global",
+        "环境桩沙箱内运行",
+        "T 偏移矩阵",
+        "token failed",
+        "match_num",
+        "yuanrenxue"
+      ],
+      "strategy": "B vm 沙箱黑盒执行（25.js 截取 x 函数 + 环境桩在 vm.runInContext 内运行）+ D 环境对齐（冻结 Date=now、global 动态 getter、pgxList 桩）；token=x('/api/question/25'+now+page)，now=GET /api/getTime 服务器毫秒文本；**403 根因=环境桩在主 realm 定义时 win.window=主进程 globalThis，x 的 window.window==function(){return this}() 自检失败误走 _$VM=111 分支**；服务端不校验时间窗口（T 偏移矩阵 now±100s 全过）；Node 原生 https 直连；提交 POST /a/25 表单编码 code=2 通关（答案 26878107）",
+      "file": "yuanrenxue-match25-cfa-vm-blackbox-env-realm.md",
       "verifiedAt": "2026-08-31"
     }
   ]

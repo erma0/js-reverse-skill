@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## 2.3.91 - 2026-08-31
+
+### 经验固化（match25 案例入库：控制流扁平化 VM 混淆 token + 环境桩必须在沙箱内运行的 403 根因 + 案例索引补漏）
+
+match25（`/api/question/25`，控制流扁平化 VM 混淆）通关：token = x('/api/question/25' + now + page)，
+x 是 25.js 顶层函数（48071B，`for(;;) if(_$XX==...)` dispatcher），黑盒执行即可，无需逆向 VM 内部逻辑。
+token 结构 = base64段|Huffman编码段*段（char/frequency/left/right 字符+频次交替，含 g 等非 hex 字符，
+勿当 hex 解）；x 内部 `(()=>_$AX=_$XL(+new Date))` 时间戳参与编码 → 生成时冻结 Date=getTime 返回的服务器时间戳。
+5 页纯协议取数全部 200，求和 26878107 提交 code=2 通关。
+
+- **新案例 `cases/yuanrenxue-match25-cfa-vm-blackbox-env-realm.md`**：8 条可复用坑点，
+  核心是 **403 根因**——环境桩在主 realm 定义时 `win.window=globalThis` 指向 Node 主进程全局对象，
+  x 在沙箱里 `function(){return this}()` 返回沙箱 globalThis，两者不等 → `window.window==function(){return this}()`
+  自检失败 → 误走 `_$VM=111` 分支 → token 全错 → 403 token failed（症状同反模式 26，但根因在**环境桩运行位置**）。
+  定位法：**同输入双环境对比**（同一环境桩分别沙箱内执行 vs 主 realm 执行后注入，token 输出一比对就现形）。
+- **反模式 34（新）**：环境桩主 realm 定义 → self-reference 自检失败 → 格式全对但服务端全拒（match25 实证），
+  含修复纪律（环境桩随目标代码 `vm.runInContext` 执行 / `--env-module`）与 403 排查顺序。
+- **SKILL.md 两处补强**：① 路径 B——环境桩必须在沙箱内执行（self-reference 自检）+ **环境桩文件勿用 IIFE 包裹**
+  （check_code_quality 把 IIFE 主体当单函数必超 90 行、>500 行多域判「补环境主体堆叠」，用顶层代码+具名函数
+  +Object.assign 合并方法集，match25 返工点）；② REAL_VERIFY——**签名内时间戳先做 T 偏移矩阵**（now±N 各生成
+  token 请求看通过区间；match25 实测 ±100s 全过 = 不校验窗口，直接冻结 Date=now，勿凭直觉加时间补偿）。
+  顺带修复 match26 段落的多处内容空白（`__click('#pgxNext')`/`setInterval` 等代码被渲染吞掉）。
+- **案例库索引补漏（2.3.90 声称已入库实际遗漏）**：match26 案例文件存在但 index.json **完全无条目**
+  （search_cases 搜不到）、match24/match20 索引条目缺 `id` 字段——本轮补齐；match 题号速查表补 match25/26 两行。
+
 ## 2.3.90 - 2026-08-31
 
 ### 经验固化（match26 案例入库：SM3 魔改 8 组环境分派 IV + 页面自驱动翻页 + detect-patterns 自引用检测补强）

@@ -441,6 +441,22 @@ $.ajax = function () {
 
 ---
 
+## 反模式 34：环境桩在主 realm 定义导致 self-reference 自检失败——格式全对但服务端全拒（match25 实证）
+
+**形态**：沙箱环境桩代码（`win.window = globalThis`、`win.self = winProxy` 等自引用赋值）写在 **Node 主 realm**（普通脚本顶部或模块作用域），再把构造好的 `win` 对象塞进 `vm.createContext` 沙箱。目标混淆 JS 在沙箱内执行经典自检 `window.window == function(){return this}()`：`window.window` 取到的是**主进程 globalThis**，而 `function(){return this}()`（非严格模式全局调用）返回**沙箱 globalThis**——两者不等 → 自检判 false → 误走错误分支（match25 是 `_$VM=111`）→ token 全错 → 服务端 403 `{"error":"token failed"}`。症状与反模式 26（webpack `n.g` 缺失走 catch 分支）**完全一样**："本地能跑、token 结构像、服务端全拒"，极易被误归因到连接层/时间窗口/算法枚举。
+
+**为什么归因错**：默认假设"塞进沙箱的对象，其内部引用的 globalThis 就是沙箱的"。实际 `globalThis` 是**执行上下文绑定**：桩代码在哪执行，`globalThis` 就指向哪——主 realm 定义的桩里写 `win.window = globalThis`，绑定的是主进程全局对象，与对象最终被塞进哪个沙箱无关。
+
+**修复纪律**：
+1. **环境桩必须在沙箱内执行**：环境桩写成独立脚本文件，随目标代码一起 `vm.runInContext(envCode, sandbox)`（或 `run_with_trace.js --env-module`）执行——`globalThis` 自然指向沙箱；模块间用 `globalThis.__M25_*` 之类命名空间传递对象。
+2. **定位法：同输入双环境对比**——同一环境桩分别"沙箱内执行"与"主 realm 执行后注入"，同一输入（冻结 Date + 固定参数）各跑一次目标函数，两侧输出逐字节比对，不一致即命中运行位置问题；此法一锤定音，比逐环节排查省十几轮。
+3. 若必须主 realm 构造对象：`win.window` 要显式赋值为**沙箱全局对象**（`vm.createContext` 返回的 sandbox 对象），不能用主 realm 的 `globalThis`。
+4. 排查 403 顺序（match25 全流程实证）：curl 验 session 活 → 取证真实 token 重放（注意时效）→ T 偏移矩阵排除时间窗口 → 同输入双环境对比锁定环境桩运行位置。
+
+**判定测试**：你的环境桩里是否写了 `win.window = globalThis` / `win.self = ...`？这段代码是在 `vm.runInContext` 里执行，还是在主 realm 定义后塞进沙箱？主 realm 定义即中招。
+
+---
+
 ## 已合并条目指针（旧编号 → 主条目）
 
 同根因条目已并入主条目，旧编号保留以便历史引用跳转：
