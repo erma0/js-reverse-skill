@@ -944,6 +944,34 @@
       "strategy": "B vm 沙箱黑盒执行（25.js 截取 x 函数 + 环境桩在 vm.runInContext 内运行）+ D 环境对齐（冻结 Date=now、global 动态 getter、pgxList 桩）；token=x('/api/question/25'+now+page)，now=GET /api/getTime 服务器毫秒文本；**403 根因=环境桩在主 realm 定义时 win.window=主进程 globalThis，x 的 window.window==function(){return this}() 自检失败误走 _$VM=111 分支**；服务端不校验时间窗口（T 偏移矩阵 now±100s 全过）；Node 原生 https 直连；提交 POST /a/25 表单编码 code=2 通关（答案 26878107）",
       "file": "yuanrenxue-match25-cfa-vm-blackbox-env-realm.md",
       "verifiedAt": "2026-08-31"
+    },
+    {
+      "id": "yuanrenxue-match28-jsvmp-rsa-purecompute",
+      "title": "猿人学 match28 JSVMP 内嵌确定性 RSA-1024：字节码 limbs 直读纯算（无需跑 VM）",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match28",
+        "api/question/28",
+        "api/getTime",
+        "确定性 RSA",
+        "RSA-1024",
+        "JSBN",
+        "28-bit limbs",
+        "hex2b64",
+        "字节码数字字面量",
+        "m324665p2098959",
+        "PKCS#1 固定 0x01",
+        "token failed",
+        "限流",
+        "数据绑定 sessionid",
+        "match_num",
+        "yuanrenxue"
+      ],
+      "strategy": "A 纯算还原（Node BigInt 模幂 + JSBN hex2b64）：token=RSA-1024 确定性密文，明文='/api/question/28'+now+'28$'+page，PKCS#1 填充 00 02||01×k||00（固定 0x01 无随机），N 由 36 个 28-bit limbs 重建（**从 JSVMP 字节码尾部数字字面量直读**，出现序≠数组序需对拍修正），编码=JSBN hex2b64（每 3 hex→2 b64 非标准 base64）；对拍 capture 样本逐字节一致后纯协议直连；**数据绑定 sessionid**（换会话数据不同需重算，答案 25808383→27673886）；站点限流：短窗口连续请求第 3 页起 403 token failed（单请求正常，非签名错），页间 3s+冷却+提交用 --answer 单请求解耦；提交 POST /a/28 表单编码 code=2 通关（答案 27673886）",
+      "file": "yuanrenxue-match28-jsvmp-rsa-purecompute.md",
+      "verifiedAt": "2026-08-31"
     }
   ]
 }

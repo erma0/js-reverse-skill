@@ -228,6 +228,37 @@ token 含 `+new Date`/`Date.now()` 派生时间戳且服务端 403 时，对 now
 无需时间补偿/重试（match25 实测 ±100s 全 200）；存在窗口则按区间中值冻结并保持 getTime→生成→请求 <1s。
 与规则 31 同精神：先量边界再动手，不凭直觉加 LEAD_MS 类补偿。
 
+## 十八、JSVMP 字节码字面量直读纯算 + 会话绑定与限流判别（match28 实证）
+
+### 35. JSVMP 不一定非要黑盒——先扫字节码数字字面量判断标准算法族，命中即转纯算
+
+JSVMP（单行 VM + 字节码串）的字节码尾部常含**大数字面量序列**（如 `m324665p2098959o9832905...`），
+这是 JSBN 类大数库的 **28-bit limbs**（RSA 模数/公钥）或算法常数。先扫字节码找数字段、判断标准算法族
+（RSA/AES/哈希），命中标准算法立即转纯算——match28 实证：token 是确定性 RSA-1024（明文
+`/api/question/28`+now+`28$`+page，PKCS#1 填充固定 0x01，指数 65537），limbs 直读 + Node BigInt 模幂 +
+JSBN hex2b64（3 hex→2 b64 非标准 base64）即可复现，**完全不需要跑 VM**；黑盒调试（run_with_trace 的
+bootstrap 与 VM `(p.v=p.apply).v=p.call` 元编程冲突、逐 opcode 插桩）全是弯路。
+两条子规则：
+
+1. **确定性 padding → 本地对拍**：PKCS#1 填充固定 0x01（非随机）时 token 可对拍——用 capture 真实样本
+   （now+page → token）逐字节比对，零成本验证后再发真实请求。
+2. **limbs 出现序 ≠ 数组序**：字节码里 limb 字面量的压栈顺序与构造数组的顺序可能不同，按出现序拼模数
+   会得到错误 N（token 长度对但全拒）→ 必须用对拍修正数组顺序。
+
+### 36. 数据绑定 sessionid：同会话恒定 ≠ 跨会话相同，换会话必须重算答案
+
+同 sessionid 数据恒定（可做 fixture 回归），但**不同 sessionid 数据完全不同**（match28 实证：旧会话
+page1 `[263432,...]` vs 新会话 `[636803,...]`，总和差 ~180 万）。换会话（尤其用户重新登录提供新
+sessionid）后必须用新会话重新采集计算答案，不得复用旧答案；换会话先 `GET /api/user` 验活
+（`isLogin:true`），数据接口往往不校验登录仍 200 容易误判。
+
+### 37. 站点限流 vs 签名错误的判别——"第 N 页起 403 token failed"先做单请求诊断
+
+连续快速请求时约第 3 页起 403 `token failed`、而单请求/第 1/2 页正常 = **频率墙限流**，不是签名错
+（同文案，match19 教训"错误文案不指示病因层"）。判别：单独发一次 page=1（fresh now+token）→ 200 即签名
+正确。应对：页间 3s + getTime 后 300ms 间隔 + 重试前冷却 3~4 分钟（恢复期长，反复重试持续触发）；
+**采集与提交解耦**（算好答案后 `--submit --answer <总和>` 单请求提交不受限）。
+
 ## 相关案例
 
 | 案例文件 | 关联点 |
@@ -250,3 +281,4 @@ token 含 `+new Date`/`Date.now()` 派生时间戳且服务端 403 时，对 now
 | `cases/yuanrenxue-match24-jsvmp-blackbox-tl-xor30.md` | 规则 30 实战验证（逐位 diff 判分布→常量偏移 XOR 30 就地修正；VM 探针直达路径/沙箱 realm 钩子/按页构建时效窗口）+ 规则 31 实证（LEAD_MS 补偿伪需求：先测 age 窗口 2~4s，慢的根源是逐页点击派发非时间补偿）+ 规则 32 实证（jQuery expando 随机值：格式正确+运行时随机，服务端只验结构自洽）+ 反模式 32/33 实证 |
 | `cases/yuanrenxue-match26-sm3-blackbox-page-drive.md` | 反模式 29/31 同族实证（SM3 魔改 8 组环境分派 IV，Firefox 取证内核 403 诱饵分支）+ 页面自驱动翻页（jq 桩 on() 记录 handler + 手动触发 click）+ 成对相同 token 的字节级折叠诊断（strToBytes `k & 0xfe` 偶数化）+ 会话验活（数据接口 200 ≠ 登录态存活）+ detect-patterns 自引用检测补强（拼接结果被 charCodeAt 形态漏报） |
 | `cases/yuanrenxue-match25-cfa-vm-blackbox-env-realm.md` | 规则 33 实战验证（环境桩必须在沙箱内执行：主 realm 定义 `win.window=globalThis` → self-reference 自检失败 → `_$VM=111` 分支 → 403 token failed；同输入双环境对比定位）+ 规则 34 实证（T 偏移矩阵 now±100s 全过 = 服务端不校验时间窗口，冻结 Date=now 即可，无需补偿）+ 反模式 34 实证 + IIFE 门禁坑（环境桩拆 browser-objects 顶层代码，check_code_quality 单函数上限） |
+| `cases/yuanrenxue-match28-jsvmp-rsa-purecompute.md` | 规则 35 实战验证（JSVMP 字节码 limbs 字面量直读 → 确定性 RSA-1024 纯算，无需跑 VM；固定 0x01 padding 对拍；limbs 出现序≠数组序）+ 规则 36 实证（数据绑定 sessionid：换会话数据完全不同必须重算，答案 25808383→27673886）+ 规则 37 实证（限流 403 token failed 单请求诊断法：第 3 页起 403 但单请求 200 = 频率墙；页间 3s+冷却+提交 --answer 解耦）+ 反模式 35/36 实证 + JSBN hex2b64 非标准编码 |
