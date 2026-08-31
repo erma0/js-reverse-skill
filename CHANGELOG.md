@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2.3.90 - 2026-08-31
+
+### 经验固化（match26 案例入库：SM3 魔改 8 组环境分派 IV + 页面自驱动翻页 + detect-patterns 自引用检测补强）
+
+match26（`/api/question/26`，SM3 魔改 token，26.js 原码黑盒执行）通关：token = SM3 魔改('/api/question/26' + now + page)，
+与 match21 同族但环境分派从 4 组扩到 **8 组**（reg[0..7] 分别检测 Document/Window/Navigation/Location/FocusEvent/require/Node/HTMLDocument 的 String() native 串）。
+5 页纯协议取数全部 200，求和 29597657 提交 code=2 通关。
+
+- **新案例 `cases/yuanrenxue-match26-sm3-blackbox-page-drive.md`**：与 match21 同族对照（8 组 IV 差异 + _compress 掩码分支
+  `document.__proto__===HTMLDocument.prototype→0xfcffffff`）+ 10 条可复用坑点（jq 桩自驱动翻页、setInterval 桩、sessionid 时效等）。
+- **detect-patterns 自引用检测补强（match26 实证漏报）**：26.js 解码器形态是 `q = o + i` + **拼接结果 q** 被
+  `q['charCodeAt'](u + 0xa)` 读取（带求和偏移），旧规则只匹配"拼接右侧变量自身被 charCodeAt"或显式 `toString()` 调用，
+  对该形态漏报 → 误用 AST 反混淆产物执行。pipeline-config.js 的 detectSelfReferencingDecoder 新增第三形态：
+  `(\w+)=\w+\+\w+[,;]...\1['charCodeAt'](\w+ + 常量)`（拼接结果 + 求和偏移）。回归：match23 仍告警（无回归）、match22 无误报、match26 现在告警。
+- **SKILL.md 四处补强**：① IMPLEMENT 路径 B——页面自驱动翻页（jq 桩按 selector 缓存 + on() 记录 handler + 手动触发
+  click，复用页面页码计数器，match26 实证）+ 混淆文件尾反调试 IIFE 需空 setInterval 桩 + **环境桩拆独立文件
+  （fs.readFileSync 注入，禁大段模板字符串——check_code_quality 红线，match26 返工点）**；② IDENTIFY 表——签名/token
+  **成对或周期相同**先做字节级折叠分析（strToBytes `k & 0xfe` 使 '2'/'3'→0x32、'4'/'5'→0x34，消息字节级相同→hash 相同，
+  真浏览器与服务端一致，不是沙箱 bug）；③ REAL_VERIFY——**提交/写接口前先验活会话**（数据接口 200 ≠ 登录态存活，
+  会话过期后服务端还会主动清 sessionid cookie）；④ EVIDENCE_GATE——**目标接口命中但全 403** 时 target-hits 的 URL/参数
+  结构仍是有效接口证据，不无限重采，签名正确性由 trace+沙箱+REAL_VERIFY 闭环验证（取证侧 403 可能是环境分派诱饵分支）。
+
 ## 2.3.89 - 2026-08-31
 
 ### 经验固化（match24 案例入库：JSVMP 常量偏移就地修正 + 工具三能力补强 + ruyitrace 参数文档三方核对）

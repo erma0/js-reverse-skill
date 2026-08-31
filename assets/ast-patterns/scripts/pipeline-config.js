@@ -271,7 +271,10 @@ function detectSelfReferencingDecoder(sourceText) {
   }
   const summedOffsetCharCodeAt = /\[\s*['"]charCodeAt['"]\s*\]\(\s*\w+\s*\+\s*(?:0x[0-9a-fA-F]+|\d+)\s*\)/.test(sourceText);
   const concatSelf = /=\s*\w*\s*\+\s*\w+\s*[,;]\s*\w+\s*=\s*['"]{2}/.test(sourceText)
-    || /\w+\['toString'\]\(\)|=\s*\w+\s*\+\s*(\w+)\s*[,;].{0,600}?\1\s*\[\s*['"]charCodeAt['"]/.test(sourceText);
+    || /\w+\['toString'\]\(\)|=\s*\w+\s*\+\s*(\w+)\s*[,;].{0,600}?\1\s*\[\s*['"]charCodeAt['"]/.test(sourceText)
+    // match26 形态：`q = o + i`（拼接源含函数自身）+ 拼接【结果】q 被 charCodeAt 且带求和偏移。
+    // 旧规则只覆盖"拼接右侧变量自身被 charCodeAt"，26.js 是 q（结果）被读，漏报导致误用 AST 产物执行。
+    || /(\w+)\s*=\s*\w+\s*\+\s*\w+\s*[,;][\s\S]{0,300}?\1\s*\[\s*['"]charCodeAt['"]\s*\]\(\s*\w+\s*\+\s*(?:0x[0-9a-fA-F]+|\d+)\s*\)/.test(sourceText);
   const selfDefenseTrap = /['"]newState['"]/.test(sourceText)
     && /\\x5cw\+\\x20\*\\x5c\(\\x5c\)\\x20\*\\x5c\{/.test(sourceText);
 
