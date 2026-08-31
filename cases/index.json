@@ -1002,6 +1002,39 @@
       "strategy": "A 纯算还原（Node crypto.publicEncrypt + 内嵌 X.509 SPKI 公钥）：token=RSA-1024 PKCS#1 v1.5 随机填充密文（128B/172 字符标准 base64），明文=\"/api/question/27\"+now+\"27\"+page（X=N+window._$v=27 由候选 X×公钥扫描实证：pubkey1+X=27→200、pubkey2 全 403）；公钥=27.js 内嵌 SPKI hex（pubkey1，E=65537，indexOf 0x02818100 定位 N）；沙箱跑通+结构像≠服务端接受（_$v 依赖 document.all 分支致常量算错），可纯算时转纯算不死磕沙箱；m=window[\"matchnumber\"]=undefined 诱饵；429 限流页间 3s+冷却；末页 UA=yuanrenxue；数据绑定 sessionid；提交 POST /a/27 表单编码 code=2 通关（答案 26217857）",
       "file": "yuanrenxue-match27-jsencrypt-random-rsa-purecompute.md",
       "verifiedAt": "2026-09-01"
+    },
+    {
+      "id": "yuanrenxue-match29-vmpzl-eval-log-source",
+      "title": "猿人学 match29 js混淆源码乱码：vmpzl 三脚本全 VM 化 + RuyiTrace eval 日志直读业务源码 + 魔改 MD5 黑盒",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match29",
+        "api/question/29",
+        "api/getTime",
+        "vmpzl",
+        "jsvmp",
+        "eval 日志",
+        "eval_xxx_eval-direct.js",
+        "trace_eval_process",
+        "LZ.",
+        "fast_unpack",
+        "WAFJ",
+        "魔改 MD5",
+        "46 项环境探测",
+        "counter 28",
+        "pgxDebug",
+        "页面自驱动翻页",
+        "token failed",
+        "数据绑定 sessionid",
+        "m undefined 诱饵",
+        "match_num",
+        "yuanrenxue"
+      ],
+      "strategy": "B 最小 JS 沙箱（黑盒执行 RuyiTrace eval 落盘源码）：token=魔改MD5(/api/question/29+now+(counter+_)+\"()\"+page)，counter 初值 28 随翻页递增、_=pgxDebug 检测恒 0；标准 MD5 K 表缺失 + 46 项环境探测分派不可纯算；RuyiTrace eval 分类日志落盘 VM 反序列化业务源码（eval_<pid>_<seq>_eval-direct.js，29.js 对应 60KB），绕开 LZ 压缩/字节码/VM 指令三层直读逻辑；页面自驱动翻页（触发 #pgxNext click + 每次翻页前注入新 getTime now）；jQuery 桩 .add() 必须有；m=undefined 诱饵；末页 UA=yuanrenxue；数据绑定 sessionid；提交 POST /a/29 表单编码 code=2 通关（答案 27105688）",
+      "file": "yuanrenxue-match29-vmpzl-eval-log-source.md",
+      "verifiedAt": "2026-09-01"
     }
   ]
 }
