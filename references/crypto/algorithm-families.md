@@ -57,6 +57,15 @@ eval(...) / new Function(...)（打包）
 200KB+ 文件 + 字节码数组（JSVMP）
 ```
 
+### RSA 家族（浏览器侧签名常见两形态）
+```
+确定性 RSA-1024（JSVMP 内嵌 JSBN，字节码尾部 28-bit limbs 字面量 m324665p2098959...，
+固定 0x01 PKCS#1 填充，hex2b64 非标准编码）→ match28：Node BigInt 模幂纯算
+随机 RSA-1024（混淆 JS 内嵌 JSEncrypt，X.509 SPKI hex 公钥 30819f300d06092a864886f70d01...，
+crypto.getRandomValues(Uint32Array 256) 随机填充源，标准 base64 172 字符）→ match27：
+Node crypto.publicEncrypt(RSA_PKCS1_PADDING) 纯算；明文含未知常量用候选 X×公钥扫描实证
+```
+
 ## 按反爬类型分类
 
 ### 签名型反爬（环境即签名）

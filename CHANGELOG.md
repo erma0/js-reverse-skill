@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## 2.3.93 - 2026-09-01
+
+### 经验固化（match27 案例入库：336KB 短名混淆内嵌 JSEncrypt 随机填充 RSA-1024 纯算 + X 值扫描实证 + 沙箱跑通≠服务端接受）
+
+match27（`/api/question/27`，js混淆源码乱码）通关：token 是 **RSA-1024 PKCS#1 v1.5 随机填充密文**
+（128B/172 字符标准 base64，每次不同属预期），明文=`/api/question/27`+now+`27`+page，公钥=27.js
+内嵌 **X.509 SPKI hex**（pubkey1，`30819f300d06092a864886f70d01...` OID 头，E=65537）。
+**破局：X.509 SPKI 公钥直读 + Node `publicEncrypt` 纯算**——先写 vm 沙箱（jQuery 桩 + crypto 真随机）
+跑通签名确认结构，再提取 SPKI hex 转纯算；明文含运行时未知常量 X=N+window._$v 且有双公钥候选，
+用**候选 X × 公钥扫描实证**（publicEncrypt 逐个发请求，300ms 间隔防限流）：pubkey1+X=27→200、
+X=28/pubkey2 全 403 → 明文/公钥双确认。5 页全 200，答案 26217857 提交 code=2 通关（exp=131）。
+
+- **新案例 `cases/yuanrenxue-match27-jsencrypt-random-rsa-purecompute.md`**：7 条可复用坑点，
+  核心三条——① **X.509 SPKI hex 公钥 + getRandomValues = JSEncrypt 随机 RSA**（与 match28 的 JSBN
+  limbs 确定性 RSA 互补：SPKI 用 `indexOf([0x02,0x81,0x81,0x00])` 定位 N，publicEncrypt 直出，
+  无需沙箱）；② **候选 X×公钥扫描实证明文常量**（服务端校验明文确切值，X=27 过 X=28 拒即铁证）；
+  ③ **沙箱跑通+token 结构像 ≠ 服务端接受**——`_$v` 依赖 `document.all["pgxDebug"]` 分支致运行时
+  数值常量算错（N+_$v≠27），可纯算时转纯算不死磕沙箱。
+- **规则 38（新）**：X.509 SPKI hex + getRandomValues = JSEncrypt 随机 RSA → publicEncrypt 纯算 +
+  X 值扫描实证明文常量；沙箱跑通≠服务端接受三形态归纳（环境分派诱饵分支 match21/26、realm 自检
+  match25、环境依赖数值常量 match27）。
+- **SKILL.md 三处补强**：① IDENTIFY 表新增「128B 密文 + SPKI hex + getRandomValues = JSEncrypt 随机
+  RSA」识别行（与 match28 的 JSBN limbs 确定性 RSA 并列）；② IMPLEMENT 路径 A 补「明文含运行时未知
+  常量 → 候选 X×公钥扫描实证」；③ 路径 B 补 jq 桩 Proxy 缓存坑（`__jqCache` 必须缓存 Proxy 本体，
+  否则同 key 二次访问裸对象缺失方法报错，match27 实证）。
+- **algorithm-families.md**：新增「RSA 家族」识别关键词段（确定性 JSBN limbs vs 随机 JSEncrypt SPKI
+  两形态对照）。
+- **common-pitfalls.md**：反模式 29 补「形态二（环境依赖的数值常量算错）」——沙箱自洽但 403 的
+  match27 实证，与 match21 诱饵算法变体（IV 常量不同）区分；按同根因合并原则并入既有条目。
+- **案例索引**：index.json（46 条）+ match-index.md 补 match27（含 id 字段）。
+
 ## 2.3.92 - 2026-08-31
 
 ### 经验固化（match28 案例入库：JSVMP 内嵌确定性 RSA-1024 字节码 limbs 直读纯算 + 数据绑定 sessionid + 站点限流判别）

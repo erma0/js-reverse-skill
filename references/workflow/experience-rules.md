@@ -259,6 +259,23 @@ sessionid）后必须用新会话重新采集计算答案，不得复用旧答�
 正确。应对：页间 3s + getTime 后 300ms 间隔 + 重试前冷却 3~4 分钟（恢复期长，反复重试持续触发）；
 **采集与提交解耦**（算好答案后 `--submit --answer <总和>` 单请求提交不受限）。
 
+### 38. X.509 SPKI hex 公钥 + getRandomValues = JSEncrypt 随机 RSA → publicEncrypt 纯算 + X 值扫描实证明文常量
+
+混淆 JS 内 `30819f300d06092a864886f70d01...`（rsaEncryption OID 头）开头的 162 字节 hex 字符串是
+**标准 X.509 SPKI 公钥 DER**（`indexOf(Buffer.from([0x02,0x81,0x81,0x00]))` 定位 128B N），配合加载期
+`crypto.getRandomValues(Uint32Array 256)`（PKCS#1 随机填充源，无 `crypto.subtle` = 纯 JS 加密库）→
+**JSEncrypt 随机 RSA**（与 match28 的 JSBN limbs 确定性 RSA 互补）：`publicEncrypt({key, padding:
+RSA_PKCS1_PADDING})` 直出，无需沙箱，token 每次不同属预期（服务端解密校验明文，200 即签名正确）。
+
+明文含运行时未知常量（如 `N + window._$v`）且公钥有多个候选时，用**候选 X × 候选公钥扫描实证**：
+对 X ∈ 小整数集 × 各候选公钥逐个 `publicEncrypt` 生成 token 发真实请求（每请求 300ms 间隔防限流），
+找到 200 的那组即定案（match27：pubkey1 + X=27 → 200，X=28/pubkey2 全 403，证明服务端校验明文确切值）。
+
+**沙箱跑通 + token 结构像 ≠ 服务端接受**：黑盒沙箱自洽产出签名但仍 403，可能是**环境依赖的数值常量**
+算错（match27 实证：`_$v` 依赖 `document.all["pgxDebug"]` 分支，桩导致 N+_$v≠27）——与 match21/26 的
+环境分派诱饵分支、match25 的 realm 自检都不同。当算法可纯算（公钥/模数可提取）时**直接转纯算 + 扫描
+实证，不要死磕沙箱环境对齐**。
+
 ## 相关案例
 
 | 案例文件 | 关联点 |
@@ -282,3 +299,4 @@ sessionid）后必须用新会话重新采集计算答案，不得复用旧答�
 | `cases/yuanrenxue-match26-sm3-blackbox-page-drive.md` | 反模式 29/31 同族实证（SM3 魔改 8 组环境分派 IV，Firefox 取证内核 403 诱饵分支）+ 页面自驱动翻页（jq 桩 on() 记录 handler + 手动触发 click）+ 成对相同 token 的字节级折叠诊断（strToBytes `k & 0xfe` 偶数化）+ 会话验活（数据接口 200 ≠ 登录态存活）+ detect-patterns 自引用检测补强（拼接结果被 charCodeAt 形态漏报） |
 | `cases/yuanrenxue-match25-cfa-vm-blackbox-env-realm.md` | 规则 33 实战验证（环境桩必须在沙箱内执行：主 realm 定义 `win.window=globalThis` → self-reference 自检失败 → `_$VM=111` 分支 → 403 token failed；同输入双环境对比定位）+ 规则 34 实证（T 偏移矩阵 now±100s 全过 = 服务端不校验时间窗口，冻结 Date=now 即可，无需补偿）+ 反模式 34 实证 + IIFE 门禁坑（环境桩拆 browser-objects 顶层代码，check_code_quality 单函数上限） |
 | `cases/yuanrenxue-match28-jsvmp-rsa-purecompute.md` | 规则 35 实战验证（JSVMP 字节码 limbs 字面量直读 → 确定性 RSA-1024 纯算，无需跑 VM；固定 0x01 padding 对拍；limbs 出现序≠数组序）+ 规则 36 实证（数据绑定 sessionid：换会话数据完全不同必须重算，答案 25808383→27673886）+ 规则 37 实证（限流 403 token failed 单请求诊断法：第 3 页起 403 但单请求 200 = 频率墙；页间 3s+冷却+提交 --answer 解耦）+ 反模式 35/36 实证 + JSBN hex2b64 非标准编码 |
+| `cases/yuanrenxue-match27-jsencrypt-random-rsa-purecompute.md` | 规则 38 实战验证（X.509 SPKI hex 公钥 + getRandomValues = JSEncrypt 随机 RSA → publicEncrypt 纯算；候选 X×公钥扫描实证明文常量：pubkey1+X=27 → 200、pubkey2 全 403；**沙箱跑通+结构像 ≠ 服务端接受**——_$v 依赖 document.all 分支致运行时常量算错，可纯算时转纯算不死磕沙箱）+ 反模式 27 五次实证（m=window["matchnumber"]=undefined 诱饵）+ 反模式 36 同族实证（429 限流）+ jq 桩 Proxy 缓存坑（缓存裸 obj 致二次访问缺失方法报错） |

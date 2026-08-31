@@ -972,6 +972,36 @@
       "strategy": "A 纯算还原（Node BigInt 模幂 + JSBN hex2b64）：token=RSA-1024 确定性密文，明文='/api/question/28'+now+'28$'+page，PKCS#1 填充 00 02||01×k||00（固定 0x01 无随机），N 由 36 个 28-bit limbs 重建（**从 JSVMP 字节码尾部数字字面量直读**，出现序≠数组序需对拍修正），编码=JSBN hex2b64（每 3 hex→2 b64 非标准 base64）；对拍 capture 样本逐字节一致后纯协议直连；**数据绑定 sessionid**（换会话数据不同需重算，答案 25808383→27673886）；站点限流：短窗口连续请求第 3 页起 403 token failed（单请求正常，非签名错），页间 3s+冷却+提交用 --answer 单请求解耦；提交 POST /a/28 表单编码 code=2 通关（答案 27673886）",
       "file": "yuanrenxue-match28-jsvmp-rsa-purecompute.md",
       "verifiedAt": "2026-08-31"
+    },
+    {
+      "id": "yuanrenxue-match27-jsencrypt-random-rsa-purecompute",
+      "title": "猿人学 match27 js混淆源码乱码：336KB 短名混淆内嵌 JSEncrypt 随机填充 RSA-1024（X.509 SPKI 公钥直读纯算）",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match27",
+        "api/question/27",
+        "api/getTime",
+        "JSEncrypt",
+        "RSA-1024",
+        "X.509",
+        "SPKI",
+        "30819f300d06092a864886f70d01",
+        "getRandomValues",
+        "PKCS#1 随机填充",
+        "publicEncrypt",
+        "X 值扫描",
+        "token failed",
+        "429 限流",
+        "数据绑定 sessionid",
+        "m undefined 诱饵",
+        "match_num",
+        "yuanrenxue"
+      ],
+      "strategy": "A 纯算还原（Node crypto.publicEncrypt + 内嵌 X.509 SPKI 公钥）：token=RSA-1024 PKCS#1 v1.5 随机填充密文（128B/172 字符标准 base64），明文=\"/api/question/27\"+now+\"27\"+page（X=N+window._$v=27 由候选 X×公钥扫描实证：pubkey1+X=27→200、pubkey2 全 403）；公钥=27.js 内嵌 SPKI hex（pubkey1，E=65537，indexOf 0x02818100 定位 N）；沙箱跑通+结构像≠服务端接受（_$v 依赖 document.all 分支致常量算错），可纯算时转纯算不死磕沙箱；m=window[\"matchnumber\"]=undefined 诱饵；429 限流页间 3s+冷却；末页 UA=yuanrenxue；数据绑定 sessionid；提交 POST /a/27 表单编码 code=2 通关（答案 26217857）",
+      "file": "yuanrenxue-match27-jsencrypt-random-rsa-purecompute.md",
+      "verifiedAt": "2026-09-01"
     }
   ]
 }
