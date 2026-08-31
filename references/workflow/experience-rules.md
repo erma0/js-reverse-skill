@@ -276,6 +276,28 @@ RSA_PKCS1_PADDING})` 直出，无需沙箱，token 每次不同属预期（服�
 环境分派诱饵分支、match25 的 realm 自检都不同。当算法可纯算（公钥/模数可提取）时**直接转纯算 + 扫描
 实证，不要死磕沙箱环境对齐**。
 
+### 39. JSVMP 业务逻辑反序列化经 eval 执行——RuyiTrace eval 分类日志直接落盘业务源码（match29 实证）
+
+vmpzl 系 VM 执行到业务层时通过 **eval 执行"反序列化生成的 JS 源码"**。RuyiTrace 的 **eval 分类日志**
+（`logs/eval/trace_eval_process_*.ndjson`）记录该 eval 的完整源码并落盘 `logs/eval/eval_<pid>_<seq>_eval-direct.js`，
+**绕开 LZ 压缩/字节码/VM 指令三层直接拿到业务逻辑源码**。用法与特征：
+
+1. **识别**：JSVMP 文件是 `eval((function(){...VM 编译器...})())` 包裹（页面脚本可能**全部 VM 化**，
+   match29 三脚本 _jquery/_common/29.js 各对应一个 eval 落盘文件）；尾部常有 `$fast_unpack("LZ.xxx")`
+   （自定义 LZ 压缩字节码）——有 eval 就有落盘，无需手工解压字节码。
+2. **定位**：grep eval 源码里的 `token` / `case 64`（vmpzl 编译产物里请求 data 构造常在 switch-case 中）
+   找参数拼接点，再逆变量赋值链。eval 源码变量名是 `_$`+随机（每次加载不同）但**结构稳定**——
+   token 拼接点在相邻 `case` 之间以字符串拼接形态固定出现（match29：`case 3` 与 `case 64`）。
+3. **判定算法可算性**：哈希函数体内有 rotl + 32 位加法 + 消息填充 = MD5/SHA 结构；标准 K 表十六进制/
+   十进制全搜不到 = **魔改**；配合 46 项 `typeof X==="..." && X.xxx` 环境探测 → 不可纯算，黑盒执行
+   （环境桩须让探测全 true：`Symbol.toStringTag` 补 `[object HTMLDocument]`/`[object Navigator]`，
+   `document.all.pgxDebug` 恒 falsy 保证 `_$v=0`）。
+4. **手写 LZ 解压/反编译字节码是死路**（反模式 37）：`LZ.` 前缀压缩 + WAFJ 魔数 + bit 流解压极易出
+   bug，eval 日志已把解压后的业务源码直接落盘，先查日志再动手。
+5. **页面自驱动翻页的 now 注入**（match26 同款再实证）：每次翻页前注入新的服务器时间再触发
+   `#pgxNext` click——页面自身走"getTime → 算 token → ajax"链路，天然复用会话内递增计数器；
+   沙箱必须跨页复用（token 材料含 counter，重建沙箱会让 counter 回初值）。
+
 ## 相关案例
 
 | 案例文件 | 关联点 |
@@ -300,3 +322,4 @@ RSA_PKCS1_PADDING})` 直出，无需沙箱，token 每次不同属预期（服�
 | `cases/yuanrenxue-match25-cfa-vm-blackbox-env-realm.md` | 规则 33 实战验证（环境桩必须在沙箱内执行：主 realm 定义 `win.window=globalThis` → self-reference 自检失败 → `_$VM=111` 分支 → 403 token failed；同输入双环境对比定位）+ 规则 34 实证（T 偏移矩阵 now±100s 全过 = 服务端不校验时间窗口，冻结 Date=now 即可，无需补偿）+ 反模式 34 实证 + IIFE 门禁坑（环境桩拆 browser-objects 顶层代码，check_code_quality 单函数上限） |
 | `cases/yuanrenxue-match28-jsvmp-rsa-purecompute.md` | 规则 35 实战验证（JSVMP 字节码 limbs 字面量直读 → 确定性 RSA-1024 纯算，无需跑 VM；固定 0x01 padding 对拍；limbs 出现序≠数组序）+ 规则 36 实证（数据绑定 sessionid：换会话数据完全不同必须重算，答案 25808383→27673886）+ 规则 37 实证（限流 403 token failed 单请求诊断法：第 3 页起 403 但单请求 200 = 频率墙；页间 3s+冷却+提交 --answer 解耦）+ 反模式 35/36 实证 + JSBN hex2b64 非标准编码 |
 | `cases/yuanrenxue-match27-jsencrypt-random-rsa-purecompute.md` | 规则 38 实战验证（X.509 SPKI hex 公钥 + getRandomValues = JSEncrypt 随机 RSA → publicEncrypt 纯算；候选 X×公钥扫描实证明文常量：pubkey1+X=27 → 200、pubkey2 全 403；**沙箱跑通+结构像 ≠ 服务端接受**——_$v 依赖 document.all 分支致运行时常量算错，可纯算时转纯算不死磕沙箱）+ 反模式 27 五次实证（m=window["matchnumber"]=undefined 诱饵）+ 反模式 36 同族实证（429 限流）+ jq 桩 Proxy 缓存坑（缓存裸 obj 致二次访问缺失方法报错） |
+| `cases/yuanrenxue-match29-vmpzl-eval-log-source.md` | 规则 39 实战验证（JSVMP 业务逻辑经 eval 反序列化执行 → RuyiTrace eval 分类日志落盘业务源码，绕开 LZ 压缩/字节码/VM 指令三层直读；eval 源码变量名 `_$`+随机但结构稳定，grep `token`/`case 64` 定位请求构造）+ 反模式 37 实证（手写 `LZ.` 前缀解压器是死路，先查 eval 日志）+ 反模式 27 再实证（m=window.matchnumber 诱饵）+ match26 同款实证（页面自驱动翻页注入新 now、jQuery 桩 `.add()` 必须有）+ 46 项环境探测桩全 true（Symbol.toStringTag 补 HTMLDocument/Navigator）+ Session 门禁字面识别再实证（`client.getPage(` 不算复用，须 `client.get/post(`） |

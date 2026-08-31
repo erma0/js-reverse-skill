@@ -1,6 +1,42 @@
 # CHANGELOG
 
-## 2.3.93 - 2026-09-01
+## 2.3.94 - 2026-09-01
+
+### 经验固化（match29 案例入库：vmpzl 三脚本全 VM 化 + RuyiTrace eval 日志直读业务源码 + 魔改 MD5 黑盒）
+
+match29（`/api/question/29`，js混淆源码乱码）通关（答案 27105688，code=2 exp=107）：页面
+`_jquery.js`/`_common.js`/`29.js` **三脚本全 vmpzl VM 化**（eval 包裹 + 尾部 `$fast_unpack("LZ.xxx")`
+自定义 LZ 压缩字节码 → WAFJ 魔数 → VM 执行）。token = **魔改 MD5**（标准 K 表十六进制/十进制全缺失 +
+46 项 `typeof X==="..." && X.xxx` 环境探测分派，不可纯算），材料 =
+`'/api/question/29' + now + (counter + _$v) + '()' + page`（counter 初值 28 随翻页递增、`_$v`=pgxDebug
+检测恒 0、page=min(5,max(1,p))）。
+
+- **决定性取证（规则 39 / 反模式 37）**：vmpzl 系 VM 业务层通过 **eval 执行反序列化生成的 JS 源码**，
+  RuyiTrace 的 **eval 分类日志**（`logs/eval/trace_eval_process_*.ndjson`）记录完整源码并落盘
+  `logs/eval/eval_<pid>_<seq>_eval-direct.js`——**绕开 LZ 压缩/字节码/VM 指令三层直接拿到业务逻辑**
+  （29.js 46KB → eval 源码 60KB，`token = _$hal8sh(path+now+(counter+_$v)+"()"+page)` 直接读出）。
+  grep eval 源码里的 `token`/`case 64` 定位请求 data 构造（vmpzl 产物请求构造在 switch-case 中）；
+  eval 源码变量名 `_$`+随机但**结构稳定**（相邻 case 间固定出现）。
+- **新案例 `cases/yuanrenxue-match29-vmpzl-eval-log-source.md`**：8 条可复用经验——① eval 日志落盘
+  直读源码（先查日志，勿手写 `LZ.` 解压器）；② vmpzl 三层包装特征（eval 包裹 + $fast_unpack + 字节码
+  eval 反序列化）；③ 46 项环境探测桩全 true（Symbol.toStringTag 补 HTMLDocument/Navigator、
+  document.all.pgxDebug 恒 falsy 保 `_$v=0`）；④ 页面自驱动翻页的 now 注入（每次翻页前注入新 getTime，
+  沙箱必须跨页复用保计数器递增）；⑤ jQuery 桩 `.add()` 必须有（match26 同款再实证）；⑥ m=undefined
+  诱饵（反模式 27 再实证）；⑦ 末页 UA=yuanrenxue；⑧ Session 门禁字面识别再实证（`client.getPage(` 不
+  算复用，须 `client.get/post(`）。
+- **规则 39（新）**：JSVMP 业务逻辑经 eval 反序列化执行 → RuyiTrace eval 分类日志落盘业务源码，绕开
+  三层直读；识别/定位/算法可算性判定/now 注入四步法。
+- **反模式 37（新）**：JSVMP 一上来就手写解压器/反编译字节码，而 eval 日志已落盘业务源码（match29
+  实证修 LZ 解压耗 3~4 轮；判定测试 = `case/ruyi-trace/logs/eval/` 是否有 `eval_*_eval-direct.js`）。
+  反模式实条 21 → 22（文档"封顶 20"提示已超，本次为新根因且与既有条目无重复，按编号顺延新增）。
+- **SKILL.md 四处补强**：① IDENTIFY 表 JSVMP 行补「先查 eval 分类日志落盘源码」捷径（置于 limbs 直读
+  之前）；② §8 TRACE_ANALYZE 开头补 eval 落盘核对与定位命令；③ 4.2 定向 trace 段补「JSVMP 采集后核对
+  logs/eval/」；④ IMPLEMENT 路径 B 页面自驱动翻页补「now 注入 + 沙箱跨页复用」细节（match29 实证）。
+- **ruyitrace-cheatsheet.md**：新增「§1.0 eval 源码落盘（JSVMP 破局捷径）」小节（落盘文件位置、用法、
+  多脚本全 VM 化对应多份落盘、指向规则 39/反模式 37/案例）。
+- **案例索引**：`cases/yuanrenxue-match-index.md` 加第 29 题行；`cases/index.json` 追加
+  `yuanrenxue-match29-vmpzl-eval-log-source`（46 → 47 条）。
+
 
 ### 经验固化（match27 案例入库：336KB 短名混淆内嵌 JSEncrypt 随机填充 RSA-1024 纯算 + X 值扫描实证 + 沙箱跑通≠服务端接受）
 

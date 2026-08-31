@@ -34,6 +34,22 @@
 
 > **cookie trace 无痕（无开关）**：cookie 读/写/拒绝/发送在 C++ 网络层 + Document 层插桩，一律传 `cx=nullptr`，不进 JS realm、不抓栈、不调 `JS_ClearPendingException`，`stack` 字段恒 `[]`，页面 JS（含 performance.now 时序检测）无从感知。两种来源都覆盖：HTTP `Set-Cookie`（`source:"http"`）与 `document.cookie=`（`source:"document.cookie"`）。无需任何开关；旧 `MOZ_DOM_COOKIE_TRACE_STACK` 已废弃删除。
 
+### 1.0 eval 源码落盘（JSVMP 破局捷径，match29 实证）
+
+**JSVMP（vmpzl 系）的 VM 执行到业务层时通过 eval 执行"反序列化生成的 JS 源码"——RuyiTrace 的 eval
+分类日志记录该 eval 的完整源码并落盘 `logs/eval/eval_<pid>_<seq>_eval-direct.js`**。这意味着对
+vmpzl 类混淆，**无需解 LZ 压缩、无需读字节码、无需逐 opcode 反编译**——落盘文件就是解混淆后的
+业务源码（match29 实证：46KB 的 29.js 对应 60KB 的 eval 源码，`token = 魔改MD5(path+now+(counter+_$v)+"()"+page)`
+直接读出）。
+
+- 自动采集默认产出该分类（`trace_eval_process_*.ndjson` + `eval/` 子目录落盘文件），无需额外开关；
+  `--import-after` 导入后核对 `case/ruyi-trace/logs/eval/` 是否落盘目标脚本对应的文件。
+- 用法：先 grep eval 源码里的 `token` / `case 64`（vmpzl 编译产物里请求 data 构造在 switch-case 中）
+  找参数拼接点，再逆变量赋值链；eval 源码变量名 `_$`+随机但**结构稳定**（相邻 `case` 间固定出现）。
+- 页面多脚本全 VM 化（如 `_jquery.js`/`_common.js`/`29.js` 全部 eval 包裹）时，每个脚本对应一份
+  eval 落盘文件（按 seq 区分，三份大小分别为 370KB/48KB/60KB 级）。
+- 详见规则 39 / 反模式 37 / `cases/yuanrenxue-match29-vmpzl-eval-log-source.md`。
+
 ### 1.1 JS 异常 trace（exception）
 
 > GUI 启动默认注入 `TRACE=1` / `LIMIT=0` / `FLUSH_INTERVAL=1`（见 §0）；下表「默认」为内核默认。脚本方式需要异常证据时显式开：`--trace-env MOZ_DOM_EXCEPTION_TRACE=1 --trace-env MOZ_DOM_EXCEPTION_LIMIT=0 --trace-env MOZ_DOM_EXCEPTION_FLUSH_INTERVAL=1`。

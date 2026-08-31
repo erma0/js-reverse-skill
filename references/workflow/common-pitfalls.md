@@ -498,6 +498,31 @@ match27 算法本身没变（同一 RSA），错的是**喂给算法的数值常
 
 ---
 
+## 反模式 37：JSVMP 一上来就手写解压器/反编译字节码，而 RuyiTrace eval 日志已落盘业务源码（match29 实证）
+
+**形态**：识别出 JSVMP（eval 包裹 + 字节码串）后，第一反应是"先解出字节码看看"——对 `LZ.` 前缀
+压缩（`$fast_unpack("LZ.xxx")`，base64 字母表标准但加 LZ 头）手工复刻 bit 流 + 动态码宽解压器，
+或逐 opcode 反编译，耗 3~4 轮仍拿不到可读逻辑。
+
+**为什么容易踩**：字节码确实有可解性（match28 的 limbs 直读纯算先例让人以为"解字节码"是正道）；
+且 AI 不知道 RuyiTrace 的 eval 分类日志（`logs/eval/trace_eval_process_*.ndjson`）会把 VM 反序列化
+eval 的**完整业务源码**落盘成 `eval/eval_<pid>_<seq>_eval-direct.js`——对 vmpzl 系 VM，业务逻辑层
+通过 eval 执行反序列化生成的 JS 源码，落盘文件直接就是解混淆后的源码（match29 实证：46KB 的 29.js
+对应 60KB 的 eval 源码，`token = 魔改MD5(path + now + (counter + _$v) + "()" + page)` 直接读出）。
+
+**修复纪律**：
+1. **JSVMP 判定后先查 eval 日志**：`ls case/ruyi-trace/logs/eval/`，有 `eval_*_eval-direct.js` 直接读，
+   不再手工解压/反编译——LZ 解压、WAFJ 魔数、字节码三层全部跳过。
+2. **eval 源码定位**：grep `token` / `case 64`（vmpzl 编译产物里请求 data 构造在 switch-case 中），
+   再逆变量赋值链；变量名 `_$`+随机但结构稳定，拼接点在相邻 `case` 间固定。
+3. 只有 eval 日志确实缺失（取证未开对应分类）时才考虑手工解压，且优先用浏览器侧 trace 的
+   `String.charCodeAt` 调用序列辅助校验解压正确性。
+
+**判定测试**：`case/ruyi-trace/logs/eval/` 下是否存在目标脚本对应的 `eval_*_eval-direct.js`？
+存在 → 直接读源码，禁止继续手写解压器。不存在 → 回到正常 JSVMP 黑盒/纯算决策线。
+
+---
+
 ## 已合并条目指针（旧编号 → 主条目）
 
 同根因条目已并入主条目，旧编号保留以便历史引用跳转：
