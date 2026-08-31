@@ -66,6 +66,12 @@ function parseArgs(argv) {
     signalPolicy: 'strict',
     flushTimeout: 45000,
     flushQuiet: 8000,
+    userJs: '',
+    prefs: [],
+    gate: null,
+    gateAfter: 0,
+    gateDuration: 0,
+    maxLogBytes: 0,
     dryRun: false,
     importAfter: false,
     json: false,
@@ -123,6 +129,31 @@ function parseArgs(argv) {
       if (!Number.isFinite(v) || v < 0) throw new Error('--flush-quiet 需为非负毫秒数');
       args.flushQuiet = v;
     }
+    else if (a === '--user-js') args.userJs = needVal('user.js 文件路径（整份写入 trace profile）');
+    else if (a === '--pref') {
+      const v = needVal('KEY=VALUE，如 javascript.options.blinterp=false');
+      if (!v.includes('=')) throw new Error(`--pref 需要 KEY=VALUE 形式，收到：${v}`);
+      args.prefs.push(v);
+    }
+    else if (a === '--gate') {
+      // 省略取值时用默认控制文件（输出目录下 trace-gate.on），传值则用指定路径
+      args.gate = nextVal('') || 'default';
+    }
+    else if (a === '--gate-after') {
+      const v = Number(needVal('毫秒，如 8000'));
+      if (!Number.isFinite(v) || v < 0) throw new Error('--gate-after 需为非负毫秒数');
+      args.gateAfter = v;
+    }
+    else if (a === '--gate-duration') {
+      const v = Number(needVal('毫秒，如 15000'));
+      if (!Number.isFinite(v) || v < 0) throw new Error('--gate-duration 需为非负毫秒数');
+      args.gateDuration = v;
+    }
+    else if (a === '--max-log-bytes') {
+      const v = Number(needVal('字节数，如 2147483648（2GB）'));
+      if (!Number.isFinite(v) || v < 0) throw new Error('--max-log-bytes 需为非负字节数');
+      args.maxLogBytes = v;
+    }
     else if (a === '--dry-run') args.dryRun = true;
     else if (a === '--import-after') args.importAfter = true;
     else if (a === '--json') args.json = true;
@@ -142,16 +173,86 @@ function parseArgs(argv) {
   assertTraceSignals(args.endSignals, 'end-signal');
   if (args.evidenceSignals.length) args.targetSignals = args.evidenceSignals.slice();
   args.traceEnvPairs = parseTraceEnv(args.traceEnv);
+  if ((args.gateAfter || args.gateDuration) && !args.gate) {
+    throw new Error('--gate-after / --gate-duration 需配合 --gate 使用（未启用闸门时无意义）');
+  }
+  args.prefPairs = parsePrefs(args.prefs);
   return args;
 }
 
-// 定向 trace 开关透传：仅允许 MOZ_DOM_ 前缀（RuyiTrace 内核 trace 配置命名空间），
+// user.js pref 透传：Firefox 层配置（JIT/tier-pin、代理 prefs 等）没有对应的 MOZ_DOM_ 环境变量，
+// 只能写进 profile 的 user.js。--pref 与 --user-js 可并用，--pref 覆盖同名 key 后追加。
+function parsePrefs(pairs) {
+  const out = [];
+  for (const item of (pairs || [])) {
+    const eq = String(item).indexOf('=');
+    const key = String(item).slice(0, eq).trim();
+    const value = String(item).slice(eq + 1).trim();
+    if (!key || eq <= 0) throw new Error(`--pref 需要 KEY=VALUE 形式，收到：${item}`);
+    out.push({ key, value });
+  }
+  return out;
+}
+
+// 把 user.js 内容合并进 trace profile：同 key 覆盖、其余保留，避免复用 profile 时丢掉既有 prefs。
+// 返回实际写入的 pref 行数（含 --pref 追加项），供计划与报告展示。
+function writeUserPrefs(profileDir, args) {
+  let base = '';
+  if (args.userJs) {
+    const src = path.resolve(args.userJs);
+    if (!exists(src)) throw new Error(`--user-js 文件不存在：${src}`);
+    base = fs.readFileSync(src, 'utf8');
+  }
+  const lines = base.split(/\r?\n/);
+  const prefRe = /^user_pref\(\s*"([^"]+)"\s*,\s*(.*?)\s*\)\s*;?\s*$/;
+  for (const { key, value } of args.prefPairs || []) {
+    const literal = /^-?\d+(\.\d+)?$/.test(value) || value === 'true' || value === 'false' ? value : `"${value.replace(/"/g, '\\"')}"`;
+    const line = `user_pref("${key}", ${literal});`;
+    const idx = lines.findIndex((l) => { const m = l.match(prefRe); return m && m[1] === key; });
+    if (idx >= 0) lines[idx] = line; else lines.push(line);
+  }
+  const content = lines.filter((l) => l.trim()).join('\n') + '\n';
+  ensureDir(profileDir);
+  fs.writeFileSync(path.join(profileDir, 'user.js'), content, 'utf8');
+  return (content.match(/user_pref\(/g) || []).length;
+}
+
+// 递归统计目录体积（用于采集期日志熔断）。读不到就当 0，不因统计失败中断采集。
+function dirSizeBytes(dir) {
+  let total = 0;
+  const walk = (d) => {
+    let entries = [];
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const ent of entries) {
+      const p = path.join(d, ent.name);
+      try {
+        if (ent.isDirectory()) walk(p);
+        else total += fs.statSync(p).size;
+      } catch { /* 文件被并发写入/删除时跳过 */ }
+    }
+  };
+  walk(dir);
+  return total;
+}
+
+function formatBytes(n) {
+  if (n >= 1073741824) return `${(n / 1073741824).toFixed(2)} GB`;
+  if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${n} B`;
+}
+
+// 定向 trace 开关透传：允许 MOZ_DOM_（RuyiTrace 内核 trace 配置命名空间）与
+// JIT_OPTION_（Firefox JIT 调优/tier-pin，如 baselineInterpreterWarmUpThreshold）两类前缀，
 // 不允许覆盖脚本自身管理的 5 个 key（对应专用参数 --limit / --ptype / 输出路径），
 // 避免采集计划与实际环境变量漂移。输出文件按锚点自动派生：设 MOZ_DOM_TRACE_FILE 后，
 // jscall/cookie/eval 等模块日志落在同目录子文件夹，无需单独传 *_TRACE_FILE。
 const SCRIPT_MANAGED_TRACE_ENV = new Set([
   'MOZ_DOM_TRACE', 'MOZ_DOM_TRACE_FILE', 'MOZ_DOM_TRACE_LIMIT',
   'MOZ_DOM_TRACE_PTYPE', 'MOZ_DISABLE_LAUNCHER_PROCESS',
+  // 闸门由 --gate 自管：脚本要在运行中按 --gate-after / --gate-duration 创建/删除控制文件，
+  // 再用 --trace-env 传一个静态路径会让脚本与实际环境漂移（浏览器只读 env，不管文件是谁建的）。
+  'MOZ_DOM_TRACE_GATE',
 ]);
 
 function parseTraceEnv(pairs) {
@@ -162,8 +263,10 @@ function parseTraceEnv(pairs) {
     if (eq <= 0) throw new Error(`--trace-env 需要 KEY=VALUE 形式，收到：${item}`);
     const key = item.slice(0, eq).trim();
     const value = item.slice(eq + 1).trim();
-    if (!/^MOZ_DOM_[A-Z0-9_]+$/.test(key)) throw new Error(`--trace-env 只接受 MOZ_DOM_ 前缀的环境变量：${key}（完整开关清单见 references/tooling/ruyitrace-cheatsheet.md）`);
-    if (SCRIPT_MANAGED_TRACE_ENV.has(key)) throw new Error(`--trace-env 不允许覆盖脚本管理的 ${key}：行数上限用 --limit、进程类型用 --ptype、输出路径由 --case-dir 决定`);
+    // MOZ_DOM_ 一律全大写；JIT_OPTION_ 沿用 Firefox 的驼峰名（baselineInterpreterWarmUpThreshold）
+    const keyOk = /^MOZ_DOM_[A-Z0-9_]+$/.test(key) || /^JIT_OPTION_[A-Za-z0-9_]+$/.test(key);
+    if (!keyOk) throw new Error(`--trace-env 只接受 MOZ_DOM_（RuyiTrace trace 开关，全大写）或 JIT_OPTION_（Firefox JIT 调优/tier-pin，驼峰）前缀的环境变量：${key}（完整开关清单见 references/tooling/ruyitrace-cheatsheet.md）`);
+    if (SCRIPT_MANAGED_TRACE_ENV.has(key)) throw new Error(`--trace-env 不允许覆盖脚本管理的 ${key}：行数上限用 --limit、进程类型用 --ptype、输出路径由 --case-dir 决定、运行时闸门用 --gate`);
     out[key] = value;
   }
   return out;
@@ -200,6 +303,22 @@ function usage() {
     --trace-env MOZ_DOM_JSCALL_TRACE=1 --trace-env MOZ_DOM_JSCALL_SCRIPT_URL=target.js --trace-env MOZ_DOM_JSCALL_DETAIL_SCRIPT_URL=target.js --trace-env MOZ_DOM_JSCALL_SHALLOW=1 --trace-env MOZ_DOM_JSCALL_DEEP_LONG_STR=512
     # 还原 jsvmp 指令流（autodetect；重混淆站点加 MIN_BYTECODE=128 MIN_SPAN=200）：
     --trace-env MOZ_DOM_JSVMP_TRACE=1 --trace-env "MOZ_DOM_JSVMP_SCRIPT_URL=challenges.example.com" --trace-env MOZ_DOM_JSVMP_AUTODETECT=1
+--user-js <file> / --pref KEY=VALUE（后者可多次）：把 user.js 合并写入 trace profile，用于没有对应环境变量的
+  Firefox 层配置。典型用途是 tier-pin（opcode/vm_step 要全程不断流必须关 JIT，否则热函数 tier-up 后进入
+  hook 盲区、轨迹断流）与代理 prefs：
+    --pref javascript.options.blinterp=false --pref javascript.options.baselinejit=false --pref javascript.options.ion=false
+  --user-js 为整份文件（同 key 被 --pref 覆盖后追加），--pref 适合只改个别项。注意 blinterp 才是
+  baseline interpreter 的正确 pref 名（写 baseline_interpreter 不生效，match24 实证）。
+--gate [控制文件]（省略取值时落到输出目录下 trace-gate.on）：运行时启停闸门，只录关心的窗口，避免把整个
+  页面加载期噪声一起录进来（带栈 opcode 全录是 GB 级）。配套：
+    --gate-after <ms>（默认 0）：启动后多久开闸，给页面加载/登录留静默期。
+    --gate-duration <ms>（默认 0=开到采集结束）：开窗多久后自动关闸。
+  例（加载完再等 8s 开窗录 15s）：--gate --gate-after 8000 --gate-duration 15000 --duration 60
+  开窗期间需要交互（翻页/触发验证码）时用 ruyipage 挂到本脚本启动的浏览器上驱动，
+  见 references/tooling/ruyi-tooling.md「闸门窗口 + 外部驱动采集」。
+--max-log-bytes <字节数>（默认 0=不限）：采集期每 1.5s 统计日志目录体积，达阈值立即关浏览器收尾。
+  带栈 opcode（OPCODE_STACK_FULL）务必设硬保险，实测可达 2~6.6GB（match24）；OPCODE_LIMIT 是条数上限，
+  与字节上限互补——单条深序列化时条数没到、盘先满。
 --cookie "name=value"（可多次，或 "a=1; b=2" 分号分隔）：启动前向 trace profile 的 cookies.sqlite 预写 Cookie，用于需预置登录态/会话的页面取 Business 完整链路。
 --cookie-domain <domain>：--cookie 写入的目标域名（如 .bilibili.com），缺省取 --url 主机（含点前缀）。
 `;
@@ -261,6 +380,8 @@ function buildPlan(args, trace) {
   const outDir = path.resolve(args.outDir || path.join(caseSubdir, 'ruyi-trace', 'logs'));
   const profileDir = path.resolve(args.profileDir || path.join(caseSubdir, 'tmp', 'ruyitrace-profile'));
   const traceFile = path.join(outDir, `trace-${timestamp()}.ndjson`);
+  // 闸门控制文件：--gate 未传值时落在输出目录下，避免与本次采集的日志混在一起难以分辨
+  const gateFile = args.gate ? path.resolve(args.gate === 'default' ? path.join(outDir, 'trace-gate.on') : args.gate) : '';
   const firefoxArgs = ['-no-remote', '-new-instance', '-profile', profileDir];
   if (args.url) firefoxArgs.push(args.url);
   return {
@@ -268,6 +389,14 @@ function buildPlan(args, trace) {
     outDir,
     profileDir,
     traceFile,
+    gateFile,
+    gateAfterMs: args.gateAfter || 0,
+    gateDurationMs: args.gateDuration || 0,
+    maxLogBytes: args.maxLogBytes || 0,
+    userPrefs: {
+      file: args.userJs ? path.resolve(args.userJs) : '',
+      overrides: (args.prefPairs || []).map((p) => `${p.key}=${p.value}`),
+    },
     firefoxExe: trace.firefoxExe,
     firefoxArgs,
     presetCookies: {
@@ -280,6 +409,7 @@ function buildPlan(args, trace) {
       MOZ_DOM_TRACE_LIMIT: String(args.limit),
       MOZ_DISABLE_LAUNCHER_PROCESS: '1',
       ...(args.ptype ? { MOZ_DOM_TRACE_PTYPE: args.ptype } : {}),
+      ...(gateFile ? { MOZ_DOM_TRACE_GATE: gateFile } : {}),
       ...(args.traceEnvPairs || {}),
     },
   };
@@ -547,15 +677,51 @@ async function runSelfTest() {
     if (!missed || missed.imported) throw new Error('未导入文件应标记为未导入');
     if (missed.processType !== 'content') throw new Error('候选诊断应带出 process_type');
     if (cands.some((c) => c.lines < 0)) throw new Error('候选诊断行数不应为负');
-    // 定向 trace 开关透传：合法 MOZ_DOM_ key、非法前缀、脚本托管 key 三种路径
-    const envParsed = parseTraceEnv(['MOZ_DOM_JSCALL_TRACE=1', 'MOZ_DOM_JSCALL_SCRIPT_URL=a.js;b.js']);
-    if (envParsed.MOZ_DOM_JSCALL_TRACE !== '1' || envParsed.MOZ_DOM_JSCALL_SCRIPT_URL !== 'a.js;b.js') throw new Error('--trace-env 应解析 KEY=VALUE');
+    // 定向 trace 开关透传：合法 MOZ_DOM_ 与 JIT_OPTION_ key、非法前缀、脚本托管 key 三种路径
+    const envParsed = parseTraceEnv(['MOZ_DOM_JSCALL_TRACE=1', 'MOZ_DOM_JSCALL_SCRIPT_URL=a.js;b.js', 'JIT_OPTION_baselineInterpreterWarmUpThreshold=0']);
+    if (envParsed.MOZ_DOM_JSCALL_TRACE !== '1' || envParsed.MOZ_DOM_JSCALL_SCRIPT_URL !== 'a.js;b.js' || envParsed.JIT_OPTION_baselineInterpreterWarmUpThreshold !== '0') throw new Error('--trace-env 应解析 KEY=VALUE');
     let threw = false;
     try { parseTraceEnv(['MOZ_DOM_JSVMP_TRACE=1', 'MOZ_OTHER=1']); } catch { threw = true; }
-    if (!threw) throw new Error('非 MOZ_DOM_ 前缀应被拒绝');
+    if (!threw) throw new Error('非 MOZ_DOM_/JIT_OPTION_ 前缀应被拒绝');
     threw = false;
     try { parseTraceEnv(['MOZ_DOM_TRACE=0']); } catch { threw = true; }
     if (!threw) throw new Error('覆盖脚本管理的 key 应被拒绝');
+    threw = false;
+    try { parseTraceEnv(['MOZ_DOM_TRACE_GATE=C:\\out\\trace.on']); } catch { threw = true; }
+    if (!threw) throw new Error('MOZ_DOM_TRACE_GATE 由 --gate 自管，--trace-env 应拒绝');
+    threw = false;
+    try { parsePrefs(['no-equals-sign']); } catch { threw = true; }
+    if (!threw) throw new Error('--pref 缺等号应被拒绝');
+    // user.js 合并写入：同 key 覆盖、其余保留（复用 profile 时不丢既有 prefs）
+    const prefDir = path.join(root, 'profile');
+    fs.mkdirSync(prefDir, { recursive: true });
+    const userJsSrc = path.join(root, 'user-src.js');
+    fs.writeFileSync(userJsSrc, 'user_pref("a", 1);\nuser_pref("keep.me", true);\n', 'utf8');
+    const prefCount = writeUserPrefs(prefDir, {
+      userJs: userJsSrc,
+      prefPairs: parsePrefs(['javascript.options.blinterp=false', 'a=2', 'network.proxy.socks=127.0.0.1']),
+    });
+    const written = fs.readFileSync(path.join(prefDir, 'user.js'), 'utf8');
+    if (prefCount !== 4) throw new Error(`user.js 应写入 4 条 pref，实际 ${prefCount}`);
+    if (!/user_pref\("a", 2\);/.test(written)) throw new Error('--pref 应覆盖 --user-js 里的同名 key');
+    if (!/user_pref\("keep\.me", true\);/.test(written)) throw new Error('--user-js 里未被覆盖的 pref 应保留');
+    if (!/user_pref\("javascript\.options\.blinterp", false\);/.test(written)) throw new Error('布尔值应写成字面量而非字符串');
+    if (!/user_pref\("network\.proxy\.socks", "127\.0\.0\.1"\);/.test(written)) throw new Error('字符串值应加引号');
+    // 参数联动：未启用闸门却给闸门时间参数应报错
+    threw = false;
+    try { parseArgs(['node', 'x', '--gate-after', '5000']); } catch { threw = true; }
+    if (!threw) throw new Error('--gate-after 未配 --gate 应被拒绝');
+    const gateDefault = parseArgs(['node', 'x', '--gate']);
+    if (gateDefault.gate !== 'default') throw new Error('--gate 省略取值时应落到默认控制文件');
+    const gateCustom = parseArgs(['node', 'x', '--gate', 'C:\\out\\trace.on', '--gate-duration', '15000']);
+    if (gateCustom.gate !== 'C:\\out\\trace.on' || gateCustom.gateDuration !== 15000) throw new Error('--gate 应支持自定义控制文件路径与开窗时长');
+    // 体积统计：目录递归（含子目录），用于采集期日志熔断
+    const capDir = path.join(root, 'cap', 'jscall');
+    fs.mkdirSync(capDir, { recursive: true });
+    fs.writeFileSync(path.join(capDir, 'a.jsonl'), 'x'.repeat(2048), 'utf8');
+    fs.writeFileSync(path.join(root, 'cap', 'b.ndjson'), 'y'.repeat(1024), 'utf8');
+    if (dirSizeBytes(path.join(root, 'cap')) !== 3072) throw new Error('dirSizeBytes 应递归统计子目录体积');
+    if (formatBytes(2147483648) !== '2.00 GB') throw new Error('formatBytes 应按 GB 展示');
     // 日志刷盘等待：静默期内新出现的日志不得被漏掉（match17 实测：3 个真正的 tab 进程日志
     // 在浏览器 kill 后才刷盘，旧实现“一轮稳定即返回”只收进 823B 空壳）
     const flushDir = path.join(root, 'flush', 'domtrace');
@@ -577,7 +743,8 @@ async function runSelfTest() {
     const jscallDir = path.join(root, 'jscall');
     fs.mkdirSync(jscallDir, { recursive: true });
     fs.writeFileSync(path.join(jscallDir, 'trace_jscall_process_1.jsonl'), '{"kind":"jscall"}\n', 'utf8');
-    const walkAll = walkNdjson(root).filter((f) => !/[\\/]flush[\\/]/.test(f));
+    // cap/ 是体积统计用例造的临时目录，不是本断言的计数对象
+    const walkAll = walkNdjson(root).filter((f) => !/[\\/](flush|cap)[\\/]/.test(f));
     if (walkAll.length !== 5) throw new Error('walkNdjson 应匹配 .ndjson 与 .jsonl');
     // 参数报错精细化：缺值 / 非法枚举 / 拼错参数名各给出定向提示，不再回落全量 usage
     threw = '';
@@ -860,8 +1027,13 @@ function writePresetCookies(args, profileDir, url) {
 async function capture(args, plan) {
   ensureDir(plan.outDir);
   ensureDir(plan.profileDir);
+  const prefCount = (args.userJs || (args.prefPairs || []).length) ? writeUserPrefs(plan.profileDir, args) : 0;
   writePresetCookies(args, plan.profileDir, args.url);
   const startedAt = Date.now();
+  // 闸门：启动前确保控制文件不存在 → 浏览器启动即处于暂停态（加载期噪声一条不写）
+  if (plan.gateFile) {
+    try { fs.unlinkSync(plan.gateFile); } catch { /* 文件不存在即已暂停态 */ }
+  }
   const child = spawn(plan.firefoxExe, plan.firefoxArgs, {
     env: { ...process.env, ...plan.env },
     stdio: 'ignore',
@@ -881,6 +1053,10 @@ async function capture(args, plan) {
     endReason: 'duration',
     startedAt: new Date(startedAt).toISOString(),
     collectionDeadlineAt: new Date(startedAt + args.duration * 1000).toISOString(),
+    userPrefCount: prefCount,
+    gate: plan.gateFile
+      ? { file: plan.gateFile, afterMs: plan.gateAfterMs, durationMs: plan.gateDurationMs, opened: false, closedAt: null }
+      : null,
   };
   child.on('error', (err) => { result.launchError = err.message || String(err); });
   try {
@@ -892,11 +1068,35 @@ async function capture(args, plan) {
     let everSeen = false;
     const signalState = { offsets: new Map(), carry: new Map(), observed: new Set() };
     while (Date.now() < deadline) {
+      const elapsed = Date.now() - startedAt;
       const currentLogs = mainTraceFiles(listNdjsonFiles(plan.outDir, startedAt));
       if (args.endSignals.length && scanSignalsIncremental(currentLogs, args.endSignals, signalState)) {
         result.endReason = 'end-signal-observed';
         console.log('[capture] 已观察到全部 end-signal，开始收尾');
         break;
+      }
+      // 闸门状态机：after 到点开闸（删除文件=关、创建文件=开），duration 到点关闸
+      if (result.gate && !result.gate.opened && elapsed >= plan.gateAfterMs) {
+        fs.writeFileSync(plan.gateFile, String(startedAt), 'utf8');
+        result.gate.opened = true;
+        result.gate.openedAtMs = elapsed;
+        console.log(`[capture] 闸门已开启（启动后 ${Math.round(elapsed / 1000)}s）：${plan.gateFile}`);
+      } else if (result.gate && result.gate.opened && !result.gate.closedAt
+        && plan.gateDurationMs > 0 && elapsed >= plan.gateAfterMs + plan.gateDurationMs) {
+        try { fs.unlinkSync(plan.gateFile); } catch { /* 已被外部删除则忽略 */ }
+        result.gate.closedAt = new Date().toISOString();
+        console.log(`[capture] 闸门已关闭（开窗 ${Math.round(plan.gateDurationMs / 1000)}s），后续不再落盘`);
+      }
+      // 体积熔断：STACK_FULL/大 opcode 窗口几秒就能写出 GB 级日志，靠事后发现已经晚了
+      if (plan.maxLogBytes > 0) {
+        const size = dirSizeBytes(plan.outDir);
+        result.logBytes = size;
+        if (size >= plan.maxLogBytes) {
+          result.endReason = 'log-size-cap';
+          result.logSizeCapped = `${formatBytes(size)} ≥ 阈值 ${formatBytes(plan.maxLogBytes)}`;
+          console.log(`[capture] 日志体积达 ${result.logSizeCapped}，立即结束采集并关闭浏览器`);
+          break;
+        }
       }
       const alive = await kernelFirefoxAlive(plan.firefoxExe);
       if (alive !== null) {
@@ -912,7 +1112,12 @@ async function capture(args, plan) {
       await wait(pollMs);
     }
     if (Date.now() >= deadline && result.endReason === 'duration') result.endReason = 'duration-timeout';
+    if (!plan.maxLogBytes && !result.logBytes) result.logBytes = dirSizeBytes(plan.outDir);
   } finally {
+    // 收尾一律删掉闸门控制文件：残留会让下一次共用同一控制文件的采集启动时直接开闸
+    if (plan.gateFile) {
+      try { fs.unlinkSync(plan.gateFile); } catch { /* 已删除则忽略 */ }
+    }
     // 采集结束（成功或异常）一律主动关闭浏览器进程树，避免残留进程锁住 profile。
     // 注意：spawn 的 launcher PID 可能在采集期间自己退出（Firefox 155 重 fork 主进程），
     // 不能因 child 已退出就跳过 kill —— 真实浏览器主进程/子进程可能仍存活。
@@ -1059,6 +1264,19 @@ function renderMarkdown(obj) {
   }
   if (args.evidenceSignals.length) lines.push(`- evidence-signal：${args.evidenceSignals.join('、')}（策略 ${args.signalPolicy}）`);
   if (args.endSignals.length) lines.push(`- end-signal：${args.endSignals.join('、')}`);
+  if (plan.gateFile) {
+    const gate = result.gate || {};
+    lines.push(`- 运行时闸门：${plan.gateFile}（启动后 ${Math.round((plan.gateAfterMs || 0) / 1000)}s 开闸${plan.gateDurationMs ? `，开窗 ${Math.round(plan.gateDurationMs / 1000)}s 后自动关闸` : '，开到采集结束'}）`);
+    if (result.launched && (result.endReason !== 'duration' || gate.opened)) {
+      lines.push(`  - 闸门实际状态：${gate.opened ? `已于启动后 ${Math.round((gate.openedAtMs || 0) / 1000)}s 开闸` : '未开闸'}${gate.closedAt ? `，${gate.closedAt} 关闸` : ''}`);
+    }
+  }
+  if (typeof plan.maxLogBytes === 'number' && plan.maxLogBytes > 0) {
+    lines.push(`- 日志体积熔断：${formatBytes(plan.maxLogBytes)}${result.logSizeCapped ? `（已触发：${result.logSizeCapped}）` : ''}`);
+  }
+  if (plan.userPrefs && (plan.userPrefs.file || plan.userPrefs.overrides.length)) {
+    lines.push(`- profile user.js：${plan.userPrefs.file ? `基准 ${plan.userPrefs.file}` : '（无基准文件）'}${plan.userPrefs.overrides.length ? ` + 覆盖 ${plan.userPrefs.overrides.join('，')}` : ''}${typeof result.userPrefCount === 'number' ? `，共写入 ${result.userPrefCount} 条 pref` : ''}`);
+  }
   lines.push(`- DOM trace 行数上限：${args.limit}`);
   if (plan.presetCookies && plan.presetCookies.count) {
     lines.push(`- 预置 Cookie：${plan.presetCookies.count} 条（domain=${plan.presetCookies.domain || '<缺省取url主机>'}）`);
@@ -1082,6 +1300,7 @@ function renderMarkdown(obj) {
   }
   lines.push('', '## 捕获结果');
   if (result.launchError) lines.push(`- 启动错误：${result.launchError}`);
+  if (typeof result.logBytes === 'number') lines.push(`- 日志总体积：${formatBytes(result.logBytes)}`);
   lines.push(`- 是否已启动：${result.launched ? '是' : '否'}`);
   if (result.exitedEarly) lines.push('- 浏览器在 duration 前已被关闭/退出，采集提前结束（NDJSON 日志保留，需结合结束原因判断是否为用户正常结束）');
   if (result.pid) lines.push(`- 进程 PID：${result.pid}`);
