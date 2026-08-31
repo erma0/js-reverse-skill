@@ -20,7 +20,7 @@ description: >
 | GATE-2 证据 | `node scripts/check_evidence.js --case-dir <project-root> --url <目标> --markdown` | 退出码 0 |
 | 取证前速查 | `node scripts/search_cases.js --domain <域名> --signal <信号>` | 提取终态接口/坑点校准参数 |
 | Step 1 网络取证 | `python scripts/forensic_ruyipage.py --url <目标> --targets <终态接口> --markdown`（时间参数一律秒；`--targets` 只写唯一子串，优先带 `?` 参数片段如 `page=1`，避免误命中静态资源，反模式 22） | 终态 2xx + capture.json 落盘 + `target-hits.json` 的 url 就是目标接口 |
-| Step 2 trace | `node scripts/capture_ruyitrace_log.js --url <目标> --evidence-signal <writer写入点> --import-after --markdown`（结束后核对 `case/ruyi-trace/logs/domtrace/` 各文件体积，明显大于摘要行数说明有大进程日志漏导，用 `import_ruyitrace_log.js --input <file>` 合并） | NDJSON + 摘要"合并文件数"与 domtrace 实际文件数一致 + trace 门禁退出码 0 |
+| Step 2 trace | `node scripts/capture_ruyitrace_log.js --url <目标> --evidence-signal <writer写入点> --import-after --markdown`（结束后核对 `case/ruyi-trace/logs/domtrace/` 各文件体积，明显大于摘要行数说明有大进程日志漏导，用 `import_ruyitrace_log.js --input <file>` 合并；带栈 opcode / 交互窗口采集追加 `--gate --gate-after <ms> --gate-duration <ms> --max-log-bytes <n>`，tier-pin 用 `--pref javascript.options.blinterp=false` 等三层 pref，配方见 ruyi-tooling.md「闸门窗口 + 外部驱动采集」） | NDJSON + 摘要"合并文件数"与 domtrace 实际文件数一致 + trace 门禁退出码 0 |
 | 证据检索 | `search_trace.js --keyword <kw>` / `search_js.js --file <js> --keyword <kw>` | 执行输出的 [WARN]/[STATE] 提示 |
 | 运行混淆 JS | `node scripts/run_with_trace.js --target <js> --entry <fn> --timeout 5000`（默认桩不足时 `--env-module <文件>` 注入自定义环境模块，自动 minimal bootstrap） | 禁手写 vm runner |
 | 混淆反混淆 | `node assets/ast-patterns/scripts/detect-patterns.js <js>` → `run-pipeline.js` | 按 README 分层执行 |
@@ -341,6 +341,9 @@ node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-roo
 #（jscall 收窄、detail 真值、opcode/vm_step、WS 帧）从源头收窄，先判题型再选最小开关组合；
 # 场景组合表与收窄纪律见 references/workflow/trace-flow.md「定向 trace 策略」，完整开关手册见
 # references/tooling/ruyitrace-cheatsheet.md。默认全量采集仍是首轮与出口门禁基准。
+# 带栈 opcode（STACK_FULL）必配：--gate --gate-after <ms> --gate-duration <ms>（只录交互窗口，防 GB 级日志）
+# + --max-log-bytes <n>（体积硬保险）+ --pref javascript.options.blinterp=false 等三层 pref（tier-pin，
+# 否则 tier=jit 的 opcode 记录无栈值），配方见 ruyi-tooling.md「闸门窗口 + 外部驱动采集」。
 # 其余参数细则（--duration 默认 120 秒与收尾刷盘、--signal-policy advisory、--cookie/--cookie-domain 写入 trace profile
 # cookies.sqlite 且 --input 导入时忽略、endReason 语义）见 scripts/README.md 与
 # references/workflow/trace-flow.md，此处不重复。

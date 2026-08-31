@@ -807,65 +807,84 @@
       "file": "yuanrenxue-match21-sm3-variant-decoy-branch.md",
       "verifiedAt": "2026-08-29"
     },
-{
-        "id": "yuanrenxue-match22-openssl-salted-alphabet-branch",
-        "title": "猿人学 match22 魔改标准算法：OpenSSL Salted + base64 字母表环境分支 + TLS 指纹白名单 + [Unforgeable] 沙箱探针",
-        "domains": [
-            "match.yuanrenxue.cn"
-        ],
-        "signals": [
-            "match22",
-            "api/question/22",
-            "api/getTime",
-            "Salted__",
-            "EvpKDF",
-            "keySize",
-            "字母表",
-            "base64 环境分支",
-            "TLS 指纹白名单",
-            "curl_cffi",
-            "Unforgeable",
-            "delete window",
-            "逆练MD5",
-            "异化AES",
-            "魔改标准算法",
-            "match_num",
-            "yuanrenxue"
-        ],
-        "strategy": "A 纯算还原（EvpKDF-MD5 三块链 + AES-256-CBC 全可纯代码）+ B 最小沙箱（22.js 黑盒跑逆练MD5变体）+ 桥式交付：salt8=常量 bb76994f²（fe() fallback），材料=EvpKDF-MD5(密码666yuanrenxue66, salt, keySize=12字) 三块链，ct=AES-256-CBC(key=材料[0:32], iv=材料[32:48], PKCS7(now+page))，密文44字符=b64(\"Salted__\"‖salt‖ct)，token=22.js内逆练MD5变体(密文串)；双层风控：TLS指纹白名单（未消费token三客户端阶梯定位，curl_cffi chrome131 过）+ base64字母表环境分支（同Z.ct双侧密文串diff定位，22.js补丁暴露__hd/__hs桥内位置翻译后变体md5重算）；沙箱须[Unforgeable]对齐（window等不可配置accessor，delete window探针）；复盘：本题=第二届第一题同族重发，通行解法=原码执行+diff魔改点；识别crypto-js家族后应优先库复现路线（标准件EVP/AES-CBC/PKCS7不重逆），全文件沙箱重建额外踩[Unforgeable]+编码表两分支",
-        "file": "yuanrenxue-match22-openssl-salted-alphabet-branch.md",
-        "verifiedAt": "2026-08-29"
+    {
+      "id": "yuanrenxue-match22-openssl-salted-alphabet-branch",
+      "title": "猿人学 match22 魔改标准算法：OpenSSL Salted + base64 字母表环境分支 + TLS 指纹白名单 + [Unforgeable] 沙箱探针",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match22",
+        "api/question/22",
+        "api/getTime",
+        "Salted__",
+        "EvpKDF",
+        "keySize",
+        "字母表",
+        "base64 环境分支",
+        "TLS 指纹白名单",
+        "curl_cffi",
+        "Unforgeable",
+        "delete window",
+        "逆练MD5",
+        "异化AES",
+        "魔改标准算法",
+        "match_num",
+        "yuanrenxue"
+      ],
+      "strategy": "A 纯算还原（EvpKDF-MD5 三块链 + AES-256-CBC 全可纯代码）+ B 最小沙箱（22.js 黑盒跑逆练MD5变体）+ 桥式交付：salt8=常量 bb76994f²（fe() fallback），材料=EvpKDF-MD5(密码666yuanrenxue66, salt, keySize=12字) 三块链，ct=AES-256-CBC(key=材料[0:32], iv=材料[32:48], PKCS7(now+page))，密文44字符=b64(\"Salted__\"‖salt‖ct)，token=22.js内逆练MD5变体(密文串)；双层风控：TLS指纹白名单（未消费token三客户端阶梯定位，curl_cffi chrome131 过）+ base64字母表环境分支（同Z.ct双侧密文串diff定位，22.js补丁暴露__hd/__hs桥内位置翻译后变体md5重算）；沙箱须[Unforgeable]对齐（window等不可配置accessor，delete window探针）；复盘：本题=第二届第一题同族重发，通行解法=原码执行+diff魔改点；识别crypto-js家族后应优先库复现路线（标准件EVP/AES-CBC/PKCS7不重逆），全文件沙箱重建额外踩[Unforgeable]+编码表两分支",
+      "file": "yuanrenxue-match22-openssl-salted-alphabet-branch.md",
+      "verifiedAt": "2026-08-29"
     },
     {
-        "id": "yuanrenxue-match23-selfref-decoder-env-dispatch",
-        "title": "猿人学 match23 js混淆源码乱码：toString 自引用解码 + 环境分派 IV/移位表/加法器的魔改 MD5 + 短名混淆",
-        "domains": [
-            "match.yuanrenxue.cn"
-        ],
-        "signals": [
-            "match23",
-            "api/question/23",
-            "api/getTime",
-            "js混淆源码乱码",
-            "obfuscator",
-            "短名混淆",
-            "toString 自引用",
-            "charCodeAt",
-            "newState",
-            "MKZrLm",
-            "环境分派 IV",
-            "WindowProperties",
-            "successAlert",
-            "魔改MD5",
-            "掩码加法器",
-            "低雪崩",
-            "createAnchor",
-            "match_num",
-            "yuanrenxue"
-        ],
-        "strategy": "B 最小沙箱（原始 23.js 原码执行 + 一行导出桩 __md5direct + 4 处环境分支对齐）：token=md5变体('/api/question/23'+now+page)，now=GET /api/getTime 服务器毫秒文本；IV 环境分派：window instanceof EventTarget/Window → 0x188a7ae93/0x127794fb3，Firefox 不暴露 WindowProperties → _v=0x20d90fe7e fallback（trace 无第4次 instanceof 即证据，勿按 Chrome 注入），document instanceof Document → 0x4a5bc3c6；successAlert 存在（modallayer）→ 标准移位表；createElement instanceof Node → 掩码加法器分支；魔改 T 常量 11 处。AST 反混淆产物禁执行（自引用解码器 q=o+g 读自身源码，重写即解出垃圾 → 轮转死循环，反模式 31）；Node https 直连可用（本题无 TLS 白名单）；末页 UA=yuanrenxue；数据绑定 sessionid（答案 29674800）；提交 POST /a/23 表单编码 code=2 通关",
-        "file": "yuanrenxue-match23-selfref-decoder-env-dispatch.md",
-        "verifiedAt": "2026-08-29"
+      "id": "yuanrenxue-match23-selfref-decoder-env-dispatch",
+      "title": "猿人学 match23 js混淆源码乱码：toString 自引用解码 + 环境分派 IV/移位表/加法器的魔改 MD5 + 短名混淆",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "match23",
+        "api/question/23",
+        "api/getTime",
+        "js混淆源码乱码",
+        "obfuscator",
+        "短名混淆",
+        "toString 自引用",
+        "charCodeAt",
+        "newState",
+        "MKZrLm",
+        "环境分派 IV",
+        "WindowProperties",
+        "successAlert",
+        "魔改MD5",
+        "掩码加法器",
+        "低雪崩",
+        "createAnchor",
+        "match_num",
+        "yuanrenxue"
+      ],
+      "strategy": "B 最小沙箱（原始 23.js 原码执行 + 一行导出桩 __md5direct + 4 处环境分支对齐）：token=md5变体('/api/question/23'+now+page)，now=GET /api/getTime 服务器毫秒文本；IV 环境分派：window instanceof EventTarget/Window → 0x188a7ae93/0x127794fb3，Firefox 不暴露 WindowProperties → _v=0x20d90fe7e fallback（trace 无第4次 instanceof 即证据，勿按 Chrome 注入），document instanceof Document → 0x4a5bc3c6；successAlert 存在（modallayer）→ 标准移位表；createElement instanceof Node → 掩码加法器分支；魔改 T 常量 11 处。AST 反混淆产物禁执行（自引用解码器 q=o+g 读自身源码，重写即解出垃圾 → 轮转死循环，反模式 31）；Node https 直连可用（本题无 TLS 白名单）；末页 UA=yuanrenxue；数据绑定 sessionid（答案 29674800）；提交 POST /a/23 表单编码 code=2 通关",
+      "file": "yuanrenxue-match23-selfref-decoder-env-dispatch.md",
+      "verifiedAt": "2026-08-29"
+    },
+    {
+      "title": "vmpzl 1.5.1 JSVMP 黑盒 + 状态数组常量偏移(XOR 30)就地修正（猿人学第24题）",
+      "domains": [
+        "match.yuanrenxue.cn"
+      ],
+      "signals": [
+        "vmpzl",
+        "JSVMP",
+        "jsvmpzl:ver.1.5.1",
+        "token=part1|part2",
+        "time_list",
+        "XOR 30",
+        "状态偏移",
+        "逐位 diff"
+      ],
+      "strategy": "B vm 沙箱黑盒执行（Node vm + 24.js 原码 + 最小环境桩 + TL[11..] XOR 30 修正探针）+ E 桥式交付（Python requests），按页构建+即时请求",
+      "file": "yuanrenxue-match24-jsvmp-blackbox-tl-xor30.md",
+      "verifiedAt": "2026-08-31"
     }
   ]
 }

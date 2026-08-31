@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## 2.3.89 - 2026-08-31
+
+### 经验固化（match24 案例入库：JSVMP 常量偏移就地修正 + 工具三能力补强 + ruyitrace 参数文档三方核对）
+
+match24（vmpzl 1.5.1 JSVMP 黑盒）通关并**纯协议 token 生成全打通**：沙箱与浏览器的差异只有**一个常量**（状态数组 TL[11..] 起恒差 `XOR 30`），在 VM 分发器入口注入探针就地修正后 token 逐字节一致，5 页纯协议取数全部 200，求和 25650736 通关。本题最大教训不是算法，而是**过程方法论**——一整天攻坚里 17 轮中有 7 轮被"跨构建缓存混对比"的假分歧带偏（见反模式 33）。
+
+- **新案例 `cases/yuanrenxue-match24-jsvmp-blackbox-tl-xor30.md`** + 反模式 32（常量偏移误判为环境读取）已在 2.3.88 尾部同批入库，本轮补 10 条完整踩坑记录与「对 skill 的贡献」节。
+- **反模式 33（新）**：跨样本对拍未锁同源——VM 解码缓存跨构建累积、页码=密钥选择器，把不同页码/构建序号/缓存代数的 {c,v} 混对比会产出"解码键链分岔/常量池差异/诱饵编解码器"三个假结论（match24 各耗数轮）；信号=差异项随轮次漂移。
+- **规则 31（新）**：疑似超时/时序/频控先实测约束边界再改代码——LEAD_MS=8000 补偿与整套重试是伪需求，实测 age 窗口 2~4s 后按页构建（跳过中间页 0.8~2.1s）天然满足，全部删除。
+- **规则 32（新）**：随机环境值（jQuery expando）按"格式正确+运行时随机"补、不固定对齐；先判断服务端校验精确值还是结构自洽。
+- **capture_ruyitrace_log.js 三能力补强**：① `--user-js/--pref`——Firefox 层 pref 通道（tier-pin 的 `javascript.options.blinterp=false` 等没有对应环境变量，此前只能复制 profile 手写 user.js 再 subprocess 直启，绕开本脚本）；② `--gate/--gate-after/--gate-duration`——运行时闸门脚本化（带栈 opcode 必须开→交互→关，`MOZ_DOM_TRACE_GATE` 纳入脚本托管）；③ `--max-log-bytes`——采集期日志体积熔断（cheatsheet 一直要求"驱动侧监控超阈值杀浏览器"但脚本此前无此能力，match24 采出 6.6GB）。顺带修复 2.3.88 引入的正则 bug：`JIT_OPTION_` 后是驼峰名（`baselineInterpreterWarmUpThreshold`），原 `[A-Z0-9_]+` 拒绝小写必报错。自测 20 项通过。
+- **ruyitrace 参数文档三方核对**：内核二进制（xul.dll）提取 78 个 `MOZ_DOM_*` 开关 + 官方随包 cheatsheet.md + switches.js schema 三方对照，skill 文档开关清单 100% 覆盖无遗漏。补：① `TRACE_GATE*` 在 GUI 开关表是 hidden（只能手动 set / 脚本 --gate）；② **ruyipage 每次启动重写 profile 的 user.js**——tier-pin pref 被冲掉，正路是直启/脚本 `--pref`（match24 实证）；③ 官方「区分 WindowProxy 来源」场景行；④ §6.2 判读形态扩为三种（常数偏移/逐步发散/位置值互换=枚举序问题）+ 带栈采集前置条件（`tier=jit` 无栈值）；⑤ §7 官方闸门实测背书。
+- **ruyi-tooling 新增「方式一点五：闸门窗口 + 外部驱动采集」**：capture `--gate` 配方 + 直启+`attach_exist_browser` 逃生舱（match24 用该模式采到 2GB 带栈指令流、800 万条 opcode 全 interp 带值）。
+- **case 库**：match24 案例补录完成；match 题号速查表同步。
+
 ## 2.3.88 - 2026-08-29
 
 ### 经验固化（match23 案例入库：toString 自引用解码 + 环境分派魔改 MD5 + 工具三处补强）
