@@ -11,6 +11,8 @@
 - **全部开关都是环境变量，不是命令行参数**。RuyiTrace GUI 的开关总表每项即一个 `MOZ_DOM_*` env；启动时主进程 `spawn(firefox.exe, args, { env: { ...process.env, ...switches } })` 注入。命令行参数只有：`-profile <dir>`、`-no-remote`、`-headless`、`-private-window`、`--fpfile=<path>`（**必须等号形式**，见 §9）与目标 URL。
 - 终端等价命令（GUI「复制启动命令」生成 PowerShell 形式）：`$env:MOZ_DOM_JSCALL_TRACE="1"` … 逐行 set 后 `& "firefox.exe" -profile <dir> -no-remote <url>`；Python/ruyiPage 集成同理——`os.environ["MOZ_DOM_*"]=...` 设好后再 `FirefoxPage(opt)`（Popen 继承环境变量）。
 - **GUI 会额外注入 3 个默认开关**（用户未显式关闭时）：`MOZ_DOM_EXCEPTION_TRACE=1`、`MOZ_DOM_EXCEPTION_LIMIT=0`、`MOZ_DOM_EXCEPTION_FLUSH_INTERVAL=1`——即 GUI 启动默认开启 exception trace（无限、每条刷盘）。下表「默认」列是**内核默认**（不设时的行为）；本 skill 的 `capture_ruyitrace_log.js` 自己 spawn 不带这 3 个，需要 exception 证据时用 `--trace-env` 显式开。
+- **`TRACE_GATE*` 在 GUI 开关总表里是隐藏项**（switches.js schema `hidden: true`），只能手动 `set` 环境变量或经脚本 `--gate` 启用——GUI 里找不到这两个开关是正常的，不是遗漏。
+- **GUI / ruyipage 启动会重写 profile 的 user.js**：GUI 启动自动写入代理 prefs，ruyipage 每次启动也重建 user.js——因此 **tier-pin 等 Firefox 层 pref 不能靠「先写 user.js 再让 GUI/ruyipage 启动」注入**（match24 实证：写在 user.js 的 JIT prefs 被冲掉、写 prefs.js 也未生效）。正路是**不经 GUI/ruyipage 的直启**：`capture_ruyitrace_log.js --pref javascript.options.blinterp=false …`（脚本自己 spawn firefox，user.js 不会被外部重写），或 subprocess 直启 firefox.exe + `ruyipage.attach_exist_browser` 挂上去驱动（见 ruyi-tooling.md「闸门窗口 + 外部驱动采集」）。
 - **锚点自动注入**：GUI「日志目录」未手动设 `MOZ_DOM_TRACE_FILE` 时自动注入 `<日志目录>\trace.jsonl`；主进程会自动 mkdir 锚点目录（内核不建目录，脚本方式自建目录同样必要）。
 - GUI 内置「常规采集」快捷组合与各题型预设见 §6。
 
@@ -200,6 +202,7 @@ GUI 内置两个层次的现成组合（源码确认）：
 | **还原 jsvmp 指令流**（已知槽） | `JSVMP_TRACE`+`SCRIPT_URL`+`DISPATCH_PC`+`PC_SLOT`(+`KEY_SLOT`/`BRANCH_PC`/`DUMP_BYTECODE`/`CONST_SLOT`) |
 | **还原 jsvmp（不知槽，自动）** | `JSVMP_TRACE`+`SCRIPT_URL`+`AUTODETECT`(+重混淆站点加 `MIN_BYTECODE=128`+`MIN_SPAN=200`) |
 | **抓 WebSocket 帧** | `TRACE_FILE`+`WS_TRACE=1` |
+| **区分 WindowProxy 来源**（iframe/子窗口的 global 归属） | HTTP 打开官方 `verify/windowproxy_keys.html?auto=1` + `JSCALL_NATIVE=1` + `JSCALL_SCRIPT_URL=windowproxy_keys.html` + `DETAIL_SCRIPT_URL=windowproxy_keys.html`；日志里看 `args[0].object.relation_to_caller` / `browsing_context_id`（官方随包 cheatsheet 提供） |
 | **运行时启停（启动后再开、随时停）** | 任意采集组合 + `TRACE_GATE=<控制文件>`；`ni 文件`=开、`del 文件`=关，产 `session_started/stopped` 哨兵 |
 
 **关键纪律：**
@@ -207,7 +210,7 @@ GUI 内置两个层次的现成组合（源码确认）：
 1. **先收窄再开量大的开关**：普通 jscall 噪声用 `JSCALL_SCRIPT_URL` / `JSCALL_SCRIPT_URL_EXCLUDE` 收窄；`OPCODE_*` / `JSVMP_*` 必配 `SCRIPT_URL`/`OPCODE_URL` 锁单脚本，否则 GB 级日志撑爆盘。
 2. **opcode 爆量防护**：`OPCODE_STACK_FULL` 必配 PC 窗口（`PC_START`/`PC_END`）+ `OPCODE_LIMIT`，并在驱动侧监控日志大小，超阈值杀浏览器。
 3. **反爬站勿禁 JIT、勿深序列化**：会拖慢 VM 触发时序检测/重试。用 `SHALLOW`。栈值只在解释器层有，反爬站靠热循环仍走解释器的部分抓。
-4. **vm_step 全程覆盖需 tier-pin**（仅离线对拍）：hook 只在 C++ 解释器 + Baseline Compiler；要全程不断流加 `JIT_OPTION_baselineInterpreterWarmUpThreshold=0` + `JIT_OPTION_normalIonWarmUpThreshold=2000000000`。真实 solve 慎用（会被时序 flag）。
+4. **vm_step 全程覆盖需 tier-pin**（仅离线对拍）：hook 只在 C++ 解释器 + Baseline Compiler；要全程不断流加 `JIT_OPTION_baselineInterpreterWarmUpThreshold=0` + `JIT_OPTION_normalIonWarmUpThreshold=2000000000`。真实 solve 慎用（会被时序 flag）。**pref/user.js 形式时，baseline interpreter 的 pref 名是 `javascript.options.blinterp`，不是 `baseline_interpreter`**（match24 实证：写错名导致热身函数逃进 blinterp、opcode trace 在 3 个输出后断流，带栈采集全程失败；三层 pref = `javascript.options.blinterp=false` + `baselinejit=false` + `ion=false`，配合 JIT_OPTION 形式等价）。
 5. **手动声明 pc 是金标准，autodetect 是省心增强**：mini-VM/已知结构用手动（byte-exact 可靠）；CF 这种每会话 pc 漂移用 autodetect。
 6. **进程可能被杀就调小 `FLUSH_INTERVAL`**（如 `8`）防丢缓冲。
 7. 所有**配置**开关启动时读一次，运行中改无效；多进程各写带 `<pid>` 的文件。**例外**：`TRACE_GATE` 受控模式下「开/关」可运行时翻转（控制文件存在性），但「录什么」仍启动定死。
@@ -222,6 +225,21 @@ RuyiTrace 对重复调用序列有折叠行为（parent_elide_reason 一类）�
 - **判断真实调用次数/输入规模，用未被折叠的下游函数计数反推**：轮函数/加法器/编码器这类每次哈希必调 N 次的函数，`总调用数 ÷ 单次用量 ≈ 真实调用次数`；`charCodeAt` 读数条数 × 常数 只能当输入长度的下界。
 
 folded 与 unfolded 记录同批导出时，优先用 `parent_elide_reason` 字段识别折叠点，把"缺失的重复段"还原成计数而非逐条展开。
+
+### 6.2 带栈对拍：STACK_SLOTS 盲区 + 逐位 XOR 判分布（match24 实证）
+
+**STACK_SLOTS 盲区**：`OPCODE_STACK_SLOTS` 只 dump 栈顶 N 槽，**栈深 >N 槽处的算术对拍时看不到**。match24 里"值 65 从未出现在任何栈转储中"——因为它的计算发生在栈深 >6 槽处（STACK_SLOTS=6 的盲区）。要读深层算术，把 `STACK_SLOTS` 提到 ≥12 或开 `STACK_FULL`，**同时用 `TRACE_GATE` 把窗口收窄到 click→build 这段**防爆量（`STACK_FULL` 全开是 GB 级日志主因）。
+
+**逐位 XOR 判分布（沙箱 vs 浏览器对拍的破局手法）**：黑盒沙箱与浏览器 trace 对拍不一致时，不要只做逐位相等比较，**先把两侧中间输出（VM 状态数组/字节流/token 分段）做逐位 XOR/差值，看分布**。判读三种形态：
+
+- 差值是**常数**（match24：状态数组 TL[11..] 起恒差 `XOR 30`）= 一次性注入的状态偏移 → 在 VM 输出上**就地修正**（逐元素 XOR 常数），不必再逐环节对齐环境。
+- 差值**逐步发散** = 链式差异 → 才需要逐环节对齐（见反模式 23）。
+- 位置 **a/b 两值互换**（match24 实测 K[7]=123↔101、K[12]=101↔123）= 密钥流/常量表的**枚举序或索引来源**不同，不是算术不同——核对生成器的索引/计数器初值来源，比追算术链快。
+- 差值是**同字符位置敏感 vs 位置无关**的算法级差异（match24 第三轮误判"诱饵编解码器"：MCP 看浏览器 '/'→7×6 查表式、沙箱位置依赖算术）——**先核对两侧样本是否同一状态**（同页码/同构建序号/同缓存代数，反模式 33），跨构建混对比会把"缓存状态差"误读成"算法不同"。
+
+这是 opcode/带栈 trace 的典型收口用途：带栈采集拿到两侧完整中间态后，逐位 diff 一步就能把"未知环境分歧"降维成"一个常量"。详见 `cases/yuanrenxue-match24-jsvmp-blackbox-tl-xor30.md`。
+
+**带栈采集的前置条件（tier-pin）**：opcode 记录里 `tier=jit` 的条目**只有 pc 没有栈值**（match24 实测 325 万条里仅 91 条 interp 带值）——要拿带栈指令流，必须先把热函数钉在纯解释器：三层 pref `javascript.options.blinterp=false` + `baselinejit=false` + `ion=false`（blinterp 名勿写错，见 §6 纪律 4）。pref 注入见 §0「GUI/ruyipage 会重写 user.js」条目：直启或 `capture_ruyitrace_log.js --pref`。
 
 ## 7. 运行时启停闸门（TRACE_GATE）
 
@@ -254,6 +272,8 @@ firefox.exe
 - 时延安全——独立后台线程轮询控制文件，**绝不在热路径 stat**；热路径只读一个 atomic。
 - 只做**全局总启停**（所有已配置模块同开同关）；脚本级收窄用 `OPCODE_URL`/`SCRIPT_URL` 配置层覆盖。
 - HTTP 报文 / WS 握手暂不受闸门控制；WS **数据帧**受控制。
+- **官方实测背书**（随包 cheatsheet）：噪声页面关 6s→开 5s→关 6s，窗口内 372 条记录 seq 全落在 started(1)/stopped(375) 之间、零泄漏，时间跨度 4.95s ≈ 5s 窗口；对照无闸门组各项 ≈5/17 比例，跨 8 个进程哨兵均正确配对——闸门边沿的 session 哨兵可用于挑配对完整的对拍窗口。
+- **脚本方式**：`capture_ruyitrace_log.js --gate --gate-after <ms> --gate-duration <ms>` 自动管理控制文件（启动即暂停 → 到点开闸 → 开窗结束自动关闸），开窗期间需交互时用 ruyipage 挂到该浏览器驱动，见 ruyi-tooling.md「闸门窗口 + 外部驱动采集」。
 
 ## 8. Stderr warning 分诊（外部脚本）
 

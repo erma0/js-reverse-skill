@@ -377,6 +377,40 @@ node scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <projec
 node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-root> --truncation-threshold 3900 --markdown
 ```
 
+### 方式一点五：闸门窗口 + 外部驱动采集（带栈 opcode / 交互期定向取证）
+
+match24 沉淀的取证组合：**只录"交互窗口"而不是整个页面生命周期**，且窗口内的点击由外部驱动。适用：带栈 opcode（STACK_FULL 全录是 GB 级）、验证码/翻页等需真实点击的触发式参数生成。
+
+**推荐：`capture_ruyitrace_log.js` 自管闸门 + ruyipage 挂到该浏览器驱动**（脚本自己 spawn trace Firefox，不经过 ruyipage 的 profile 管控，user.js/定向开关都可靠）：
+
+```bash
+# 终端 A：脚本启动 trace Firefox（启动即暂停落盘），8s 后开闸录 15s 窗口
+node scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <project-root> --ruyitrace-home <RuyiTrace-dir> \
+  --gate --gate-after 8000 --gate-duration 15000 --duration 60 --import-after \
+  --pref javascript.options.blinterp=false --pref javascript.options.baselinejit=false --pref javascript.options.ion=false \
+  --trace-env MOZ_DOM_JSCALL_TRACE=1 --trace-env MOZ_DOM_JSCALL_OPCODE_URL=<target.js> \
+  --trace-env MOZ_DOM_JSCALL_OPCODE_STACK=1 --trace-env MOZ_DOM_JSCALL_OPCODE_STACK_FULL=1 \
+  --max-log-bytes 2147483648
+```
+
+配套要点：
+
+- **tier-pin 的三层 pref 必须经 `--pref`（或直启 user.js）注入**——ruyipage 每次启动会重写 profile 的 user.js，写在里面的 JIT prefs 被冲掉、prefs.js 也不生效（match24 第三轮实证）。`capture_ruyitrace_log.js` 自己 spawn 不会触发重写。带栈指令流的前提是热函数被钉在纯解释器：`tier=jit` 的 opcode 记录只有 pc、没有栈值。
+- **`--max-log-bytes` 是硬保险**：STACK_FULL 全开实测 2~6.6GB（match24），与 `OPCODE_LIMIT`（条数上限）互补——单条深序列化时条数没到、盘先满。
+- 开窗期间需要真实点击时，用 ruyipage 挂到脚本启动的浏览器：`page = ruyipage.attach_exist_browser('127.0.0.1:<端口>')`。脚本当前不暴露远程调试端口，需要 attach 驱动时走下方直启模式，或改造脚本后复用。
+
+**直启 + attach 模式**（脚本无法覆盖的复杂交互时的逃生舱，必须遵守与通用采集相同的启动硬约束）：
+
+```python
+# 1) 复制一份干净 profile，写 user.js 做 tier-pin（三层 pref，blinterp 名勿写错）
+# 2) subprocess 直启 firefox.exe：-profile <pi> -no-remote -remote-debugging-port 9222 <url>
+#    env 带全部 MOZ_DOM_* 开关（jscall+opcode+STACK+OPERANDS）+ TRACE_GATE 闸门
+# 3) ruyipage.attach_exist_browser('127.0.0.1:9222') 挂上去驱动点击（拟人动作/原生 BiDi）
+# 4) 开闸→点击→等→关闸→kill→等刷盘
+```
+
+match24 用该模式采到 2GB 带栈指令流（800 万条 opcode、全部 `tier=interp` 带栈值），覆盖 part2 组装循环。要点：闸门控制文件在启动前删除（启动即暂停），开窗由脚本/驱动侧创建文件控制，收尾删除；`session_started/stopped` 哨兵用于挑配对完整的窗口。
+
 ### 方式二：手动 trace（用户指定日志）
 
 适用场景：自动 trace 启动失败 / trace Firefox 无法写日志 / 需登录验证等复杂交互 / 日志未覆盖目标参数生成路径时转手动（不询问用户选择采集方式）。
@@ -421,6 +455,14 @@ set MOZ_DISABLE_LAUNCHER_PROCESS=1
 | `MOZ_DOM_TRACE_PTYPE=<list>` | 启用 trace 的进程类型 |
 | `MOZ_DISABLE_LAUNCHER_PROCESS=1` | Windows 下避免 launcher 提前退出 |
 | 其他 `MOZ_DOM_*` | 定向 trace 开关（jscall / opcode / vm_step / WASM / WS / TRACE_GATE），完整清单见 `references/tooling/ruyitrace-cheatsheet.md`；手动方式可直接 `set`，自动方式用 `--trace-env` 透传 |
+
+自动 trace 的 `capture_ruyitrace_log.js` 另有三个一键参数，对应上面没有环境变量版本的 Firefox 层配置与运行时控制：
+
+| 参数 | 用途 |
+|---|---|
+| `--user-js <file>` / `--pref KEY=VALUE`（可多次） | 把 user.js 合并写入 trace profile——tier-pin 三层 pref（`javascript.options.blinterp=false` 等）没有对应环境变量，只能走 user.js；脚本自己 spawn 不会被 ruyipage/GUI 重写（见 cheatsheet §0 坑） |
+| `--gate [file]` + `--gate-after <ms>` + `--gate-duration <ms>` | 运行时闸门：启动即暂停落盘，到点自动开闸、开窗结束自动关闸，只录交互窗口；`MOZ_DOM_TRACE_GATE` 由脚本自管，禁止 `--trace-env` 透传 |
+| `--max-log-bytes <n>` | 采集期日志体积熔断：每 1.5s 统计目录体积，达阈值立即关浏览器收尾（带栈 opcode 务必设，实测 2~6.6GB） |
 
 ## RuyiTrace NDJSON 事件结构
 
