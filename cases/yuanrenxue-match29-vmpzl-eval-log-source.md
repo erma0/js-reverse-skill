@@ -3,9 +3,11 @@
 - 验证日期：2026-09-01
 - 域名：match.yuanrenxue.cn
 - 题型：接口 `GET /api/question/29?page=N&pageSize=10&kw=&token=<32hex>&now=<13位ms>`；
-  token = **魔改 MD5**（K 表被改 + 46 项环境探测分派，不可纯算）；now 来自 GET /api/getTime（纯文本服务器毫秒，每次翻页重新取）
+  token = **魔改 MD5**（K 表被改 + 46 项环境探测分派，不可纯算）；now 来自 GET /api/getTime（每次翻页重新取）
 - 策略：B 最小 JS 沙箱——**RuyiTrace eval 分类日志落盘的业务源码**原样执行（绕开 LZ 压缩/字节码/VM 指令三层）
 - 答案：27105688（提交 POST /a/29 表单编码，code=2 通关，exp=107）；**数据绑定 sessionid**
+
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ## 为什么本题黑盒（而不是纯算）
 
@@ -35,7 +37,8 @@ vmpzl 的 VM 执行到业务层时，会通过 **eval 执行"反序列化生成�
    → 直接读到 `token = _$hal8sh(path + now + (counter + _$v) + "()" + page)` 的拼接点
 2. 再逆变量赋值链：`path = "/api/question/" + document.querySelector('meta[name="match_num"]').content`、
    `counter` 初值 28（`case 25: var _$hfhh7a=28`）随翻页 `+=1`/`-=1`、
-   `_$v = document.all.pgxDebug || window.pgxDebug ? 1 : 0`（浏览器恒 0）
+   `_$v = document.all.pgxDebug || window.pgxDebug ? 1 : 0`（浏览器恒 0）、
+   `page = min(5, max(1, p))`（页码钳位，索引行补充固化）
 3. 确认哈希类型：`_$hal8sh` 函数体内有 rotl（`<< | >>>`）+ 32 位加法 + 消息填充
    （`(_$len+8>>6+1)*16`、`128<<...`、`len<<3`）→ MD5 结构，但 K 表缺失 → 魔改 → 黑盒
 
@@ -62,8 +65,8 @@ vmpzl 的 VM 执行到业务层时，会通过 **eval 执行"反序列化生成�
    缺失报 `xxx.add is not a function` 中断渲染链路。
 6. **m 参数诱饵**（反模式 27 第 N 次实证）：`m: window.matchnumber` 恒 undefined，被 jQuery 序列化
    丢弃，真实请求 URL 无 m（debug 文本 `GET /api/question/29?...&m=&token=...` 可见 m= 但发出去没有）。
-7. **末页（page5）UA=yuanrenxue**，否则 HTTP 200 + 中文提示数组（交付必须校验 `data` 元素类型）；
-   数据绑定 sessionid（同会话数据恒定，两轮抓数完全一致）。
+7. **末页（page5）UA=yuanrenxue**（交付校验 `data` 元素类型）；数据绑定 sessionid
+   （两轮抓数完全一致）。
 8. **check_final_artifact 的 Session 门禁按调用形态字面识别**：业务方法名（`client.getPage(`）不算
    复用——请求统一走 `client.get(...)`/`client.post(...)`，清理 `httpAgent.destroy()` 才过门禁
    （match29 返工点，与 match18 实测同规则再实证）。

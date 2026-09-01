@@ -3,9 +3,11 @@
 - 验证日期：2026-08-31
 - 域名：match.yuanrenxue.cn
 - 题型：接口 `/api/question/26?page=N&pageSize=10&kw=&token=<64hex>&now=<ms>`；
-  token = SM3 魔改('/api/question/26' + now + page)，now 来自 GET /api/getTime（纯文本服务器毫秒，每次翻页重新取）
+  token = SM3 魔改('/api/question/26' + now + page)，now 来自 GET /api/getTime（每次翻页重新取）
 - 策略：B vm 沙箱黑盒执行原 26.js（环境分支逐项对齐）+ 页面自驱动翻页签名；Node https 直连无 TLS 校验
 - 答案：29597657（提交 POST /a/26 表单编码，code=2 通关）
+
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ## 与 match21 同族（强复用）
 

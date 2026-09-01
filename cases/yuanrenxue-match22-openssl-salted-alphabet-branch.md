@@ -5,6 +5,7 @@
 > 实现语言：Python(final.py, curl_cffi) + Node(src/token_bridge.js, 22.js 沙箱桥)
 > 最后验证日期：2026-08-29
 > 平台类型：match.yuanrenxue.cn（猿人学练习平台第 22 题「js加密-初识-魔改标准算法」）
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ---
 
@@ -13,7 +14,7 @@
 - JS 特征：`/match/22/js/22.js`（438719B 单行，sha256 原版 `7fdbd518dfa4b73665f16829b6231df03c6de93c25f166676685a8cfc37ffb4b`，控制流平坦化+字符串切片混淆，内嵌完整 crypto-js 魔改包；babel 解析失败「'return' outside of function」）
 - 参数特征：`GET /api/question/22?page=N&pageSize=10&kw=&token=<32hex>&now=<13位ms>`；now = `GET /api/getTime` 服务器毫秒文本（每页独立获取）
 - 文档内联钩子：`$.ajax` 包装器拦截 `/api/match/number`（诱饵，永不发送），`window.matchnumber = data.m`；`<meta name="match_num" content="22">`
-- 风控特征：数据绑定 sessionid；末页(page5) UA=yuanrenxue；提交 `POST /a/22` 表单编码 `{answer}`，`code=2` 通关
+- 风控特征：末页(page5) UA=yuanrenxue；提交 `POST /a/22`，`code=2` 通关
 - **传输层：服务端 TLS 指纹白名单**——Node https/http2、Python requests 全 403 `{"error":"token failed"}`，**curl_cffi impersonate=chrome131 通过**（连"未消费浏览器新鲜 token 跨栈重放"都 403，与算法内容无关）
 
 ## 加密方案（完整还原，全字节级验证）

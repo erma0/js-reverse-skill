@@ -5,6 +5,7 @@
 > 实现语言：Node.js
 > 最后验证日期：2026-08-29
 > 平台类型：match.yuanrenxue.cn（猿人学练习平台）
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ---
 
@@ -15,9 +16,9 @@
 - 签名公式（入口 index.js eval 内 `req()` 明文）：`sign = m.sign(p + '|' + t.toString())`，`t` = 每次数据请求前同步 `xhr.open("GET","/api/getTime",false)` 取回的服务器毫秒时间**纯文本**（responseText 原样使用不 trim）；请求 `GET /api/question/20?sign=...&t=...&page=...`
 - sign 是 32 位 hex 但**不是** `md5("page|t")`（实测排除，勿再试 MD5/拼接族）——必须真跑 wasm
 - 请求头特征（capture.json 实测）：数据接口（$.ajax）带 `X-Requested-With: XMLHttpRequest` + `accept: application/json, text/javascript, */*; q=0.01`；getTime/api2/20 为原生 XHR/fetch **无** X-Requested-With；全部带 `Referer: /match/20`；api2/20 是 webpack `requireEnsure` 里 `fetch("/api2/20")` 发起
-- 页面规则（document.html 试炼步骤原文）：**请求全部 5 页数据求和**（TP=5/PS=10 写死）；**发送最后一页时 UA 改为 `yuanrenxue`**，否则不返回最后一页数据（末页 UA 规则第 6 次实证）
+- 页面规则（document.html 试炼步骤原文）：**请求全部 5 页数据求和**（TP=5/PS=10 写死）；发送最后一页时 UA 改为 `yuanrenxue`（平台通用）
 - 页面 hook 残留（反模式 27 同族）：内联 script `$.ajax` 拦 `/api/match/20` 存 `window.match20`——老版接口遗留从未被请求，本题生效接口是 `/api/question/20`
-- 风控特征：数据绑定 sessionid（两轮取证会话 page1 数据逐字节恒定）；无蜜月期/无挑战 cookie（仅百度统计 Hm_*）；提交 `POST /a/20` 表单编码 `code=2` 通关 / `code=1` 已做过 / `code=0 msg=wrong answer` 答案错
+- 风控特征：数据绑定 sessionid（两轮取证会话 page1 数据逐字节恒定）；无蜜月期/无挑战 cookie（仅百度统计 Hm_*）；提交 `POST /a/20` 表单编码（`code=0 msg=wrong answer` 见坑 3）
 
 ## 加密方案
 

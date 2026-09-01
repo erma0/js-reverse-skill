@@ -5,6 +5,7 @@
 > 实现语言：Node.js（vm + fetch）
 > 最后验证日期：2026-08-28
 > 平台类型：match.yuanrenxue.cn（猿人学练习平台）
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ---
 
@@ -17,9 +18,9 @@
   - `aa` = `m5(RSA_encrypt(b))`（RSA PKCS#1 随机 padding，服务端不可复算）；`bb` = `m5(b)`
   - `md5hex` = `m5(gee(aa, bb, v14, z.toString(), v142, b64_zw))`
 - 混淆特征：无 jsjiami/obfuscator 家族标记，纯体积混淆（553KB 单文件）；m.js 与 14.js 均有 `window = {}` / `delete document` 式全局覆盖环境检测
-- 请求特征：`GET /api/question/14?page=N&pageSize=10&kw=`；**page5 要求 UA=yuanrenxue**（否则返回提示文案数组而非 400）
+- 请求特征：`GET /api/question/14?page=N&pageSize=10&kw=`；page5 UA=yuanrenxue（平台通用；本题差异：改 UA 时指纹数组 UA 字段必须同步，见踩坑 3）
 - 反调试特征：eval 动态代码 + 全局对象覆盖检测
-- 风控特征：数据**绑定 sessionid**（数字答案随登录用户变化）；无蜜月期开窗要求
+- 风控特征：数据绑定 sessionid（平台共性）；本题无蜜月期开窗要求
 
 ## 加密方案
 
@@ -39,11 +40,11 @@
 
 ## 可验证事实清单（经验资产）
 
-1. 固定 sessionid 下求和稳定 **31256141**（sessionid `p4av26i0hl3t4dar70r5icog4vytlguo`，2026-08-28 实测）；数据绑定 sessionid，换登录用户答案变化
+1. 固定 sessionid 下求和稳定 **31256141**（sessionid `p4av26i0hl3t4dar70r5icog4vytlguo`，2026-08-28 实测）；换 sessionid 答案变（平台共性）
 2. 连续 3 次全量运行 5 页全部 HTTP 200，响应均为 10 个数字真实业务数据
 3. 自洽性实证：vm 沙箱指纹（UA 147 / colorDepth 32）与真实 Chrome（UA 151 / colorDepth 24）53 字段中 4 处差异，服务端照样接受——**服务端只校验 mz↔m 自洽，不校验与真实浏览器一致**（规则 25）
 4. 每页重建沙箱（n 恒 1）→ page1 200、page2-4 400；改持久沙箱后 5 页全通——反模式 24 判别信号
-5. page5 UA=Chrome 返回 `["请","将","UA","改","为",...]` 提示数组（非 400）；UA=yuanrenxue 且指纹同步后返回真实数据
+5. page5 普通 UA 返回提示数组（平台通用形态）；UA=yuanrenxue 且指纹同步后返回真实数据
 6. `window.n` 与请求序号强对应：pageN 请求 m 末段 n=N，可作签名正确性自检
 
 ## 相关参考

@@ -5,6 +5,7 @@
 > 实现语言：Node.js（原生 `vm` + `https`，无第三方依赖）
 > 最后验证日期：2026-08-28
 > 平台类型：match.yuanrenxue.cn（猿人学练习平台）
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ---
 
@@ -18,7 +19,7 @@
 - **page 字面值排除**：VM 字节码对 `page=1` 与 `page=5` 不追加签名（0-20 扫描实证；`page=05`/`page=55` 正常签名）
 - 末页双重校验：`UA=yuanrenxue` 时服务端强制校验 token（明文 → 400 `{"error":"token failed"}`）；正常 UA → 200 提示数组 `["请","将","UA","改","为","yuan","ren","xue","哦"]`
 - 诱饵（同站第四次实证，反模式 27）：script10 `$.ajax` hook 拦 `/api/match/18` 存 `window.match18`（接口从未被请求）；script13 `API="/api/question/18"` 常量与 `m:window.match18` 只进调试显示；`window.request()` 恒 undefined
-- 风控特征：数据**绑定 sessionid**（同 session 各页数值恒定）
+- 风控特征：数据绑定 sessionid（平台共性）
 
 ## 加密方案
 
@@ -48,7 +49,7 @@
 4. open 包装器栈帧：`__V/< @727:10971`（call-member opcode 汇聚点）→ `__V @727:11243`（Object.create）→ dispatch `__V/Vu_< @727:6128`；page1 与 page2 的 open 均经 wrapper（hook 启动即安装，按 DateOpen 分支）
 5. VM 挂载物：`window._$_`（状态命名空间）、`window.myenc`（编码函数）；`window.request` 从未定义（script13 的 `window.request && ...` 恒短路，又一个幌子）
 6. 签名成功即证环境语义对齐：两次运行 t/v 全部新鲜生成且服务端全收；提交 `POST /a/18` 表单编码 `{"result":"success","created":true,"code":2,"exp":500}` 通关（提交过频封号，只提交一次）
-7. 数据绑定 sessionid；page1-4 任意 UA（正常浏览器 UA 即可），仅 page5 要求 UA=yuanrenxue
+7. page1-4 任意 UA，仅 page5 要求 UA=yuanrenxue（且需 `page=05` 触发签名，见坑 2）
 
 ## 相关参考
 

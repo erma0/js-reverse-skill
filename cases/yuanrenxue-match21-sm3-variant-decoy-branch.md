@@ -5,6 +5,7 @@
 > 实现语言：Node.js
 > 最后验证日期：2026-08-29
 > 平台类型：match.yuanrenxue.cn（猿人学练习平台，match2023 第三题「守心」等效移植）
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ---
 
@@ -14,7 +15,7 @@
 - 参数特征：`POST /api/question/21` body `page=1&pageSize=10&kw=&token=<64 位 hex>`；请求头 `accept-time: <服务器毫秒>`（match3.js 自设，非 jQuery headers）
 - 页面 hook（document.html 内联，题目设计的适配层）：① `XMLHttpRequest.open` 把 `/api/match2023/3` 改写为 `/api/question/21` 并标 `this._o`；② `setRequestHeader` 记录 `Accept-Time` 到 `this._t`；③ `send` 拦截 `_o` 请求解析 body 后转调页面 `req(obj)` 由 jQuery 重发；④ `String.prototype.indexOf` 让 `'/api/question/21'.indexOf('match')` 返回 true（骗过 match3.js 的 URL 含 match 校验）；⑤ `Date.now` 重写为同步 `GET /api/getTime`（每次调用实时取值）
 - 时间源双轨：match3.js 既有 `Date.now()`（hook 后每次实时）又有**直接同步 XHR getTime**——trace 实证 Accept-Time 头值 `1787960032933` 不等于任何一次 `Date.now` 返回值（32659/33488/33496/...）
-- 风控特征：数据绑定 sessionid；末页 UA=yuanrenxue；提交 `POST /a/21` 表单编码 `{answer}`，`code=2` 通关
+- 风控特征：数据绑定 sessionid + 末页 UA + 提交 `POST /a/21` 表单编码（平台共性）
 - **服务端拒绝语义分叉（本题最坑）**：Firefox 内核（含 ruyipage 取证浏览器）访问时**浏览器自己发的请求也 400**（页面显示「接口异常」）；Chrome 真机 200 正常——match3.js 按 Function.toString 环境自检结果走**双算法变体**（见踩坑 1）
 
 ## 加密方案
@@ -53,7 +54,7 @@
 5. Firefox 内核（ruyipage 定制版 155.0a1）访问该页：浏览器自身 POST 400 `{"error":"token failed"}`（非脚本问题，是内核毒化）；Chrome 真机 200
 6. Node https / curl / curl_cffi chrome124 发「诱饵分支 token」均 400；发「真分支 token」（纯算）全 200——本题 400 语义是**算法分支**而非 TLS 黑名单（与 match19 相反）
 7. accept-time 头为小写即可（HTTP/2 规范化）；Accept-Time 与 token 输入时间必须同值
-8. 页面 TP=5/PS=10 写死；题面「试炼步骤」区块为唯一口径来源（全部 5 页求和 + 末页 UA=yuanrenxue + sessionid 绑定）
+8. 页面 TP=5/PS=10 写死；本题口径=全部 5 页求和（「试炼步骤」区块，通用告诫见平台篇）
 9. `POST /a/21` 表单编码 `{answer}`：`{"result":"success","created":true,"code":2,"exp":200}` 通关；重复提交 `code=1`
 10. match3.js 的 toString 自检目标（Chrome initScript 记录器实测）：Object、getElementsByClassName、querySelectorAll、matches、compareDocumentPosition、Document、Window、Location、FocusEvent、Node、HTMLDocument、print（各 ×3，一致性三连测）
 

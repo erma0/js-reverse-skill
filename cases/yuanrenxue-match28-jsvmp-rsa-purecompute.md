@@ -3,9 +3,11 @@
 - 验证日期：2026-08-31
 - 域名：match.yuanrenxue.cn
 - 题型：接口 `/api/question/28?page=N&pageSize=10&kw=&token=<172B base64>&now=<13位ms>`；
-  token = **RSA-1024 确定性密文**（128 字节）；now 来自 GET /api/getTime（纯文本服务器毫秒，每次翻页重新取）
+  token = **RSA-1024 确定性密文**（128 字节）；now 来自 GET /api/getTime（每次翻页重新取）
 - 策略：A 纯算还原（Node BigInt 模幂 + JSBN hex2b64），**完全不需要跑 VM**
 - 答案：27673886（提交 POST /a/28 表单编码，code=2 通关，exp=176）；**数据绑定 sessionid**（旧会话数据总和 25808383）
+
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ## 算法链（经 capture 真实样本对拍逐字节验证）
 
@@ -32,16 +34,11 @@
    `Buffer.toString('base64')`。识别特征：trace 中 `Math.floor(0.42857142857142855)`（3/7）分块运算。
 4. **limbs 顺序陷阱**：字节码里 limb 字面量出现顺序 ≠ 数组顺序（VM 压栈/构建序），按出现序拼
    模数会得到错误 N（token 长度都对但全拒）→ 用对拍修正数组顺序。
-5. **数据绑定 sessionid（换会话必须重算）**：同 sessionid 数据恒定，但**不同 sessionid 数据完全
-   不同**（page1 取证样本 [263432,...] vs 新会话 [636803,...]）——答案按提交时所用会话重算，
-   通关提交用的就是新会话答案。
-6. **站点限流 403 token failed 误判陷阱**：同一 IP/session 短时间窗口内连续数据请求会让约第 3 页起
-   返回 403 `token failed`，而**单请求正常、第 1/2 页正常**——不是签名错！先做单请求诊断（page=1
-   单独请求 200 = 签名对），再放慢节奏。稳定参数：页间 3s + getTime 后 300ms + 冷却 3~4 分钟；
-   惩罚恢复期长，反复重试会持续触发。**提交与采集解耦**：算好答案后单独 `--submit --answer <总和>`
-   单请求提交，不与采集连跑。
-7. **数据接口不校验登录但数据可用**：未登录 sessionid 也能 200 拉数据；提交接口返回 `not login`。
-   换会话先 `GET /api/user` 验活（isLogin:true）再提交。
+5. **数据绑定 sessionid（换会话必须重算）**：page1 取证样本 [263432,...] vs 新会话 [636803,...]
+   完全不同——答案按提交时所用会话重算，通关提交用的就是新会话答案。
+6. **站点限流 403 token failed 误判陷阱**：连续数据请求约第 3 页起返回 403 `token failed`，而
+   **单请求正常、第 1/2 页正常**——不是签名错，先做 page=1 单请求诊断（200 = 签名对）再放慢节奏。
+7. 未登录 sessionid 也能 200 拉数据；提交接口返回 `not login`。
 8. 明文可逆向：trace 中 `String.charCodeAt` 逐字符读取拼接串（index 顺序倒着读），可还原明文格式。
 
 ## 调试弯路（match28 实证）

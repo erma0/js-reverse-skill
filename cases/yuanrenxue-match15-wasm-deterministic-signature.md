@@ -5,6 +5,7 @@
 > 实现语言：Node.js（https + WebAssembly）
 > 最后验证日期：2026-08-28
 > 平台类型：match.yuanrenxue.cn（猿人学练习平台）
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ---
 
@@ -12,9 +13,9 @@
 
 - JS 特征：页面内联 JS 直接 `fetch('/static/new_match/question/15/main.wasm')` 加载 WebAssembly；无混淆、无 JSVMP、无环境检测，签名构造逻辑完整暴露在 document.html 内联 script（约 712-769 行）
 - 参数特征：`m = encode(t1,t2) + '|' + t1 + '|' + t2`（`encode` 为 wasm 导出函数 `(i32,i32)->i32`，返回值转十进制字符串）
-- 请求特征：`GET /api/question/15?page=N&pageSize=10&kw=&m=...`；page5 要求 UA=yuanrenxue（否则返回中文提示数组而非 400）
+- 请求特征：`GET /api/question/15?page=N&pageSize=10&kw=&m=...`；page5 UA=yuanrenxue（平台通用）
 - 反调试特征：无（纯 WASM 确定性签名题）
-- 风控特征：数据**绑定 sessionid**（答案随登录用户变化）；服务端校验 t1 时效（须真实当前时间）
+- 风控特征：数据绑定 sessionid（平台共性）；服务端校验 t1 时效（须真实当前时间）
 
 ## 加密方案
 
@@ -28,18 +29,18 @@
 
 1. **坑：wasm 内联 base64 手工复制进 final.js → 静默损坏 → 400 token failed**（同一逻辑临时脚本 200、final.js 400，曾被误归因"时间窗口/服务端时间"，重跑临时脚本确认后才核对出内联 base64 被写坏、md5 不符）。正确做法：长 base64 用程序注入（读文件→base64→替换占位符）并注入后 md5 核对原始 wasm（`0c602212...`）；或直接以独立文件 `result/wasm/main.wasm` 加载（本 case 采用，同时规避代码质量门禁对超长内联行的误判）。详见反模式 25。
 2. **坑：Node 全局 fetch 混用 `https.Agent` → 请求异常/400**（undici fetch 与 node:https Agent 不兼容，两者不可混传）。正确做法：要么纯 fetch 不传 agent，要么纯 `https.request({ agent: SESSION_AGENT })`（本 case 采用 keepAlive 连接池 + 结束 `destroy()`）。
-3. **坑：第 5 页仍用普通 UA → 返回陷阱数组而非数据**（`["请","将","UA","改","为","yuan","ren","xue","哦"]`，HTTP 200 不报错，极易当成业务数据）。正确做法：page5 单独用 UA=`yuanrenxue`，并对每页响应做 `isNumeric` 校验兜底，非数字即告警。
-4. **坑：sessionid 缺失 → 数据异常/无权限**。正确做法：外置 `config.json` 或环境变量读取，不硬编码进交付脚本。
+3. **坑：第 5 页仍用普通 UA → 返回提示数组当业务数据**（HTTP 200 不报错，平台通用形态）。正确做法：page5 单独用 UA=`yuanrenxue`，并对每页响应做 `isNumeric` 校验兜底，非数字即告警。
+4. **坑：sessionid 硬编码进交付脚本**。正确做法：外置 `config.json` 或环境变量读取。
 
 ## 可验证事实清单（经验资产）
 
-1. 固定 sessionid 下 5 页加和稳定 **26550965**（sessionid `p4av26i0hl3t4dar70r5icog4vytlguo`，2026-08-28 实测）；数据绑定 sessionid，换登录用户答案变化
+1. 固定 sessionid 下 5 页加和稳定 **26550965**（sessionid `p4av26i0hl3t4dar70r5icog4vytlguo`，2026-08-28 实测）；换 sessionid 答案变（平台共性）
 2. `encode` 对相同 `(t1,t2)` 确定性输出，同一 wasm 实例可跨请求复用（无跨调用状态）
 3. wasm 无外部导入（`WebAssembly.Module.imports()` 为空）、3854 字节、md5 `0c602212bf68561c639b9ff99b3913e5`
 4. `t2` 范围 `[t1-50, t1-1]`（`t2 = t1 - floor(random()*50+1)`）
 5. 第 5 页普通 UA 返回中文提示数组（HTTP 200、data 非数字）；UA=`yuanrenxue` 返回 10 个数字
 6. 各页小计：5,240,297 + 6,063,912 + 5,225,737 + 4,551,540 + 5,469,479 = 26,550,965
-7. 提交 `POST /a/15` 表单编码（`answer` 字段），响应 `code===2` 通关、`code===1` 已做过
+7. 提交 `POST /a/15` 表单编码（code=2 通关）
 
 ## 相关参考
 

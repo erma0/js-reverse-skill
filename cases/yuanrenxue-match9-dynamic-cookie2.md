@@ -5,6 +5,7 @@
 > 实现语言：Python（curl_cffi）+ Node（vm 沙箱执行挑战代码生成 m）
 > 最后验证日期：2026-08-25
 > 平台类型：猿人学练习平台（match.yuanrenxue.cn）
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ---
 
@@ -66,7 +67,7 @@ document['cookie'] = 'm=' + (m - 1) + res + '; path=/';
 
 - 固定 sessionid → 请求 page1 → 返回挑战 → 生成 m → 带 m 提交（失败重试 ≤8 次，间隔 2s）
 - session 验证通过后**每页无需 m**，直接拉 page1~5（page5 UA=yuanrenxue）
-- 数据绑定 sessionid：固定 sessionid → 数据固定 → **答案不变（27848571）**
+- 数据绑定 sessionid：固定会话**答案不变（27848571）**
 
 ---
 
@@ -81,8 +82,7 @@ document['cookie'] = 'm=' + (m - 1) + res + '; path=/';
    任何"性能优化"改变 m 语义都会失败。
 4. **坑：jsjiami v5 反调试覆盖 `console.log`** → Node 里 `console.log(m)` 输出为空（exit 0 无输出）。
    修复：输出一律用 `process.stdout.write`。
-5. **坑：误判「平台数据按周期重置」** → 实际是**数据绑定 sessionid**：匿名 session 每次不同数据就不同；
-   固定 sessionid 数据恒定。答题类先确认 session 基线。
+5. **坑：误判「平台数据按周期重置」** → 实为数据绑定 sessionid（平台共性），答题类先确认 session 基线。
 6. **坑：误判「TLS 指纹层拦截」** → 浏览器原生 m 用 curl_cffi 重放同样成功，连接层无拦截；
    真正根因是 udc.js 过期 + signer 缓存 + session 差异（对照实验正反双验，见 SKILL.md §10）。
 

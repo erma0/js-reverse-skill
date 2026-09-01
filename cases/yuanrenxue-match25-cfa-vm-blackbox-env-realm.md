@@ -3,10 +3,12 @@
 - 验证日期：2026-08-31
 - 域名：match.yuanrenxue.cn
 - 题型：接口 `/api/question/25?page=N&pageSize=10&kw=&token=<base64|编码串*编码串>&now=<ms>`；
-  token = x('/api/question/25' + now + page)，now 来自 GET /api/getTime（纯文本服务器毫秒，每次翻页重新取）
+  token = x('/api/question/25' + now + page)，now 来自 GET /api/getTime（每次翻页重新取）
 - 策略：B vm 沙箱黑盒执行（25.js 截取 x 函数 + 环境桩）+ D 环境对齐（时间戳冻结 + global 别名 + pgxList 桩）；
   Node 原生 https 直连无 TLS 校验
 - 答案：26878107（提交 POST /a/25 表单编码，code=2 通关）
+
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ## 算法要点
 
@@ -51,9 +53,8 @@
    **顶层代码 + 具名函数（各自 <90 行）+ `Object.assign` 合并方法集**（match25 返工点）。
 6. **`--targets` 用 `page=1`/`page=2` 参数子串**（勿用 `question/25`：静态资源
    `static/new_match/question/25/*.js` 误命中提前收尾）。
-7. **末页 UA=yuanrenxue**（page5 必须，否则 HTTP 200 但 data 是中文提示数组）；
-   page1-4 用浏览器 UA 即可（match17 的"全页浏览器 UA"在本题同样成立）。
-8. **同 sessionid 数据恒定**：5 页和 26878107 可反复复验；提交过频封号，验证只提交一次。
+7. **末页 UA=yuanrenxue**（page5 必须）；page1-4 用浏览器 UA（match17 同款）。
+8. 5 页和 26878107 同会话可反复复验；提交过频封号，验证只提交一次。
 
 ## 交付结构（过双门禁）
 

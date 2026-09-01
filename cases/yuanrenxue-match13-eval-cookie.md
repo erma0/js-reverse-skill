@@ -5,6 +5,7 @@
 > 实现语言：Python
 > 最后验证日期：2026-08-26
 > 平台类型：match.yuanrenxue.cn（猿人学练习平台）
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ---
 
@@ -29,7 +30,7 @@
 1. **坑：终态过滤用宽正则 `--targets-regex "api/[^/]*13"`** → 先命中 `/api/topic_info?href=13`，取证在数据接口之前收尾，`api/question/13` 只留元数据无响应体。正确做法：终态用完整路径子串 `--targets "api/question/13"`，避免误命中 `href=13` / `api2/13`。
 2. **坑：去 `case/js/original/` 翻挑战脚本** → 脚本是 eval 出来的，静态文件里根本没有。正确做法：先看 `case/ruyi-trace/logs/eval/trace_eval_process_*.ndjson`——RuyiTrace 把 eval 编译的动态代码单独落盘为 `eval_<pid>_<seq>_eval-direct.js` 并带 stack 顶帧（本例直指 `match/13:744`），一步拿到 builder 全文 + entry 行号。这是 cookie 型题目最快的定位路径。
 3. **坑：想用 `node -e` / Python `eval` 直接执行挑战脚本** → 原子有限，写 ~30 行定向求值器更简单也更安全（不执行服务端下发的任意代码）。
-4. **坑：把 `m:window.match13` 当成签名参数去逆** → 参数名存在 ≠ 参数生效。先看 capture 的 target-hits 或 trace 的 xhrNative `url` 里是否真有该 query；本题请求侧全明文。
+4. **坑：把 `m:window.match13` 当成签名参数去逆** → 先看 capture 的 target-hits 或 trace 的 xhrNative `url` 里是否真有该 query；本题请求侧全明文。
 5. **坑：缓存解出的 cookie 复用** → 令牌一次性且逐次校验，缺失/过期直接 `400 {"error":"token failed"}`。每页请求前重新拉 `/api2/13`（与浏览器 `req()` 行为一致）。
 6. **坑：`case/scripts/` 下的对照脚本用 `..` 拼项目根** → 脚本在 `case/scripts/`，回退项目根需两级。
 

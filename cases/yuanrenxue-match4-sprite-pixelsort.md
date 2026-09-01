@@ -5,6 +5,7 @@
 > 实现语言：Python（urllib + ddddocr + Pillow + requests.Session）
 > 最后验证日期：2026-08-23
 > 平台类型：猿人学练习平台（match.yuanrenxue.cn）
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ---
 

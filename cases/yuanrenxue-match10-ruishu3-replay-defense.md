@@ -7,6 +7,7 @@
 > 平台类型：猿人学练习平台（match.yuanrenxue.cn）
 >
 > 历史注记：本案例曾经历两个错误阶段并已终局修正——① 2026-08-25 浏览器黑盒取数违规（反模式 20，中途交付）；② 同期因「浏览器 200 + 外部 400」固化归因「TLS 指纹/会话强绑定封死纯协议」（反模式 11）。终局证明两个结论均错误：外部 400 真因是 m 动态段内容错误（boot+api2 不配套），Node 原生 https 直连全通。误判修正明细见下方「历史误判与修正」。
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ---
 
@@ -65,8 +66,8 @@ writer: arguments[1] = 签名后 URL（m 参数自动附加），页面 $.ajax �
 4. /api2/10 是 script 标签形式加载（sec-fetch-dest: script），响应 318KB 单语句 `$_ts['dfe1683']='...'`
 5. /api/10/offset 每次返回不同变量名（实测 bdfE/AbaB/dbGC/fFag/EABa），eval 后写 window
 6. 数据接口每页响应含 k.k="变量|数值"，须回写 window[变量] 参与下一页 m 生成
-7. page=5 要求 UA 含 yuanrenxue（猿人学系列惯例，match4/5/6/9/10 一致）
-8. 提交接口 POST /a/10 必须表单编码（application/x-www-form-urlencoded），JSON 提交 wrong answer
+7. page=5 要求 UA=yuanrenxue（软提示≠校验通过，见踩坑 5）
+8. 提交接口 POST /a/10 表单编码（JSON 提交 wrong answer）
 9. 数据绑定 sessionid：服务端页面加载时 Set-Cookie 重置 sessionid，须带用户登录态取数
 10. Node 原生 https 直连全通（无 TLS 指纹校验）；「TLS 封死纯协议」为误判
 11. old_time() 会话内恒定 1598547535764，m 不含运行时新鲜时间戳要求

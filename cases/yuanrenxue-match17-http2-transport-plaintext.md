@@ -5,6 +5,7 @@
 > 实现语言：Node.js（原生 `node:http2`，无第三方依赖）
 > 最后验证日期：2026-08-28
 > 平台类型：match.yuanrenxue.cn（猿人学练习平台）
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ---
 
@@ -12,10 +13,10 @@
 
 - JS 特征：页面无混淆、无 SDK、无 WASM、无 JSVMP；请求由内联 script block 12（IIFE，`window.jQuery`）直接 `$.ajax({url:"/api/question/17", data:{page,pageSize,kw,m}})` 发起
 - 参数特征：`page`(1-5) / `pageSize`(固定 10) / `kw`(固定空串)，**全明文**；无签名、无 token、无时间戳、无随机量、无指纹参数
-- **诱饵参数特征**：页面 `data` 对象里写了 `m:window.match17`，但 `window.match17` 由 `$.ajax` hook 在有人请求 `/api/match/17` 时才赋值——该接口从未被调用（25 个包全量核对），值恒为 `undefined`，被序列化/拷贝层直接丢弃。真实 writer 参数全文：`["GET","/api/question/17?page=1&pageSize=10&kw=",true,"undefined","undefined"]`。（match19 trace 修正机理：`$.param` 对 undefined 渲染空串 `m=` 并不丢弃，真正丢弃发生在 `$.ajax` 内部 `k.extend` 深拷贝的 `copy!==undefined` 守卫——详见反模式 27 机理精确版）
+- **诱饵参数特征**：页面 `data` 对象里写了 `m:window.match17`，但 `window.match17` 由 `$.ajax` hook 在有人请求 `/api/match/17` 时才赋值——该接口从未被调用（25 个包全量核对），值恒为 `undefined`，在序列化/拷贝层被丢弃（机理修正见反模式 27）。真实 writer 参数全文：`["GET","/api/question/17?page=1&pageSize=10&kw=",true,"undefined","undefined"]`。
 - 请求特征：`GET /api/question/17?page=N&pageSize=10&kw=`；Cookie 侧无签名（仅 `sessionid` + 百度统计 `Hm_*`）；**无 JS 写入的挑战 cookie**
 - 传输层特征：必须以 HTTP/2 发起（题名「天杀的 Http2.0」）；第 5 页（末页）UA 必须改为 `yuanrenxue`，否则不返回该页数据
-- 风控特征：数据**绑定 sessionid**（同 session 各页数值恒定，可反复复验）
+- 风控特征：数据绑定 sessionid（平台共性）
 
 ## 加密方案
 
@@ -29,12 +30,12 @@
 
 ## 踩坑记录
 
-1. **坑：诱饵参数 `m`（参数名存在 ≠ 参数生效，本题唯一可能浪费大量时间的点）**。`document.html` 的 script block 12 明确写了 `m:window.match17`，script block 10 还有个 `$.ajax` hook 声明"请求 `/api/match/17` 时把 `data.m` 赋给 `window.match17`"——看上去 `m` 就是待还原签名。实际上 `/api/match/17` 从未被请求，值恒为 `undefined`，jQuery `$.param` 序列化时丢弃 undefined 值，URL 里根本没有 `m`。正确做法：**判定参数是否生效，一律以 trace writer 的参数全文或 capture.json 真实请求 URL 为准，不能以 document.html 里的字面量为准**；发现"签名参数恒为 undefined"时，先查它的赋值路径有没有被执行，而不是立刻去找算法。详见反模式 27。
+1. **坑：诱饵参数 `m`（参数名存在 ≠ 参数生效，本题唯一可能浪费大量时间的点）**。`document.html` 的 script block 12 明确写了 `m:window.match17`，script block 10 还有个 `$.ajax` hook 声明"请求 `/api/match/17` 时把 `data.m` 赋给 `window.match17`"——看上去 `m` 就是待还原签名。实际上 `/api/match/17` 从未被请求，值恒为 `undefined`，在序列化/拷贝层被丢弃（机理修正见反模式 27），URL 里根本没有 `m`。正确做法：**判定参数是否生效，一律以 trace writer 的参数全文或 capture.json 真实请求 URL 为准，不能以 document.html 里的字面量为准**；发现"签名参数恒为 undefined"时，先查它的赋值路径有没有被执行，而不是立刻去找算法。详见反模式 27。
 2. **坑：`--targets` 不能用 `question/17`**。静态资源 `https://match.yuanrenxue.cn/static/new_match/question/17/webpack.js` 的路径里含 `question/17`，会先于目标接口命中，取证提前收尾、目标响应体丢失。正确做法：用带参数的子串锁定翻页请求，如 `--targets "page=1"` / `"page=2"`——无论接口是新版 `/api/question/N` 还是老版 `/api/match/N` 都能命中。详见反模式 22。
-3. **坑：接口路径随站点版本变化**。老版 `/api/match/N`，新版 `/api/question/N`；本题 JS 内仍保留 `/api/match/17` 老常量。外部老题解只作假设，**接口路径以本次抓包为准**。
+3. **坑：本题 JS 内仍保留 `/api/match/17` 老常量**，实际生效 `/api/question/17`（接口版本迁移通用告诫见平台篇）。
 4. **坑：`capture_ruyitrace_log.js --import-after` 漏导入大日志**。本次自动导入只收进 823 B 的 `trace_process_28516.ndjson`，而真正含页面 JS 的三个 tab 进程日志（1.8 MB / 2.5 MB / 1.2 MB）在浏览器被 kill 后 10~33 秒才刷盘，此时导入早已结束。正确做法：导入后核对 `case/ruyi-trace/logs/domtrace/` 各文件体积，与摘要里的"合并文件数/行数"比对，明显偏小就用 `import_ruyitrace_log.js --input <file>` 手动合并导入。
 5. **坑：trace 里的 XHR 记录会被第三方 SDK 淹没**。本次 trace 高频调用栈前两名是 `transcend-cdn.com/airgap.js`（6066 次）与 `mozilla.org` 站点脚本，目标域 `jquery.js` 只有 2020 次。正确做法：直接检索目标接口 URL 字面量（`/api/question/17`）定位 writer，不要从 `XMLHttpRequest` 事件列表逐条翻。
-6. **坑：提交必须表单编码**。`document.html` script block 11 是 `$.ajax({url:'/a/17', method:'POST', data:{answer:...}})`，jQuery 默认 `contentType: application/x-www-form-urlencoded`，**用 JSON 会被拒**。返回码语义：`code === 2` 通关；`1` 已做过；其他为答案错误。
+6. **坑：提交 `POST /a/17` 需表单编码**（`document.html` script block 11 `$.ajax` 默认表单编码，JSON 会被拒；返回码语义见平台篇）。
 
 ## 可验证事实清单（经验资产）
 
@@ -44,7 +45,7 @@
 4. Cookie 侧无 JS 写入的挑战 cookie（仅百度统计 `Hm_lvt_*` / `Hm_lpvt_*` / `Hm_ck_*` / `HMACCOUNT`）；`sessionid` 为用户提供的静态登录凭据，非 JS 生成
 5. writer 定位：`XMLHttpRequest.open` @ `https://match.yuanrenxue.cn/static/new_match/jquery/jquery.js:2391:23`（func `send`），证据行 `case/ruyi-trace/logs/domtrace/trace_process_31888.ndjson:781`
 6. 提交 `POST /a/17` 表单编码（`answer` 字段）实测通关：`{"result":"success","created":true,"code":2,"exp":70}`；提交过频会封号，只提交一次
-7. 末页 UA 校验不看状态码：UA 不对时可能仍是 HTTP 200 但 `data` 非数值数组，必须对每页做 `data` 元素类型校验（同 match14/15/16）
+7. 末页 UA 错仍返回 HTTP 200 但 `data` 非数值数组，每页须做 `data` 元素类型校验
 8. Node 原生 `http2` 交付要点：一次 `http2.connect()` 复用全部请求 + 显式 `client.close()`（交付门禁 Session 三件套）；**不要发 `accept-encoding`**，避免 br/zstd 需额外解压，同时保留 zlib 解压兜底；`client.alpnProtocol === 'h2'` 可作协议自检断言
 
 ## 相关参考

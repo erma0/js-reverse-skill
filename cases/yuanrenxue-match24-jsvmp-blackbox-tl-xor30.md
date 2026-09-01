@@ -5,6 +5,7 @@
 > 实现语言：Python（final.py，HTTP）+ Node.js（bridge-vm.js，纯计算产 token）
 > 最后验证日期：2026-08-31
 > 平台类型：match.yuanrenxue.cn 第 24 题「js混淆源码乱码」
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ---
 
@@ -14,7 +15,7 @@
 - 参数特征：`GET /api/question/24?page=N&pageSize=10&kw=&token=<part1>|<part2>&now=<13位ms>`；now = `GET /api/getTime` 服务器毫秒文本；响应 `{"data":[10 个 6~7 位整数]}` 明文
 - **token 结构**：`part1`（base64，约 24 字节）+ `|` + `part2`（密钥材料去重值序列 + 单字母间隔标记 `a`-`g` + `*`，数字集合 = 去重后的 TL 值）
 - 诱饵拓扑：内联 hook 拦截 `/api/match/number`（`m=window.matchnumber`），真实数据请求不含 `m`（反模式 27 第七次实证）；`favicon.ico` 为真图片
-- 风控特征：数据绑定 sessionid；末页(page5) UA=yuanrenxue 且**要求 token 生成环境 UA 同步为 yuanrenxue**；提交 `POST /a/24` 表单编码 `{answer}`，`code=2` 通关
+- 风控特征：末页(page5) UA=yuanrenxue 且**token 生成环境 UA 必须同步为 yuanrenxue**（本题特有）；提交 `POST /a/24`，`code=2` 通关
 - **传输层：Node https 直连被 TLS 指纹黑名单拒绝**（POST /a/24 实测 ECONNRESET，与 match19 一致）——HTTP 全部交给 Python requests，token 由 Node 沙箱纯计算产出经子进程桥交付
 
 ## 加密方案（黑盒执行 + 一处状态修正，6/7 组真实 token 逐字节验证）

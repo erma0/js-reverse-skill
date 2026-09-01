@@ -3,9 +3,11 @@
 - 验证日期：2026-09-01
 - 域名：match.yuanrenxue.cn
 - 题型：接口 `GET /api/question/27?page=N&pageSize=10&kw=&token=<172B base64>&now=<13位ms>`；
-  token = **RSA-1024 公钥加密密文**（128 字节，PKCS#1 v1.5 **随机**填充）；now 来自 GET /api/getTime（纯文本服务器毫秒，每次翻页重新取）
+  token = **RSA-1024 公钥加密密文**（128 字节，PKCS#1 v1.5 **随机**填充）；now 来自 GET /api/getTime（每次翻页重新取）
 - 策略：A 纯算还原（Node `crypto.publicEncrypt` + 内嵌 X.509 SPKI 公钥），**完全不需要跑 336KB 混淆沙箱**
 - 答案：26217857（提交 POST /a/27 表单编码，code=2 通关，exp=131）；**数据绑定 sessionid**
+
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ## 算法链（X 值扫描实证 + 服务端 200 闭环确认）
 
@@ -43,10 +45,9 @@ token = crypto.publicEncrypt({ key: <SPKI>, padding: RSA_PKCS1_PADDING }, Buffer
 5. **m 参数诱饵**（反模式 27 第五次实证）：`m = window["matchnumber"]` = undefined（`o+c+d` 拼接
    "matchnumber" 而非题目号），被 jQuery `$.param` 丢弃，真实请求无 m——trace 的
    `Object.prototype.toString` data 对象全文可见 `"m":"undefined"`。
-6. **站点限流**（反模式 36 同族）：扫描实验连续 20+ 请求触发 429 too many requests；页间 3s +
-   冷却 3~4 分钟；提交用 `--submit --answer <总和>` 单请求解耦。
-7. **末页（page5）UA=yuanrenxue**，否则 HTTP 200 + 中文提示数组；数据绑定 sessionid
-   （同会话数据恒定，page1 与取证 fixture 逐字节一致）。
+6. **站点限流**（反模式 36 同族）：扫描实验连续 20+ 请求触发 429 too many requests；
+   提交用 `--submit --answer <总和>` 单请求解耦。
+7. **末页（page5）UA=yuanrenxue**；数据绑定 sessionid（page1 与取证 fixture 逐字节一致可复验）。
 
 ## 调试弯路（match27 实证）
 

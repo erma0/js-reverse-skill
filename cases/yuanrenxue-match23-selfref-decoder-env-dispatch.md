@@ -5,6 +5,7 @@
 > 实现语言：Node.js（final.js；md5 变体不重写、不抠函数，整文件原码进沙箱）
 > 最后验证日期：2026-08-29
 > 平台类型：match.yuanrenxue.cn 第 23 题「js混淆源码乱码」
+> 平台共性（请求/提交链路、末页 UA、sessionid 绑定、getTime 时间源、诱饵参数惯例、风控底座、token failed 语义）统一见 cases/yuanrenxue-match-platform.md；本文只保留本题差异与专属事实。
 
 ---
 
@@ -14,7 +15,7 @@
 - **自引用解码（本题最关键识别特征）**：base64 解码器 `g` 内 `q=o+g`（q 为 g 自身 toString 源码），解码条件 `q['charCodeAt'](u+0xa)-0xa!==0x0 ? String.fromCharCode(0xff&s>>(-0x2*r&0x6)) : r`——解码正确性**逐字节依赖 g 函数源码不变**；AST 重写 g 后字符串表解出垃圾 → 轮转 IIFE `parseInt(NaN)` 永不收敛死循环。RuyiTrace 中 Function.toString 对 g/MKZrLm 调用 3121 次即该机制工作痕迹
 - 参数特征：`GET /api/question/23?page=N&pageSize=10&kw=&token=<32hex>&now=<13位ms>`；now = `GET /api/getTime` 响应裸数字文本（逐页独立获取）；响应 `{"data":[10 个 6~7 位整数]}` **明文**（与 match22 的 Salted 密文响应不同）
 - 诱饵拓扑：内联 script#3 hook `/api/match/number`（永不发送）存 `window.matchnumber`；d() 返回 `m: window[...]` 恒 undefined，被 $.ajax 深拷贝丢弃（wire URL 无 m；debug 文本有 `&m=`）——反模式 27 第 6 次实证
-- 风控特征：数据绑定 sessionid；末页(page5) UA=yuanrenxue；提交 `POST /a/23` 表单编码 `{answer}`，`code=2` 通关
+- 风控特征：末页(page5) UA=yuanrenxue；提交 `POST /a/23`，`code=2` 通关
 - **传输层：本题 Node https 直连可用**（无 TLS 指纹白名单；与 match19 Node 全拦 / match22 全拦到 curl_cffi 才过形成对照——同站不同题风控强度不同，不能默认迁移）
 
 ## 加密方案（完整还原，4 浏览器样本逐字节验证）
