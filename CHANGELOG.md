@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## 2.3.96 - 2026-09-01
+
+### 近期 match18~29 经验沉淀复核：common-pitfalls 四处修正（编号体系完整性）
+
+对 2.3.83~2.3.95 期间 match18~29 的非案例改动（SKILL.md、experience-rules、common-pitfalls、
+tooling 文档、capture_ruyitrace_log/run_with_trace/state_machine/check_env_prerequisites/
+check_final_artifact 脚本能力）做了一轮完整性复核。脚本能力与文档声称全部一致（`--gate`/
+`--max-log-bytes`/`--pref`/`--env-module`/`DIAGNOSE→BLOCKED_FORENSIC`/P0-P2 硬校验/样本值扫描/
+Session 字面识别均在）；规则 20~39 编号连续、SKILL.md 引用的全部反模式编号均有落点。
+common-pitfalls.md 修正四处：
+
+- **速查表漏条目（实质问题）**：反模式 34/35/36/37（match25/28/29 实证新增）没进速查表——而
+  使用方式规定 CASE_LOOKUP 只扫速查表，四条新经验在速查路径下不可见。已补 4 行。
+- **头部计数过时**：「20 条主条目」/「28 个编号 = 20 实条 + 8 指针」为 2.3.82 时状态，现为
+  37 编号 = 29 实条 + 8 指针，两处已更新。
+- **反模式 29/30 正文顺序颠倒**：30 块排在 29 之前（match22 补录早于 match21 入库所致），已按
+  编号归位并补块间空行。
+- **贡献节规模数字过时**：「21 条实条（封顶 20 已超）」→ 29 条实条，措辞同步更新。
+
 ## 2.3.95 - 2026-09-01
 
 ### 猿人学 match 案例体系整理：平台共性沉淀 + 24 篇案例瘦身 + 通用/专属边界固化

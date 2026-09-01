@@ -4,11 +4,11 @@
 
 ## 使用方式
 
-1. **激活 skill 后（CASE_LOOKUP）**：只扫视下方速查表（20 条主条目 + 1 行合并指针），不必读详情。
+1. **激活 skill 后（CASE_LOOKUP）**：只扫视下方速查表（29 条实条 + 1 行合并指针），不必读详情。
 2. **决策卡住 / 写代码中途怀疑方向时**：回来读对应条目详情。
 3. **用户发现 AI 违反**：直接引用反模式编号质问。
 
-同根因条目已合并为指针条目（28 个编号 = 20 条实条 + 8 条指针），旧编号引用沿指针跳转，不废弃：
+同根因条目已合并为指针条目（37 个编号 = 29 条实条 + 8 条指针），旧编号引用沿指针跳转，不废弃：
 **2→1、5→20、12→11、14→13、15→13、21→11、24→7、26→23**（完整映射见文末「已合并条目指针」）。
 
 ## 速查表
@@ -40,6 +40,10 @@
 | 31 | toString 自引用解码器被 AST 重写破坏——产物能跑但解出垃圾/轮转死循环 | obfuscator 家族一律原码执行+diff 魔改点；AST 产物只阅读禁执行；补丁避开 toString 引用函数体 | IDENTIFY→IMPLEMENT |
 | 32 | 把"常量偏移"误判为"未知环境读取"逐环节对齐——信号：两侧输出逐位 XOR 差值是常数 | 先逐位 diff 判分布；常数=一次性状态偏移→在 VM 输出就地修正（逐元素 XOR 常数）；逐步发散才走反模式 23 | IMPLEMENT→DIAGNOSE |
 | 33 | 跨样本对拍未锁同源（不同页码/构建序号/解码缓存代数混对比）→ 状态差被误读成算法差 | 对拍前锁同源：同页码+同构建序号+同缓存代数（解码缓存跨构建累积）；差异项随轮次漂移=先查状态源 | TRACE_ANALYZE |
+| 34 | 环境桩在主 realm 定义 → `window.window` 自检失败误走错误分支（格式全对但服务端全拒） | 环境桩必须在 `vm.runInContext` 沙箱内执行（`--env-module`）；定位=同输入双环境（沙箱内执行 vs 主 realm 注入）token 对比 | IMPLEMENT |
+| 35 | 换会话后复用旧答案——数据绑定 sessionid，跨会话数据完全不同 | 答案按提交所用会话重算；数据类接口先做 session 基线验证（反模式 19） | REAL_VERIFY |
+| 36 | 站点限流 403 `token failed` 误判成签名/环境错误（短窗口连续请求第 N 页起 403，单请求正常） | 先单请求诊断（fresh now+token 发 page=1，200=签名对）再放慢节奏；采集与提交解耦 | REAL_VERIFY |
+| 37 | JSVMP 一上来就手写解压器/反编译字节码，而 eval 日志已落盘业务源码 | 先查 `case/ruyi-trace/logs/eval/eval_*_eval-direct.js`，存在直接读源码（规则 39），禁止手写解压器 | TRACE_ANALYZE |
 | 2/5/12/14/15/21/24/26 | 已按同根因并入主条目（旧编号保留） | 指针：2→1，5→20，12→11，14/15→13，21→11，24→7，26→23（见文末索引） | — |
 
 ---
@@ -369,14 +373,6 @@ $.ajax = function () {
 
 **判定测试**：沙箱"跑通"但目标 hook/挂载物未出现且无报错时，是否先做了 window 级 Proxy 记录？补桩前是否回答了"VM 在哪个属性访问上与浏览器分歧"？全量堆桩（一次加 10 个桩）即违反单变量原则。
 
-## 反模式 30：沙箱 [Unforgeable] 绑定探针 + base64 字母表环境分支（match22 实证）
-
-**形态一（[Unforgeable] 探针）**：混淆类初始化埋 `w=window → delete window → window=w` —— 真浏览器 delete 返回 false、赋值静默忽略（window 为只读 accessor），vm 沙箱 data 属性会被真删/真换 → 走诱饵分支。**症状**：同输入下关键中间值（如 AES 调度表）逐字漂移但格式全对。**修复**：`window/self/top/parent/frames` 定义为不可配置 accessor（get 返回全局、set 空、configurable:false）；验收 = 同 now 断点比状态机变量（i/z/b/x/D）逐个一致。
-
-**形态二（base64 字母表环境分支）**：AES 输出（Z.ciphertext）双侧**逐字节一致**但密文串不同 → 差异只在编码层：base64 字母表（编码表组装状态机）随环境分叉（如"混元表 abcd…hiA-Z…j-z" vs "a-z,A-Z,0-9"）。**检测**：同 Z.ct 双侧密文串逐字符 diff——若仅大小写/字母置换差异即字母表分支。**修复**：用已知 (Z.ct↔密文串) 配对 + blob 结构假设（如 OpenSSL "Salted__"‖salt‖ct）反推两侧字母表全排列，源码补丁暴露哈希器与密文串（inject `globalThis.__hd=this,globalThis.__hs=String(i),` 于编码调用点前），桥内位置翻译（sb[i]→ch[i]）后重算摘要，token 与真机一致闭环。
-
-**采样纪律（match22 实证）**：此类代码第 2 次计算在调试器挂接时反调试死循环（渲染进程卡死）——MCP 调试采样**一次/会话**，采样前规划全部 dump 项；卡死先查进程 CommandLine 确认 MCP 专属 profile 再杀渲染进程；MCP 断点跨 reload 易丢；evaluateOnCallFrame 的 objectId 在 resume 后失效（单次 pause 内完成全部取值）；文本锚点断点用函数**尾部唯一长片段**反向定位（通用序言 find() 会命中别的函数）。
-
 ## 反模式 29：环境分支诱饵变体——黑盒输出自洽但服务端拒绝，且外部情报对拍失败被误判"情报过期"
 
 **实战案例**：match21（match3.js，match2023 第三题移植）。黑盒沙箱一字不改执行 525KB JSVMP，包装 `window.sm3Digest` 观测到 token = `sm3Digest(t + page)`、格式 64hex 完全正确，发真实请求 400 `{"error":"token failed"}`；ruyipage（Firefox 内核）浏览器自己发的 token 也 400；扫遍 Accept-Time ±1500ms 窗口找不到浏览器 token 对应输入。AI 先后怀疑时间窗口、拼接格式、TLS 黑名单（curl_cffi chrome124 也试了）、外部情报过期——每个方向都空耗多轮。真正根因：**match3.js 初始化时用 `Function.prototype.toString` 对 Object/Document/Window/Location/FocusEvent/Node/HTMLDocument/print 及 DOM 方法做 native 自检，非 Chrome 内核或不完整沙箱检测不过，走入"诱饵算法变体"**——同一个 `sm3Digest`，诱饵分支的 IV 数组退化为重复值（`IV[1]=IV[4]=7370067d`）、strToBytes 不做字节偶数化，产出的 token 与真分支**结构同构但常量全不同**。
@@ -404,6 +400,15 @@ match27 算法本身没变（同一 RSA），错的是**喂给算法的数值常
 **正确做法**：算法可纯算（公钥/模数可提取）时**直接转纯算 + 候选 X×公钥扫描实证**（对 X ∈ 小整数集 ×
 各候选公钥逐个 `publicEncrypt` 发请求，200 即定案，match27 实证 pubkey1+X=27 → 200、X=28/pubkey2 全
 403）——不要死磕沙箱环境对齐（规则 38）。沙箱作为"结构确认"工具（验证 token 形态/明文格式来源）即可。
+
+## 反模式 30：沙箱 [Unforgeable] 绑定探针 + base64 字母表环境分支（match22 实证）
+
+**形态一（[Unforgeable] 探针）**：混淆类初始化埋 `w=window → delete window → window=w` —— 真浏览器 delete 返回 false、赋值静默忽略（window 为只读 accessor），vm 沙箱 data 属性会被真删/真换 → 走诱饵分支。**症状**：同输入下关键中间值（如 AES 调度表）逐字漂移但格式全对。**修复**：`window/self/top/parent/frames` 定义为不可配置 accessor（get 返回全局、set 空、configurable:false）；验收 = 同 now 断点比状态机变量（i/z/b/x/D）逐个一致。
+
+**形态二（base64 字母表环境分支）**：AES 输出（Z.ciphertext）双侧**逐字节一致**但密文串不同 → 差异只在编码层：base64 字母表（编码表组装状态机）随环境分叉（如"混元表 abcd…hiA-Z…j-z" vs "a-z,A-Z,0-9"）。**检测**：同 Z.ct 双侧密文串逐字符 diff——若仅大小写/字母置换差异即字母表分支。**修复**：用已知 (Z.ct↔密文串) 配对 + blob 结构假设（如 OpenSSL "Salted__"‖salt‖ct）反推两侧字母表全排列，源码补丁暴露哈希器与密文串（inject `globalThis.__hd=this,globalThis.__hs=String(i),` 于编码调用点前），桥内位置翻译（sb[i]→ch[i]）后重算摘要，token 与真机一致闭环。
+
+**采样纪律（match22 实证）**：此类代码第 2 次计算在调试器挂接时反调试死循环（渲染进程卡死）——MCP 调试采样**一次/会话**，采样前规划全部 dump 项；卡死先查进程 CommandLine 确认 MCP 专属 profile 再杀渲染进程；MCP 断点跨 reload 易丢；evaluateOnCallFrame 的 objectId 在 resume 后失效（单次 pause 内完成全部取值）；文本锚点断点用函数**尾部唯一长片段**反向定位（通用序言 find() 会命中别的函数）。
+
 ## 反模式 31：toString 自引用解码器被 AST 重写破坏——产物能跑但解出的全是垃圾，或轮转死循环（match23 实证）
 
 **形态一（重写破坏自引用）**：obfuscator.io 家族的 base64 解码器内含 `q = o + g`（q 为解码函数**自身 toString 源码**），解码条件形如 `q['charCodeAt'](u+0xa)-0xa!==0x0 ? String.fromCharCode(...) : r`——解码结果逐字节依赖函数源码原文。AST 反混淆流水线重排/重写该函数体后，字符串表解出垃圾 → `parseInt` 得 NaN → 字符串表轮转 IIFE（`while(!![]){...push(shift())...}`）**永不收敛死循环**。**症状**：流水线 status=ok，产物在沙箱一加载就超时；或"能跑但所有解码串都是乱码"。**识别信号**：RuyiTrace 中 Function.toString 对同一解码函数高频调用（match23 对 g/MKZrLm 调用 3121 次）；源码含 `['charCodeAt'](变量+十六进制常量)` 求和偏移（detect-patterns 已内置该形态告警）。
@@ -545,4 +550,4 @@ eval 的**完整业务源码**落盘成 `eval/eval_<pid>_<seq>_eval-direct.js`�
 每次实战失败后，如果发现 skill 里没覆盖的新反模式：
 1. 按"反模式 N：XXX"格式追加一条（编号顺延，不重排既有编号）。
 2. 必须有**真实站点名**、AI 当时的**具体操作**、**为什么辩护不成立**、**正确做法**、**判定测试**；"AI 的辩护"可并入"为什么不成立"。
-3. **同根因合并优先**：新失败与既有条目同根因时，并入既有条目（原编号保留在指针索引），不新增编号；并入前同时检查主条目与指针条目两处。当前规模：**21 条实条 + 8 条指针**（2/5/12/14/15/21/24/26），实条已达 21（封顶 20 已超，见下）；确需新增编号时，先评估是否该合并相邻条目或按阶段/主题分卷重构，而不是线性膨胀。
+3. **同根因合并优先**：新失败与既有条目同根因时，并入既有条目（原编号保留在指针索引），不新增编号；并入前同时检查主条目与指针条目两处。当前规模：**29 条实条 + 8 条指针**（2/5/12/14/15/21/24/26）；确需新增编号时，先评估是否该合并相邻条目或按阶段/主题分卷重构，而不是线性膨胀。
