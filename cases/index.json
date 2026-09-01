@@ -314,6 +314,29 @@
       "verifiedAt": "2026-08-24"
     },
     {
+      "title": "猿人学 match 平台共性知识库",
+      "domains": [
+        "match.yuanrenxue.cn",
+        "yuanrenxue.com"
+      ],
+      "signals": [
+        "平台共性",
+        "末页 UA=yuanrenxue",
+        "sessionid 数据绑定",
+        "POST /a/N 表单编码",
+        "蜜月期",
+        "限流",
+        "token failed 多义",
+        "api/getTime",
+        "诱饵参数 window.matchN",
+        "试炼步骤"
+      ],
+      "strategy": "平台级通用基线：请求/提交链路、末页 UA 校验、sessionid 数据绑定、getTime 时间源、诱饵参数惯例、蜜月期/限流风控底座、token failed 多义性、取证注意与通用/专属边界维护规则；match4~29 多题实证沉淀",
+      "file": "yuanrenxue-match-platform.md",
+      "kind": "template",
+      "verifiedAt": "2026-09-01"
+    },
+    {
       "title": "页面内联明文 btoa 签名 + 末页 UA 校验（猿人学第12题）",
       "domains": [
         "match.yuanrenxue.cn"

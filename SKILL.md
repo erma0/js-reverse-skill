@@ -441,6 +441,8 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 
 只读命中案例，提取可复用定位方法、已知坑点、验证日期。命中后做时效校验：JS URL/文件名/资源版本、sha256 或资源清单、参数名称/长度/写入位置/请求链均一致才复用算法；否则降级为方法论参考。未命中进入 EXTERNAL_LOOKUP。新经验写入本次 `result/`，不修改 skill 仓库的 `cases/`。
 
+目标为 match.yuanrenxue.cn（猿人学 match 题）时，先读平台共性基线 `cases/yuanrenxue-match-platform.md`（请求/提交链路、末页 UA、sessionid 数据绑定、风控底座、token failed 多义性等，match4~29 实证沉淀），再按 `cases/yuanrenxue-match-index.md` 题号速查定位该题案例；平台共性仍是假设，各题风控配置独立，须本次取证逐项验证。
+
 ## 6. 范围与环境复核
 
 案例证据显示目标接口、参数或运行环境与初始范围不一致时，回 INTENT_CONFIRM；工具环境变化时回 ENV_READY。未变化则直接进入 IDENTIFY。
@@ -639,6 +641,7 @@ node scripts/check_final_artifact.js --case-dir <project-root> --production --ma
 | 当前需要 | 首选 reference |
 |---|---|
 | 状态机细则、常见坑、经验法则 | `references/workflow/phase-flow.md`、`decision-tree.md`、`common-pitfalls.md`、`experience-rules.md` |
+| 猿人学 match 题（match.yuanrenxue.cn） | `cases/yuanrenxue-match-platform.md`（平台共性基线）+ `cases/yuanrenxue-match-index.md`（题号速查） |
 | 取证、trace 质量与重试、工具安装 | `references/workflow/trace-flow.md`、`references/tooling/ruyi-tooling.md`、`browser-acquisition.md` |
 | 混淆 JS 反混淆（`_0x`/字符串表/控制流平坦化，AST 改写） | `assets/ast-patterns/README.md` 入口：`detect-patterns.js` 检测家族 → `run-pipeline.js` 执行流水线 |
 | 运行混淆 JS 验证行为（vm 沙箱 + 超时 + 环境访问日志 + 自定义环境模块） | `node scripts/run_with_trace.js --help`（禁止手写 vm runner；分支对齐桩用 `--env-module` + `--bootstrap-mode minimal`） |
