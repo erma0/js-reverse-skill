@@ -3,6 +3,14 @@
 
 > 历史版本（2.3.87 及更早）已归档至 CHANGELOG.archive.md。
 
+## 2.3.100 - 2026-09-06
+
+### 修复 RB-026 锚点漂移（CI failure）
+
+- 2.3.98 精简 SKILL.md 取证注释块时，把硬约束原文「禁止用会误命中同号旁路接口的宽正则」改写为「禁止宽正则误命中旁路」，导致 `check_routing_benchmarks.js --markdown` 的 RB-026 锚点断言失配（双平台 CI 失败，本地 Windows 因跑的是 `--self-test` 未复现）。
+- **修复**：SKILL.md §6 网络取证行恢复锚点原文；反模式 22 细节仍在 `references/workflow/common-pitfalls.md`，指针不变。
+- 教训：SKILL.md 中被 `skillAnchors` 依赖的硬约束短语属于「防漂移契约」，精简措辞前先跑 `--markdown` 全量基准（不只是 `--self-test`）。
+
 ## 2.3.99 - 2026-09-06
 
 ### 算法家族表吸收外部仓库通用经验（yunforis/js-reverser 对照，T1 形态不落站点密钥）

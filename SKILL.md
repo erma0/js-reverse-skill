@@ -294,7 +294,7 @@ node scripts/search_cases.js --domain <目标域名> --signal <参数名或SDK�
 
 命中时提取三项情报写入状态行后再取证：① 终态接口模式（校准 `--targets`，禁止靠记忆猜接口路径候选）；② 同站点已知坑点与采集参数建议（等待窗口、trace 信号选择等）；③ 题型假设与可复用方法论。未命中按全新 case 取证。速查结果只是假设与路径提示（绝对规则 2），不替代本次取证证据；同站历史案例不因速查命中而免除本次取证。
 
-网络取证（`--targets` 仅写唯一标识终态接口的完整路径子串，禁止宽正则误命中旁路，见反模式 22；入口页 HTML 自动存 `case/forensic/document.html` 作为 challenge cookie 强制证据）：
+网络取证（`--targets` 仅写唯一标识终态接口的完整路径子串，禁止用会误命中同号旁路接口的宽正则，见反模式 22；入口页 HTML 自动存 `case/forensic/document.html` 作为 challenge cookie 强制证据）：
 
 ```powershell
 python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root> --targets <最终业务接口关键词> --markdown
