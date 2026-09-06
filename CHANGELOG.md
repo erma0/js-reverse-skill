@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## 2.3.97 - 2026-09-06
+
+### 1997.pro 博客 44 篇逆向经验对照入库：4 份新 reference + 小程序边界澄清
+
+系统抓取 yazong 博客（1997.pro）全部 44 篇文章并逐域对照本 skill（对照分析报告见本地
+`analysis-1997-blog/REPORT.md`，不随仓库分发）。结论：Web JS 主干域（混淆/平坦化/指纹/
+TLS 对齐/验证码/WASM）skill 已覆盖且更工程化，本次只吸收博客的**真增量**，四份均为新增
+文档、不改动既有行为：
+
+- **新增 `references/web/covert-channel.md`（新领域）**：浏览器隐蔽信道四分类（存储机制/
+  跨上下文线程/DOM 属性/文件与渲染产物隐写）+ trace 取证信号；重点收录阿里滑块 `_rand`
+  的 **CSS 动画隐写**案例（@keyframes+@supports/@media 条件块 → animationend 终态
+  opacity/color 读取序列化进参数）与**纯协议还原六步法**（ENV 过滤条件规则 + 关键帧线性
+  插值 + direction/fill-mode 终态模拟，与真机渲染一致）。
+- **新增 `references/network/tls-handshake-gotchas.md`**：JA4 已对齐仍被拦的三个握手级
+  残差——ClientHello 记录层分段（Chrome 分片 vs 库整发）、Key Share PQC 混合
+  （x25519+kyber768 vs 纯 x25519）、TCP seq 恒 1；附单变量诊断流程。对齐主流程仍以
+  `tls-validation.md` 为准，本文只管残差。
+- **新增 `references/env/env-concurrency.md`**：补环境服务化工程。vm2 实测陷阱（CPU 密集
+  PoW 下 +1069% 耗时 / 十倍内存）→ 禁用 vm2；OOM 根因 = V8 **isolate 级 code cache 不随
+  context 回收** × Piscina 复用 worker 单调累积 → 修复 `idleTimeout=1 + minThreads=0`；
+  PoW 类任务 MAX_ITERATIONS/MAX_TIME 双保险模板。单请求取证仍走 `run_with_trace.js` 不变。
+- **新增 `references/deobfuscation/vmp-decompile-optional.md`（例外路径）**：纯 Web JS
+  VMP 黑盒穷尽（eval 落盘/字面量转纯算/带栈 opcode）仍失败时的反编译逃生舱——调度核
+  `Q[m[g++]]` 插桩 → 指令语义重写 → 闭包/异常表建模 → AST 重建；黑盒默认不变，Native
+  严禁（绝对规则 4）。
+- **SKILL.md 三处接入**：§7 IDENTIFY 信号表补"隐蔽信道"路由行；§8 TRACE_ANALYZE 补
+  "参数输入链可能经浏览器隐蔽信道"硬提醒段落；§12 路由表补 2 行。
+- **小程序边界澄清**：frontmatter 与 §1 任务边界由"不用于小程序"精确为"小程序限纯 JS
+  参数还原（Native/加壳部分除外）"——小程序底层多为 JS 封装（wx 对象即 JS），纯 JS 参数
+  还原属 Web 路径，与博客 rid 还原实践一致。
+- **`references/workflow/reference-map.md`**：场景表补 4 行 + 目录索引补 web/ 节与 3 条
+  新文档条目。
+
 ## 2.3.96 - 2026-09-01
 
 ### 近期 match18~29 经验沉淀复核：common-pitfalls 四处修正（编号体系完整性）

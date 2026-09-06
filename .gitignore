@@ -26,6 +26,9 @@ tools/
 /notes/
 /测试日志.txt
 
+# 本地研究语料（第三方博客抓取内容与对照分析，版权原因不入库；结论已沉淀进 references/）
+analysis-1997-blog/
+
 # 通用
 *.log
 *.tmp

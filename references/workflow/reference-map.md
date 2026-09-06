@@ -22,6 +22,10 @@
 | 指纹一致性和信任判断 | `references/fingerprint/fingerprint-baseline-consistency.md`、`trust-matrix.md`、`fingerprint-value-replay.md` |
 | 高强度检测排查与 trace 一致性 | `references/quality/high-strength-detection.md`、`trace-api-coverage.md`、`trace-runtime-conformance.md` |
 | 反调试对抗与 Hook 模板 | `references/hooks/anti-debug.md`、`hook-templates.md` |
+| 参数经浏览器隐蔽信道传递（trace 无 writer / 渲染产物藏数据） | `references/web/covert-channel.md` |
+| 补环境服务化：并发、OOM、执行引擎选型 | `references/env/env-concurrency.md` |
+| TLS/JA4 已对齐仍被拦的握手级残差 | `references/network/tls-handshake-gotchas.md` |
+| 纯 Web JS VMP 黑盒失败后的反编译例外路径 | `references/deobfuscation/vmp-decompile-optional.md` |
 | 验证码 | 先读 `references/captcha/captcha-overview.md`，再按厂商、题型、轨迹或验证失败路由到具体文档 |
 | 交付、验证、清理与代码规范 | `references/quality/delivery-templates.md`、`validation.md`、`cleanup.md`、`final-summary.md`、`code-style.md`、`code-change-memory.md`、`stage-reports.md`、`trusted-input.md` |
 | 调试、取证流程与工具获取 | `references/debug/debug-playbook.md`、`references/workflow/trace-flow.md`、`references/tooling/ruyi-tooling.md`、`browser-acquisition.md` |
@@ -57,6 +61,7 @@
 ### deobfuscation
 
 - `references/deobfuscation/obfuscation-identify.md`
+- `references/deobfuscation/vmp-decompile-optional.md`
 
 ### env
 
@@ -72,6 +77,7 @@
 - `references/env/object-shape-private-state.md`
 - `references/env/runtime-frameworks.md`
 - `references/env/webapi-env-detection-matrix.md`
+- `references/env/env-concurrency.md`
 
 ### fingerprint
 
@@ -87,6 +93,7 @@
 ### network
 
 - `references/network/tls-validation.md`
+- `references/network/tls-handshake-gotchas.md`
 - `references/network/session-chain.md`
 - `references/network/cookie-generation.md`
 - `references/network/dynamic-resource.md`
@@ -122,6 +129,10 @@
 - `references/tooling/browser-acquisition.md`
 - `references/tooling/ruyi-tooling.md`
 - `references/tooling/ruyitrace-cheatsheet.md`
+
+### web
+
+- `references/web/covert-channel.md`
 
 ### workflow
 

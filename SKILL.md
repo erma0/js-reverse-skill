@@ -5,7 +5,7 @@ description: >
   cookie、设备指纹的生成逻辑；适用于各类动态参数的生成逻辑分析，覆盖标准算法、自定义混淆、
   obfuscator.io、JSVMP 黑盒补环境、WASM 加密、TLS 指纹模拟、Session 请求链、验证码 verify、
   反爬风控对抗等场景。覆盖桌面网页、移动 H5 与内置浏览器，交付 Node.js/Python 实现。
-  不用于 App、小程序、桌面程序及 Native 逆向；JSVMP 默认黑盒执行或最小环境复现。
+  不用于 App、桌面程序及 Native 逆向；小程序限纯 JS 参数还原（Native/加壳部分除外）；JSVMP 默认黑盒执行或最小环境复现。
 ---
 
 # 通用网页端 JS 逆向技能
@@ -121,7 +121,7 @@ Windows 下后续手动运行 Python 脚本一律用环境检查选定的解释�
 
 任务边界：
 
-- 处理对象：网页端 JS 签名、Cookie/Token、设备指纹、混淆、WASM、JSVMP、验证码 verify 与 Session/TLS 请求链；覆盖桌面网页、移动 H5 与内置浏览器；不用于 App、小程序、桌面程序及 Native 逆向。
+- 处理对象：网页端 JS 签名、Cookie/Token、设备指纹、混淆、WASM、JSVMP、验证码 verify、Session/TLS 请求链与浏览器隐蔽信道参数；覆盖桌面网页、移动 H5 与内置浏览器；不用于 App、桌面程序及 Native 逆向。小程序底层多为 JS 封装（wx 对象即 JS），其**纯 JS 参数还原**走本 skill Web 路径；涉及 Native .so、加壳或非 JS 层的部分仍超出范围。
 - 交付要求：最终交付是可审计、可复现、可维护的纯协议实现；浏览器仅用于取证与运行时观察，不作为交付物执行依赖。
 - 技术栈：支持 Node.js 与 Python；优先复用成熟实现；新增依赖写入依赖契约并确认来源和版本。
 
@@ -468,6 +468,7 @@ node scripts/search_cases.js --domain <域名> --signal <信号>
 | webmssdk、byted_acrawler、bdms、a_bogus、X-Bogus、_signature | trace 定位环境读取和签名写入；注意 `byted_acrawler.sign` 多返回老版 `_signature`，`a_bogus`/`X-Bogus` 由 `bdms` 生成，两者不可混淆 |
 | geetest、smcp、dx-captcha、TCaptcha、NECaptcha、AWSC | 按封装层、答案层、verify 链分别处理 |
 | h5st、js_security_v3、JA3/JA4 | 先确认会话绑定和 TLS 指纹，再实现请求链 |
+| 参数/状态输入在 trace 中无 writer，或依赖页面上一次会话、iframe/worker 上下文、渲染产物 | 浏览器隐蔽信道排查（storage/跨上下文/DOM/CSS 动画终态隐写），见 `references/web/covert-channel.md`；阿里滑块 `_rand` 类 CSS 动画隐写纯协议可还原 |
 | `Salted__` 魔数（b64 解码 53616c7465645f5f）、keySize/iterations+盐常量碎片、44 字符尾 `=` | OpenSSL Salted 格式：blob="Salted__"‖salt(8)‖ct；key/iv=EvpKDF-MD5(password,salt,keySize字) 多块链；**盐在 blob 内服务端可提取，随机/恒定均可**（match22：fe() 随机函数三层降级 fallback 常量即盐；ct=AES-256-CBC(now+page)，密文串=custom_b64(blob)） |
 | obfuscator **短名混淆**（无 `_0x`：a1/Q/zk）+ 自保护陷阱（`'newState'`/`MKZrLm`）+ 解码器 `charCodeAt(变量+常量)` 求和偏移 | **toString 自引用解码**：解码器以自身 toString 源码为密钥表——AST 反混淆产物禁执行（重写即解出垃圾/轮转死循环，反模式 31），原码执行 + 一行导出桩；detect-patterns 已内置 ob-io 家族与自引用告警 |
 | 多组输入的签名/token **低雪崩**（不同输入仅个位 nibble/字节变化，甚至不同输入同输出） | 结构化魔改哈希（环境分派 IV + 掩码加法器），非标准哈希——优先原码执行 + 环境分支对齐，别去逆标准算法；同输入恒同输出但被拒 → 环境分支（反模式 29/31，规则 29） |
@@ -527,6 +528,8 @@ node scripts/run_with_trace.js --target <project-root>/case/js/original/<资源�
 环境补齐采用证据驱动的最小集合。只有 trace 显示参与参数或服务端校验的模块才实现；每轮补齐保存输入、中间值、输出和请求结果，禁止一次性伪造大量浏览器 API。环境检测代码不等于服务端约束，未进入关键链路的检测不纳入最终环境。
 
 **签名输入含不可复算随机值 = 分支判定失败（硬约束）**：复现出签名后先自问「服务端能用请求里已有的信息复算出这个值吗」。若签名依赖服务端无法复算的量（RSA 随机 padding 产物、`Math.random`/`crypto.getRandomValues` 结果、只存在于客户端的本地状态），说明沙箱走进了错误分支，**不得继续枚举算法组合或拼接顺序**——转 DIAGNOSE，从随机量产生处回溯到最近的分支条件，逐个对照该条件依赖的环境值（单变量原则）。全局对象被目标 JS 覆盖是最常见诱因，见 `references/env/env-object-model.md` 与 `references/workflow/common-pitfalls.md` 反模式 23。
+
+**参数输入链可能经浏览器隐蔽信道（硬提醒）**：签名/状态的输入不一定来自同上下文 JS 计算——可能先写入 localStorage/cookie/IndexedDB/Cache、经 postMessage/BroadcastChannel 跨上下文传递、写进 DOM 属性，或藏进 CSS 动画终态/canvas 像素等渲染产物，再由业务 JS 读出拼参。trace 摘要里目标参数 writer 缺失、或输入含"上一次请求的产物"时，按 `references/web/covert-channel.md` 四类信道排查（`localStorage.setItem`/`postMessage`/`animationend`/`toDataURL` 等信号必须与参数名组合，避免泛化命中门禁拒绝）。隐写信道参与参数生成时属于"参与参数的模块"，按证据驱动最小集合原则必须实现。
 
 ## 9. IMPLEMENT
 
@@ -645,6 +648,8 @@ node scripts/check_final_artifact.js --case-dir <project-root> --production --ma
 | 取证、trace 质量与重试、工具安装 | `references/workflow/trace-flow.md`、`references/tooling/ruyi-tooling.md`、`browser-acquisition.md` |
 | 混淆 JS 反混淆（`_0x`/字符串表/控制流平坦化，AST 改写） | `assets/ast-patterns/README.md` 入口：`detect-patterns.js` 检测家族 → `run-pipeline.js` 执行流水线 |
 | 运行混淆 JS 验证行为（vm 沙箱 + 超时 + 环境访问日志 + 自定义环境模块） | `node scripts/run_with_trace.js --help`（禁止手写 vm runner；分支对齐桩用 `--env-module` + `--bootstrap-mode minimal`） |
+| 隐蔽信道（参数经 storage/postMessage/DOM/CSS 动画隐写传递） | `references/web/covert-channel.md` |
+| 补环境服务化（并发/OOM/vm2 选型）、TLS 已对齐仍被拦、纯 Web VMP 黑盒失败 | `references/env/env-concurrency.md`、`references/network/tls-handshake-gotchas.md`、`references/deobfuscation/vmp-decompile-optional.md` |
 | 加密、混淆、环境、WASM、网络、指纹、验证码、交付 | 按场景细分见 `references/workflow/reference-map.md` |
 
 完整目录和场景索引在 `references/workflow/reference-map.md`。目录、脚本和模板的具体参数以实际脚本 `--help` 输出为准。若 reference 与本文件冲突，以本文件的状态机、真实 API 验证规则和纯协议红线为准。
