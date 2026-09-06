@@ -160,7 +160,7 @@ function detectState(pythonSpec) {
 }
 
 // 供应链锁定：tool-pins.json 的 pythonPackages.ruyiPage.version 存在时按精确版本安装，
-// 升级必须先更新锁定记录并回归验证（CHANGELOG 2.3.47 的兼容项），防止破坏性升级无感知引入
+// 升级必须先更新锁定记录并回归验证（CHANGELOG.archive.md 2.3.47 的兼容项），防止破坏性升级无感知引入
 function pinnedRuyipageVersion() {
   try {
     const pins = JSON.parse(fs.readFileSync(path.join(__dirname, 'lib', 'tool-pins.json'), 'utf8'));

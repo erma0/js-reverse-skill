@@ -155,6 +155,8 @@ Windows 下后续手动运行 Python 脚本一律用环境检查选定的解释�
 
 状态转换是唯一准入规则，旧版编号清单不得并行执行。
 
+（命令参数细则见 `scripts/README.md`，trace 策略见 `references/workflow/trace-flow.md`；本节聚焦状态流转与门禁规则，不重复承载细则。）
+
 ```text
 INTENT_CONFIRM
   ├─ 范围明确 → ENV_READY
@@ -292,24 +294,16 @@ node scripts/search_cases.js --domain <目标域名> --signal <参数名或SDK�
 
 命中时提取三项情报写入状态行后再取证：① 终态接口模式（校准 `--targets`，禁止靠记忆猜接口路径候选）；② 同站点已知坑点与采集参数建议（等待窗口、trace 信号选择等）；③ 题型假设与可复用方法论。未命中按全新 case 取证。速查结果只是假设与路径提示（绝对规则 2），不替代本次取证证据；同站历史案例不因速查命中而免除本次取证。
 
-网络取证：
+网络取证（`--targets` 仅写唯一标识终态接口的完整路径子串，禁止宽正则误命中旁路，见反模式 22；入口页 HTML 自动存 `case/forensic/document.html` 作为 challenge cookie 强制证据）：
 
 ```powershell
-# 发起取证命令前先 --set 对应节点（FORENSIC_CAPTURE / TRACE_CAPTURE），取证完成再补设会被状态机拒绝；
-# 已完成上述取证前速查的情报用于校准本命令参数。
-# --targets = 本次流程的终态接口（如最终登录/业务提交接口）；任一目标 URL 的非 OPTIONS 2xx 响应命中后进入短暂收尾窗口并结束取证，
-# 抓包从页面打开前覆盖到终态，不要求用户预先列全验证码 load/verify 等中间接口。
-# 自动保存入口页面 HTML 到 case/forensic/document.html（含 412/JS challenge 页内联脚本，是 acw_sc__v2 等 challenge cookie 的强制证据）。
-# --targets 只写能唯一标识终态接口的完整路径子串（如 api/question/13）；禁止用会误命中同号旁路接口的宽正则
-# （topic_info?href=N / api2/N / a/N 都含同一数字，宽正则会让取证在目标接口之前提前收尾 → 目标响应体丢失，见反模式 22）。
-# 全部参数细则（时间参数一律「秒」、--wait/--target-settle 上限、--cookie/--cookie-domain 会话注入、--ua 覆盖、
-# 60包/100MB 关联预算、bodies/wasm 落盘、预览阈值与 saved_to/_complete 语义）见 scripts/README.md
-# 与 references/workflow/trace-flow.md，此处不重复。
-# --ua 只覆盖 UA 字符串；eval.toString() 等内核级检测覆盖无效，命中此类检测按状态机 BLOCKED_FORENSIC 处理
-# （见 references/env/env-detect-bypass.md 内核级差异检测），禁止为改 UA 手写取证探针。
-# RED LINE：--cookie 仅用于"注入到取证浏览器以还原真实会话过程"，不替代最终交付的协议实现。
 python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root> --targets <最终业务接口关键词> --markdown
 ```
+
+- 发起取证命令前先 `--set` 对应节点（FORENSIC_CAPTURE / TRACE_CAPTURE），取证完成再补设会被状态机拒绝；抓包从页面打开前覆盖到终态，不要求用户预先列全验证码 load/verify 等中间接口。
+- `--ua` 只覆盖 UA 字符串；`eval.toString()` 等内核级检测覆盖无效，命中按 `BLOCKED_FORENSIC` 处理（见 `references/env/env-detect-bypass.md`），禁止手写取证探针。
+- RED LINE：`--cookie` 仅注入取证浏览器还原真实会话，不替代最终交付的协议实现。
+- 完整参数细则（时间参数单位秒、`--wait/--target-settle` 上限、`--cookie/--cookie-domain`、`--ua`、60 包/100MB 预算、bodies/wasm 落盘、`saved_to/_complete` 语义）见 `scripts/README.md` 与 `references/workflow/trace-flow.md`。
 
 终态目标请求未命中 = Step 1 缺失，禁止转源码搜索继续。JS 源码关键词定位只能作辅助假设；用户也可提供 cURL/HAR/原始请求文本；终态命中并落盘后再回 EVIDENCE_GATE。**NO_TARGET 不是死路（match18 实证）**：取证脚本输出末尾的「本次实际观察到以下动态 2xx 接口（重采候选）」就是校准 `--targets` 的第一手材料——诱饵接口路径导致首次未命中时，按候选列表锁定真实接口（本例 `api/v/question/18data`）重采即 PASS，不要凭记忆换下一个猜测路径再赌一次。**命中但全 403（match26 实证）**：目标接口被请求但响应恒为 403（如 `token failed`，sessionid 已带上）时，target-hits.json 的 URL/Query 参数结构仍是**接口路径与参数名的有效证据**（配合 RuyiTrace 定位写入点）——不要无限重采；签名正确性由「trace 定位 builder/writer + 沙箱对齐环境分支 + REAL_VERIFY 真实 API 5 页全 200」闭环验证，取证侧 403 样本可能是环境分派诱饵分支所致（Firefox 内核走错 IV，match21/26 同族）。
 
@@ -328,28 +322,13 @@ Windows 下若 Python 脚本输出仍现编码异常，用 `PYTHONUTF8=1` 前缀
 
 ```powershell
 node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-root> --evidence-signal <环境API或签名写入点关键词> --end-signal <明确完成事件> --import-after --markdown
-# --trace-signal / --evidence-signal 只匹配 RuyiTrace 记录的环境 API / 写入点（如 Headers.set(<参数>)、参数名、JSONP callback 注册；
-# XHR 类调用记录为 {"interface":"XMLHttpRequest","member":"open"} 分存字段，信号写 XMLHttpRequest.open 即可结构化命中）。
-# 三类必然未命中的信号，一律不传：①目标接口 URL（trace 记录 API 调用不记录请求 URL）；
-# ②裸 createElement/appendChild/querySelector/JSON.stringify/Date.now 等泛化 API（门禁脚本会拒绝）；
-# ③密钥/常量名（如 appSignKey、bl、secret；trace 记录运行时值与写入点，不记录密钥字面量，会误触发硬阻断）。
-# 应选参数写入点/参数名（如 noncestr、x-zse-96、Headers.set(...)）。
-# 目标接口 URL 的命中证据由 Step 1 承担：forensic_ruyipage.py --targets <URL> + check_evidence.js --require-network-signal <URL>。
-# --end-signal 只控制自动采集何时提前关闭，与 evidence-signal 不再混用；不传时仅用户关闭或 duration 到期结束。
-# --target-signal 仅为兼容旧调用，同时作为 evidence-signal 和 end-signal；新流程不要使用。
-# 定向采集：已锁定目标脚本/函数、jsvmp 题型或首轮日志过大时，追加 --trace-env KEY=VALUE 透传 MOZ_DOM_* 定向开关
-#（jscall 收窄、detail 真值、opcode/vm_step、WS 帧）从源头收窄，先判题型再选最小开关组合；
-# 场景组合表与收窄纪律见 references/workflow/trace-flow.md「定向 trace 策略」，完整开关手册见
-# references/tooling/ruyitrace-cheatsheet.md。默认全量采集仍是首轮与出口门禁基准。
-# JSVMP 题型采集完成后核对 case/ruyi-trace/logs/eval/ 是否落盘 eval_*_eval-direct.js（vmpzl 系 VM 业务层
-# 经 eval 执行反序列化源码，落盘即业务逻辑，规则 39/反模式 37），有则后续 TRACE_ANALYZE 直接读源码。
-# 带栈 opcode（STACK_FULL）必配：--gate --gate-after <ms> --gate-duration <ms>（只录交互窗口，防 GB 级日志）
-# + --max-log-bytes <n>（体积硬保险）+ --pref javascript.options.blinterp=false 等三层 pref（tier-pin，
-# 否则 tier=jit 的 opcode 记录无栈值），配方见 ruyi-tooling.md「闸门窗口 + 外部驱动采集」。
-# 其余参数细则（--duration 默认 120 秒与收尾刷盘、--signal-policy advisory、--cookie/--cookie-domain 写入 trace profile
-# cookies.sqlite 且 --input 导入时忽略、endReason 语义）见 scripts/README.md 与
-# references/workflow/trace-flow.md，此处不重复。
 ```
+
+- 信号语义：`--evidence-signal` 只匹配 RuyiTrace 记录的 API/写入点（`Headers.set(<参数>)`、参数名、`XMLHttpRequest.open`）。三类必然不命中、一律不传：①目标接口 URL；②裸 `createElement/appendChild/JSON.stringify/Date.now` 等泛化 API（门禁会拒绝）；③密钥/常量名（会误触发硬阻断）。应选参数写入点/参数名（`noncestr`、`x-zse-96`）。
+- `--end-signal` 只控制提前关闭，与 `--evidence-signal` 分离；`--target-signal` 仅兼容旧调用，新流程勿用。目标接口 URL 命中证据由 Step 1（`forensic_ruyipage.py --targets` + `check_evidence.js --require-network-signal`）承担。
+- 定向收窄：默认全量采集仍是首轮与出口门禁基准；已锁定目标脚本/函数、jsvmp 题型或首轮日志过大时，追加 `--trace-env KEY=VALUE` 透传 `MOZ_DOM_*` 开关（先判题型再选最小组合，见 `references/workflow/trace-flow.md`「定向 trace 策略」）。JSVMP 采后核 `case/ruyi-trace/logs/eval/eval_*_eval-direct.js` 是否落盘（落盘即业务逻辑）。
+- 带栈 opcode（`STACK_FULL`）必配 `--gate --gate-after <ms> --gate-duration <ms>` + `--max-log-bytes <n>` + `--pref javascript.options.blinterp=false`（配方见 `ruyi-tooling.md`「闸门窗口」）。
+- 其余参数细则（`--duration` 默认 120 秒与收尾刷盘、`--signal-policy advisory`、`--cookie/--cookie-domain`、endReason）见 `scripts/README.md` 与 `references/workflow/trace-flow.md`。
 
 用户已提供 NDJSON 时用 `--input <ndjson>` 导入并生成摘要，不重复采集；多个进程日志用 `import_ruyitrace_log.js --input a --input b`，复制到 case 时会按来源摘要命名，避免同名文件覆盖。取证结果只进入 `case/`，原始 JS 放入 `case/js/original/`，临时材料放入 `case/tmp/`。
 

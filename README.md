@@ -33,7 +33,8 @@
 js-reverse-skill/
 ├── SKILL.md              流程骨架 + 规则 + 索引（AI 加载的主文档；版本变更见 CHANGELOG.md）
 ├── README.md             本文件
-├── CHANGELOG.md          版本变更记录（每次 bump 同步更新）
+├── CHANGELOG.md          版本变更记录（每次 bump 同步更新；仅保留最近版本）
+├── CHANGELOG.archive.md  历史版本归档（2.3.87 及更早）
 ├── assets/               可复用资产（AST 反混淆 + 补环境片段 + fixture 模板）
 ├── templates/            7 类交付入口模板（Node/Python、请求客户端、vm 沙箱、WASM、验证码）
 ├── references/           知识参考（12 个专题目录，按需读取；含验证码封装层与答案层资产、字体映射反爬）

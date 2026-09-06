@@ -6,7 +6,7 @@
       "version": "1.2.62",
       "source": "pypi",
       "verifiedAt": "2026-08-21",
-      "note": "2.3.47 验证组合：≥1.2.62 原生内置 Firefox 155+ privileged-scope 兼容；升级前必须更新本记录并按 CHANGELOG 2.3.47 的兼容项回归验证"
+      "note": "2.3.47 验证组合：≥1.2.62 原生内置 Firefox 155+ privileged-scope 兼容；升级前必须更新本记录并按 CHANGELOG.archive.md 2.3.47 的兼容项回归验证"
     }
   }
 }
