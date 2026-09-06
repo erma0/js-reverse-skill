@@ -21,6 +21,8 @@
 | 网易 yidun | 易盾验证参数 | yidun | AST 反混淆 | `assets/ast-patterns/patterns.md` |
 | 同花顺 | token | tonghuashun | AST 反混淆 | `assets/ast-patterns/patterns.md` |
 | 小红书 | x-s / x-t | xhs | AST 反混淆 | `assets/ast-patterns/patterns.md` |
+| 百度指数 | ascToken token | window.aes_encrypt / gtk 哈希族 | 纯算还原（自研哈希 + AES-CBC） | 通用流程 |
+| youdao.com | sign / mysticTime | URI 伪装常量派生 + key-getter | 纯算还原（md5 + AES-128-CBC） | 通用流程 |
 
 ## 识别关键词
 
@@ -49,12 +51,32 @@ acmescripts / sensor_data / _abck
 acw_sc__v2 / acw_tc
 ```
 
+### 百度系
+```
+String.fromCharCode(103,116,107) 拼出 "gtk" 再取 window 属性（属性名混淆，明文检索盲区）
+gtk 种子按 "." 切两段数字 + 操作串驱动位运算循环（3 字符步进，"+" 标志位切换 移位/加法 与 异或，& 4294967295 掩码）
+超长输入 >30 字符截断：头 10 + 中 10 + 尾 10（含 surrogate 对分支，翻译 tk 与指数 token 同族）
+token 形态：<固定seed时间戳>_<实时ms>_<base64(AES-CBC-PKCS7(JSON))>，JSON 绑 ua/url/platform/clientTs/version
+写死的固定 seed 是可过期参数（源码注释自认"请求失败请更新"）→ 交付必须定位 seed 生成来源，禁止照抄
+```
+
+### 密钥来源两形态（下发 / 常量派生）
+```
+动态下发型：sign = md5(常量盐拼 KV 串) 只为调密钥下发接口，响应返回 secretKey/aesKey/aesIv
+识别信号：keyid / secretKey / aesKey / aesIv / pointParam（pointParam 声明签名覆盖的字段集）
+排查分支：JS 里找不到密钥来源时，先查前置接口响应是否下发密钥，再回 JS 死磕
+常量派生型：密钥常量伪装成 URI 样式（xxx://query/key/…），md5 后 hex 截 16 字节当 AES-128-CBC key/iv
+两形态可在同一站点并存（不同接口不同密钥形态），两条线都要查
+```
+
 ### 混淆特征
 ```
 _0x（OB 混淆）
 switch-case 状态机 + while(true)（控制流平坦化）
 eval(...) / new Function(...)（打包）
 200KB+ 文件 + 字节码数组（JSVMP）
+String.fromCharCode(...) 拼敏感属性名（103,116,107 = "gtk"，静态明文检索盲区）
+\xHH 十六进制转义 + b('0x..') 字符串数组索引（OB 变体）
 ```
 
 ### RSA 家族（浏览器侧签名常见两形态）

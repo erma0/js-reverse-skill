@@ -3,6 +3,17 @@
 
 > 历史版本（2.3.87 及更早）已归档至 CHANGELOG.archive.md。
 
+## 2.3.99 - 2026-09-06
+
+### 算法家族表吸收外部仓库通用经验（yunforis/js-reverser 对照，T1 形态不落站点密钥）
+
+对照该学习笔记仓库（~40 站点）逐条复核后，仅吸收可固化的通用模式进 `references/crypto/algorithm-families.md`，站点具体盐值/密钥一律不写（T2 政策）。多数内容已被本 skill 覆盖（瑞数/易盾/极验/猿人学/重放反模式），净增三处：
+
+- **识别关键词新增「百度系」**：gtk 位运算哈希族形态（`String.fromCharCode` 拼属性名、种子 "." 切分、操作串 3 字符步进位运算、>30 头中尾 10 截断）+ token 三段式形态 + 固定 seed 可过期警示。
+- **识别关键词新增「密钥来源两形态」**：动态下发型（key-getter，sign 换密钥接口，`keyid/secretKey/aesIv/pointParam` 信号，"先查前置接口再回 JS"排查分支）与常量派生型（URI 伪装密钥常量 + md5 截 16 字节派生 AES key/iv）；两形态可同站并存。
+- **站点速查表补百度指数 / youdao.com 两行路由；混淆特征补 `fromCharCode` 拼属性名与 `\xHH` 转义 + 字符串数组索引两行。**
+- 评估结论存档：PSM 目录（统计学）无关；数美 yolo.onnx 滑块缺口检测模型层（C 路线增强）经评审暂不采纳。
+
 ## 2.3.98 - 2026-09-06
 
 ### CHANGELOG 归档拆分 + SKILL.md 取证两节注释块精简
