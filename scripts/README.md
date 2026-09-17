@@ -4,6 +4,8 @@
 
 本文中的 `<project-root>` 指项目根目录，其下包含平级的 `case/` 与 `result/` 目录。需要 case 目录的脚本使用 `<project-root>/case`，需要项目根目录的脚本直接使用 `<project-root>`。`forensic_ruyipage.py` 与 `capture_ruyitrace_log.js` 会在 `--case-dir` 下创建 `case/`，因此必须传入 `<project-root>`。`check_session_resume`/`check_fingerprint_fixture`/`check_trace_api_coverage` 已归一化，传 `<project-root>` 或 `<project-root>/case` 均可。
 
+**多 case 布局（2.3.125 规范化）**：每个案例目录 `<case-name>/` 自身就是 `<project-root>`（`--case-dir` 传它），其下平级 `case/`（取证/中间产物）与 `result/`（交付物）；`tools/` 放外层共享，与各案例目录平级：`<workspace>/{tools/, <case-a>/{case,result}, <case-b>/{case,result}}`。环境检测用 `--project-dir <workspace>`（tools 所在工程根），`normalizeTraceHome` 会从案例目录自动上溯命中共享 tools/。
+
 ## 环境与会话检测（7 个）
 
 | 脚本 | 功能 | 典型用法 |

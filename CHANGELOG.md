@@ -3,6 +3,18 @@
 
 > 历史版本（2.3.87 及更早）已归档至 CHANGELOG.archive.md。
 
+## 2.3.126 - 2026-09-18
+
+### 目录布局规范化：多 case 布局 `<workspace>/{tools/, <case-name>/{case,result}}` 落地并固化
+
+用户确认后，把 SKILL.md §4.1 已声明但未显式固化的多 case 层级变成默认工作形态。
+
+- **布局规范**：每个案例目录 `<case-name>/` 自身即 `<project-root>`（`--case-dir` 传它，其下平级 `case/` + `result/`）；`tools/` 放外层 workspace 与案例目录平级共享：`<workspace>/{tools/, <case-a>/{case,result}, <case-b>/{case,result}}`。`scripts/README.md` 顶部新增该布局说明；SKILL.md §4.1 原有表述不变（已是权威）。
+- **实际迁移（用户环境）**：`D:\test\git\jsskilltt\` 作为 workspace——`tools/`（RuyiTrace + ruyipage-browsers 未来落点）迁至 `jsskilltt\tools\`，现有 baidu-finance 案例迁入 `jsskilltt\baidu-finance\{case,result}`（原根级 `jsskilltt/{case,result}` 归位）。`normalizeTraceHome` 上溯自动命中 `jsskilltt\tools\RuyiTrace`，无需手工 `--ruyitrace-home`；`check_external_tools` 全项通过（node/ruyipage 包/runtime/RuyiTrace/内核）。
+- **迁移后注意**：tools 位置变化使 `check_session_resume` 判为 resume/fresh（环境快照与当前不一致），须重跑完整 ENV_READY 检测——与 SKILL.md「迁移 tools 重跑环境检查」一致。
+
+**效果**：目录结构对齐 SKILL.md §4.1 规范；多 case 后续平级扩展；tools 一处共享、案例各自独立。
+
 ## 2.3.125 - 2026-09-17
 
 ### baidu-finance 实测回归优化：安装路径归一 + 门禁 --explain + 两个新工具 + case 吸纳
