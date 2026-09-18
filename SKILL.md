@@ -121,7 +121,7 @@ INTENT_CONFIRM ─ 范围明确 → ENV_READY；缺信息 → WAIT_USER
 ENV_READY ─ 环境正常 → EVIDENCE_GATE；缺失 → 修复后重检
 EVIDENCE_GATE
   ├─ Step 1 + Step 2 均具备 → CASE_LOOKUP
-  ├─ 只有 Step 1 → TRACE_CAPTURE（RuyiTrace 不可用且自动安装失败 → MATERIALS_FALLBACK）
+  ├─ 只有 Step 1 → 先过「速通路径速查」（4.2）：命中全明文/源码可读形态且用户确认免采 → CASE_LOOKUP（义务见 4.4 例外 4）；未命中/未确认 → TRACE_CAPTURE（RuyiTrace 不可用且自动安装失败 → MATERIALS_FALLBACK）
   ├─ 只有 Step 2 → STEP2_ONLY
   └─ 两步均缺 → FORENSIC_CAPTURE
 MATERIALS_FALLBACK（工具不可用降级，见 decision-tree.md 阻塞点#5）
@@ -203,6 +203,13 @@ python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root>
 
 终态目标请求未命中 = Step 1 缺失，禁止转源码搜索继续；JS 关键词定位只作辅助假设（用户也可提供 cURL/HAR/原始请求文本），终态命中落盘后再回 EVIDENCE_GATE。
 
+**速通路径速查（发起 trace 采集前必查，R1）**：EVIDENCE_GATE 判定「只有 Step 1」时、启动日志采集前，先判定可否免采 Step 2；命中即单行向用户提议（形态 + 判定依据 + 免采 Step 2），用户确认 → 跳过 TRACE_CAPTURE 直接 CASE_LOOKUP，未确认或未命中 → 正常采集。两种形态：
+
+1. **全明文采集型**：请求侧无任何待还原参数——判据①（见路径 E）+ 落盘 JS 源码级反证（判据②③的源码替代：全部脚本读毕无 cookie 写入/crypto 调用/网络封装，条件加载与动态注入脚本已核实不适用本题）+ 响应明文自包含。
+2. **简单加密源码可读型**：签名链在落盘 JS 中完整可读（链上无混淆/JSVMP/WASM），Step 1 已捕 ≥2 组不同输入的成功样本，Node 复现算法对全部样本逐字节一致；任一样本不一致即未命中，禁止枚举猜算法，正常采集 trace。
+
+判定材料须落盘引用，不得凭页面观感定性；AI 不得以「看起来简单」自行免采。速通不经 TRACE_CAPTURE 不触发出口门禁复检，Step 2 缺失合法性由例外 4 承担。
+
 日志采集：
 
 ```powershell
@@ -266,13 +273,14 @@ node scripts/write_stage_report.js --case-dir <project-root> --stage <阶段> --
 
 **收尾保底（R1）**：无论预算消耗到什么程度，进入收尾时交付物清单不得缩水——`最终项目总结.md`、`经验沉淀-<站点>.md`、`验证记录.json` 与 `check_final_artifact.js` 门禁一项不可省；只写总结就收场 = 任务未完成。
 
-**IMPLEMENT 前置条件（R1）**：满足「trace 质量达标（含目标信号命中）」或「用户明确确认轻量路径」之一；都不满足就停在 TRACE_ANALYZE，不得以 mock、猜测或实验性实现替代证据。EXTERNAL_LOOKUP 的假设与本次 trace 定位的 builder/writer 冲突时，以 trace 为准。
+**IMPLEMENT 前置条件（R1）**：满足「trace 质量达标（含目标信号命中）」「用户明确确认轻量路径（EXTERNAL_LOOKUP，前提 Step1+Step2 齐备，见 4.3）」「用户确认速通路径免采 Step 2（4.2 速查命中，4.4 例外 4）」之一；都不满足就停在 TRACE_ANALYZE，不得以 mock、猜测或实验性实现替代证据。EXTERNAL_LOOKUP 的假设与本次 trace 定位的 builder/writer 冲突时，以 trace 为准。
 
-**Step 2 缺失（check_trace_gate.js 退出码 1）时不得进入 IMPLEMENT**：不得以 EXTERNAL_LOOKUP 网络方案、边界声明、同族算法替代或 mock 填补缺口（轻量路径豁免的前提是 Step 1 + Step 2 齐备，见 4.3）。例外三个（**AI 自行判定「trace 采集不到/太难」不构成降级理由**；例外 1、2 的 REAL_VERIFY 不可豁免；三个例外都须在经验沉淀与最终总结写明取证偏差或判定依据，例外 3 另写请求侧明文参数清单 + 响应自包含证据）：
+**Step 2 缺失（check_trace_gate.js 退出码 1）时不得进入 IMPLEMENT**：不得以 EXTERNAL_LOOKUP 网络方案、边界声明、同族算法替代或 mock 填补缺口（轻量路径豁免的前提是 Step 1 + Step 2 齐备，见 4.3）。例外四个（**AI 自行判定「trace 采集不到/太难」不构成降级理由**；例外 1、2、4 的 REAL_VERIFY 不可豁免；四个例外都须在经验沉淀与最终总结写明取证偏差或判定依据，例外 3 另写请求侧明文参数清单 + 响应自包含证据，例外 4 另写速通形态与判定材料落盘引用）：
 
 1. **MATERIALS_FALLBACK**（需用户显式确认，细则见 decision-tree.md 阻塞点#5）：RuyiTrace 不可用且自动安装失败 + 用户材料过 check_evidence.js 校验，以「Node 直连真实接口、服务端响应反证」替代 Step 2。
 2. **BLOCKED_FORENSIC**（需用户显式确认，检测证据要求见 env-detect-bypass.md）：内核级检测使 RuyiTrace 无法触发目标路径，以 Step 1 网络证据 + 落盘 JS 源码分析替代。
 3. **内容还原型豁免（无需用户确认）**：请求侧参数全明文（三条判据见路径 E，无 trace 时用①网络层+③Cookie/存储层）且难点在响应解密/内容还原（字体映射、图片拼装等）、Step 1 已捕获完整响应证据——EVIDENCE_GATE 判定「只有 Step 1」时声明「Step 2 豁免：内容还原型，无运行时签名链路」后跳过 TRACE_CAPTURE 直接 CASE_LOOKUP。请求侧存在任何待还原参数即不适用本豁免。
+4. **速通路径（Step 2 免采，需用户确认）**：按 4.2「速通路径速查」命中且用户确认；形态②对拍任一样本不一致即失格，回 TRACE_CAPTURE，禁止枚举猜算法。REAL_VERIFY 不豁免。
 
 ## 5. CASE_LOOKUP
 
@@ -372,7 +380,7 @@ B. 最小 JS 沙箱：提取算法闭包，在隔离上下文提供已证实需�
 - 环境桩三纪律：沙箱内执行 / 独立模块注入（禁大段模板字符串，check_code_quality 红线）/ 不包 IIFE（规则 33 / 反模式 34）。
 C. WASM：复现加载、内存、导入与导出调用，固定输入输出契约，三形态判定——**无外部导入的确定性 wasm** 直接 Node `WebAssembly.instantiate` 执行导出（同实例跨请求复用）；**wasm-bindgen 模块**原样还原 glue + `__wbg_*` 桩（get-global 初始化链陷阱见 env-debug-loop.md）；**自同构校验签名型**（官方包 200/重建包 500）走透明边界捕获 + 直接 wasm harness，不做环境层修补。字节获取、落盘形态与边界捕获见规则 41~43 / 反模式 25/39/40 / `references/env/env-wasm-advanced.md` / 案例 `cases/wasm-harness-selfhash-fp-blackbox.md`。
 D. 环境伪装：仅补 trace 证明必要的 Web API、对象形状、Realm、时间、随机数与指纹行为。验收线是**服务端校验的自洽性**，不是与真实浏览器逐字节一致——先用最小沙箱 + 真实请求试探、按需对齐（match14：mz 指纹 53 字段中 4 处差异不影响通过）；服务端校验签名内嵌环境检测时用对齐探针法定位差异位（见 `references/env/env-detect-bypass.md`）。
-E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定向与动态资源预热。**不是每题都有签名**——请求侧参数全明文时走 A+E，不做补环境（match4/7/12/17 实证；取证侧豁免见 4.4 例外 3）。判定「无签名」须过三条判据：① 网络层——`target-hits.json` 目标请求除业务参数外无动态字段，可疑参数名在 capture.json 反查 0 次；② trace writer 层——`XMLHttpRequest.open`/`fetch`/`Headers.set` 参数全文无该字段；③ Cookie/存储层——目标域无 JS 写 cookie、无 WASM/JSVMP/混淆 SDK。三条全干净即收手，转查传输层与响应层。实现侧用 Node 原生 `node:http2`（一次 `connect()` 多次 `request()` 复用、`alpnProtocol` 自检、不发 `accept-encoding`，规则 27）。
+E. TLS/Session：对齐客户端指纹、连接复用、Cookie 顺序、重定向与动态资源预热。**不是每题都有签名**——请求侧参数全明文时走 A+E，不做补环境（match4/7/12/17 实证；取证侧速通见 4.2「速通路径速查」形态① / 4.4 例外 4）。判定「无签名」须过三条判据：① 网络层——`target-hits.json` 目标请求除业务参数外无动态字段，可疑参数名在 capture.json 反查 0 次；② trace writer 层——`XMLHttpRequest.open`/`fetch`/`Headers.set` 参数全文无该字段；③ Cookie/存储层——目标域无 JS 写 cookie、无 WASM/JSVMP/混淆 SDK。三条全干净即收手，转查传输层与响应层。实现侧用 Node 原生 `node:http2`（一次 `connect()` 多次 `request()` 复用、`alpnProtocol` 自检、不发 `accept-encoding`，规则 27）。
 F. **沙箱 [Unforgeable] 全局绑定对齐 + base64 字母表分支（match22，反模式 30）**：`window/self/top/parent/frames` 须定义为不可配置 accessor（vm data 属性会被 `delete window`/`window=0` 探针真删真换 → 诱饵分支）；同字节点但密文串不同 = 字母表分支，用已知 (明文↔密文串) 配对反推两侧字母表。
 
 中间值必须可单独验证；时间、随机数、UA、指纹与会话状态必须有明确来源；静态配置外置，秘密从环境变量或用户运行时输入读取。验证码拆成 `load → solve → verify`，按 `assets/templates/captcha-verify/`（Node）或 `captcha-verify-py/`（Python）骨架 + 本 case `result/src/adapter` 实现，`result/src/solver` 答案层是交付组成部分；成功样本先逐字段确认明文类型、长度与绑定关系，不得把一次性 challenge/ticket/答案固定到代码。
@@ -438,7 +446,7 @@ node scripts/check_code_quality.js --case-dir <project-root> --markdown
 
 `最终项目总结.md` 与 `经验沉淀-<站点>.md` 是必需交付文档（模板与写入规则见 `references/quality/final-summary.md`、`references/workflow/phase-flow.md`）；仅用户明确要求不生成时才用对应 `--no-require-*` 豁免，并记录原因。
 
-清理 `case/tmp/` 中的调试脚本、临时下载和秘密材料，保留可复核的最小证据、脱敏样本和必要 fixture。轻量路径交付须在最终总结标注算法来源 URL、验证日期和未做 trace 取证声明。
+清理 `case/tmp/` 中的调试脚本、临时下载和秘密材料，保留可复核的最小证据、脱敏样本和必要 fixture。轻量路径交付须在最终总结标注算法来源 URL、验证日期和未做 trace 取证声明；速通路径交付须标注速通形态 + 判定依据落盘引用 + 未做 trace 取证声明。
 
 卡住时按序：重看本次证据、跑 trace 覆盖检查、比较请求字段、定位中间值、缩小环境、再升级沙箱或 TLS 路径；最后输出卡点、已证实事实、缺失证据和下一步输入，不用浏览器自动化代替协议实现。
 

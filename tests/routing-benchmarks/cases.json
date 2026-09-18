@@ -762,6 +762,50 @@
       "stdoutIncludes": [
         "必须标明未完成真实 API 验证"
       ]
+    },
+    {
+      "id": "RB-041",
+      "title": "速通路径：EVIDENCE_GATE「只有 Step 1」用户确认免采后直转 CASE_LOOKUP 是合法转换",
+      "skillAnchors": [
+        "速通路径速查"
+      ],
+      "script": "state_machine.js",
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--set",
+        "CASE_LOOKUP",
+        "--note",
+        "速通形态①全明文采集型：判据①+源码级反证，用户确认免采 Step 2"
+      ],
+      "files": {
+        "state.json": "{\"version\":1,\"node\":\"EVIDENCE_GATE\",\"visited\":[\"INTENT_CONFIRM\",\"ENV_READY\",\"EVIDENCE_GATE\"],\"history\":[],\"blocks\":[],\"stepCount\":0,\"stepNode\":\"EVIDENCE_GATE\",\"todo\":[]}"
+      },
+      "expectExit": 0,
+      "stdoutIncludes": [
+        "CASE_LOOKUP"
+      ]
+    },
+    {
+      "id": "RB-042",
+      "title": "节点规则投递：EVIDENCE_GATE 必须下发「速通路径速查」提议义务",
+      "skillAnchors": [],
+      "script": "state_machine.js",
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--set",
+        "EVIDENCE_GATE",
+        "--force",
+        "--markdown"
+      ],
+      "files": {
+        "state.json": "{\"version\":1,\"node\":\"INTENT_CONFIRM\",\"visited\":[\"INTENT_CONFIRM\"],\"history\":[],\"blocks\":[],\"stepCount\":0,\"stepNode\":\"INTENT_CONFIRM\",\"todo\":[]}"
+      },
+      "expectExit": 0,
+      "stdoutIncludes": [
+        "速通路径速查"
+      ]
     }
   ]
 }

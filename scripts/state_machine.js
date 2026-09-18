@@ -157,6 +157,7 @@ const NODE_RULES = {
   EVIDENCE_GATE: [
     'URL 不是证据：文件真实存在且可归类才算；退出码非 0 或输出含「缺失证据」即停在 EVIDENCE_GATE 补证，禁止进入 IDENTIFY/TRACE_ANALYZE/IMPLEMENT。',
     'Step 1 信号用 --require-network-signal，Step 2 用 --require-trace-signal，两类信号不可混用。',
+    '「只有 Step 1」时先过 4.2「速通路径速查」：命中全明文采集型/简单加密源码可读型即单行提议免采 Step 2（用户确认 → CASE_LOOKUP）；判定材料须落盘引用，不得以「看起来简单」自行免采。',
   ],
   FORENSIC_CAPTURE: [
     '取证只允许四源（ruyipage / RuyiTrace / 用户材料 / 经确认的 MCP 兜底）；手写 fetch/curl 抓目标页、系统浏览器与 Playwright/Puppeteer/Selenium 一律禁止。',

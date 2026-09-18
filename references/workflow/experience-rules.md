@@ -107,6 +107,8 @@ match10 实测：sandbox 预填"看起来完整"的运行时状态快照后，�
 2. **trace writer 层**：`XMLHttpRequest.open` / `fetch` / `Headers.set` 的**参数全文**里没有该字段（`search_trace.js --keyword <目标URL>` 直接检索 URL 字面量最快——trace 里的 XHR 记录常被第三方 SDK 淹没，match17 实测前两名高频栈是 transcend-cdn 与 mozilla 站点脚本，目标域脚本只排第三）。
 3. **Cookie/存储层**：`case/ruyi-trace/logs/cookie/*.ndjson` 里目标域**无 JS 写入的 cookie**（只有 `Hm_*` 之类统计 cookie 即视为干净），无 WASM/JSVMP/混淆 SDK 调用，`crypto` 类 trace 条数为个位数且不来自目标域脚本。
 
+判定时机可前移（SKILL.md 4.2「速通路径速查」）：EVIDENCE_GATE「只有 Step 1」时，判据① + 落盘 JS 源码级反证（判据②③的源码替代，条件加载/动态注入脚本须核实不适用于本题）+ 响应明文自包含，即可单行提议免采 Step 2（速通形态①），用户确认后直接 CASE_LOOKUP，不必先采 trace 再收手；简单加密（如单层 md5 摘要签名）源码可读 + ≥2 组不同输入样本对拍逐字节一致时走速通形态②。免采不降验证标准——真实请求、fixture 回归、多轮稳定性验证照做。
+
 三条都干净后，**约束只可能在三个地方**，逐项落实为交付实现（match17 实证：HTTP/2 + 末页 UA=yuanrenxue + sessionid；match19 实证：服务端 TLS ClientHello 黑名单 + 末页 UA 分流）：
 1. **传输层**：协议版本（HTTP/2、ALPN）、TLS 指纹、连接复用与顺序——Node 侧用原生 `node:http2`：一次 `http2.connect()` 建会话、多次 `client.request()` 复用、最后 `client.close()`（交付门禁 Session 三件套天然满足，`client.alpnProtocol === 'h2'` 可作协议自检）；**不要发 `accept-encoding`**，避免 br/zstd 需额外解压，同时保留 zlib 解压兜底。协议要求以取证响应头（如 `x-firefox-spdy: h2`）与题面为准，不要用 HTTP/1.1 反向上报惩罚计数。
    **传输层失败先做「三级客户端阶梯」对照（match19 实证起点）**：以取证浏览器（ruyipage 成功样本）为 ground truth 锚点，协议客户端按代价从低到高逐级测——**每升一级只改"客户端栈"这一个变量**（同一份请求、同样的头/UA/时序）：
