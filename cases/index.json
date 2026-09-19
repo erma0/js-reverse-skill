@@ -1097,6 +1097,100 @@
       "strategy": "P0 最小 vm 沙箱黑盒执行真实 acs-2108.js：只补 trace 证明的基础环境，.gs() 取 token；真校验判定用 probe_endpoints 四态对照",
       "file": "jsvmp-vm-blackbox-acs-token-baidu-finance.md",
       "verifiedAt": "2026-09-17"
+    },
+    {
+      "title": "obfuscator.io string-array + self-defending 反调试绕纯算签名链（码上爬平台题7）",
+      "domains": [
+        "mashangpa.com"
+      ],
+      "signals": [
+        "ob-io",
+        "obfuscator.io",
+        "self-defending",
+        "AKcqZX",
+        "bTcNvY",
+        "rRRNBk",
+        "while(!![])",
+        "string array rotation",
+        "xialuo",
+        "xxoo",
+        "problem-detail",
+        "current_array"
+      ],
+      "strategy": "B vm 沙箱 + A 纯算：从原始单行文件提取 y/T/R 解码器并剥离 self-defending 调用进入 vm 旋转，m=MD5('xialuo'+ts)、x=SHA256(m+'xxoo')、响应 AES-CBC 解密纯算",
+      "file": "ob-string-array-selfdefending-mashangpa.md",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "title": "obfuscator.io b-io string-array + 环境注入全局 + 明文 JSON 纯算签名链（码上爬平台题8）",
+      "domains": [
+        "mashangpa.com"
+      ],
+      "signals": [
+        "ob-io",
+        "obfuscator.io",
+        "b-io",
+        "string array rotation",
+        "0x4366",
+        "sms",
+        "oooooo",
+        "OOOoOo",
+        "path=/;",
+        "problem-detail",
+        "current_array",
+        "暂无答案",
+        "请依次翻页",
+        "答案正确加10积分"
+      ],
+      "strategy": "A 纯算还原：m=OOOoOo(sms+ts+page,sms)、sms='oooooo'（6字节0xde前缀由真实样本反推）、t=btoa(Date.now())；trace JSON.parse 参数快照直读字符串映射零执行反混淆；响应明文 JSON，20页顺序翻页后提交",
+      "file": "ob-string-array-purealgo-mashangpa-p8.md",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "title": "webpack 打包 + 轻度 ob-io 混淆 + HmacSHA1 签名 + base64 时间戳（码上爬平台题9）",
+      "domains": [
+        "mashangpa.com"
+      ],
+      "signals": [
+        "webpack",
+        "ob-io",
+        "obfuscator.io",
+        "RIPEMD160",
+        "9527",
+        "xxxooo",
+        "_createHmacHelper",
+        "crypto-js",
+        "problem-detail",
+        "current_array",
+        "请依次翻页"
+      ],
+      "strategy": "A 纯算还原：m=HmacSHA1('9527'+ts,'xxxooo')、tt=base64(String(ts))、ts=Date.now()；trace 常量命中（jscall '9527' 前缀）直接定位构造点，死代码伪造赋值不可达",
+      "file": "webpack-ob-hmac-sha1-mashangpa-p9.md",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "title": "obfuscator.io string-array + 魔改 SHA-256 VM 沙箱黑盒签名链（码上爬平台题10）",
+      "domains": [
+        "mashangpa.com"
+      ],
+      "signals": [
+        "ob-io",
+        "obfuscator.io",
+        "string array rotation",
+        "OOOO",
+        "OOXX",
+        "sha256",
+        "JS_SHA256_NO_BUFFER_FROM",
+        "ajaxPrefilter",
+        "problem-detail",
+        "current_array",
+        "暂无答案",
+        "请依次翻页",
+        "答案正确加10积分"
+      ],
+      "strategy": "B vm 沙箱黑盒：魔改 SHA-256 标准 crypto 输出不匹配，整体加载 pagination10.js 补浏览器 API stub 直接调用 OOOO(url) 生成 t；响应明文 JSON；数组每次请求随机，提交前实时拉取计算并立即提交",
+      "file": "ob-string-array-modified-sha256-blackbox-mashangpa-p10.md",
+      "verifiedAt": "2026-09-19"
     }
   ]
 }

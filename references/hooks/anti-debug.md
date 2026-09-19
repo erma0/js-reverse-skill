@@ -368,3 +368,69 @@ try {
 | console 方法覆写 | 混淆代码内 `console.log = noop` / 清空 console | Node 沙箱调试输出（用 process.stdout.write） |
 
 识别到反调试后，先在 `case/notes/` 记录检测类型和触发条件，再按对应绕过方案处理。绕过脚本作为临时 Hook，调用栈确认后立即清理或归档。
+
+## obfuscator.io self-defending（防篡改）反调试
+
+obfuscator.io（ob-io）家族除标准 string-array 外，常带 **self-defending / selfDefending** 反调试：解码函数在首次初始化时校验自身源码完整性，校验失败即进入自毁死循环。识别特征与绕过方式不同于普通 debugger/toString 检测，单独列出。
+
+### 识别特征
+
+```javascript
+// 解码器首层变量（典型短名 y/T/R + 旋转 IIFE）
+function y(N, W) {
+  const M = R();
+  return y = function (O, T) {
+    O = O - (<hex 常量表达式>);     // 索引偏移，字面量 - 该值
+    let B = M[O];
+    if (y['fMXGtx'] === undefined) {
+      // ... base64 / RC4 解码原语 ...
+      y['KuLLrv'] = A, N = arguments, y['fMXGtx'] = !![];
+    }
+    const x = M[<hex>], I = O + x, w = N[I];
+    if (!w) {
+      if (y['jddRuC'] === undefined) {
+        const d = function () { /* 带 'newState' 字符串常量 */ };
+        d['prototype']['bTcNvY'] = function () {
+          // RegExp.test(某桩函数的 toString)
+          const z = G['test'](...) ? --this['DURrIM'][<hex>] : --this['DURrIM'][<hex>];
+          return this['ptBJaa'](z);
+        };
+        // ...
+        new d(y)['bTcNvY']();       // ← self-defending 触发点
+        y['jddRuC'] = !![];
+      }
+      B = y['KuLLrv'](B, T), N[I] = B;
+    } else B = w;
+    return B;
+  }, y(N, W);
+}
+
+// 头部旋转 IIFE：校验和解处于 W 值时停止数组移位
+(function (N, W) {
+  while (!![]) { /* parseInt(解码后字符串) 求和 === W ? break : 移位 */ }
+}(R, -0xe28cb * -0x1 + 0x716 * -0xf1 + 0x23b31));
+```
+
+高信号命名（实际是随机名，但不影响匹配逻辑）：`bTcNvY` / `rRRNBk` / `AKcqZX` / `PmpdcA` / `lJYsxr`（桩函数，源码形如 `function(){return 'newState';}`）；自毁副作用为 `kFdkIF.push(Math.round(Math.random()))` 无限扩容直到 RangeError "Invalid array length"。
+
+### 表现
+
+- 完整原始 JS 直接进 node 沙箱：打印反调试文本（如"我盯着你呢小子"）后**挂死**（setInterval + 自毁循环）；
+- vm 运行或 require 提取的解码器：RangeError / 死循环；
+- 反混淆（美化/换行）后函数 toString 变更，self-defending 校验更易失败。
+
+### 绕过方案
+
+1. **用原始单行文件**，不要用美化产物：self-defending 校验基于函数源码 toString，原始压缩文本才可能通过桩校验。
+2. **提取解码器闭包**（y / T / R）与旋转 IIFE。可用括号配平在原始文件中定位 `function y(N,W)`、`function T(N,W)`、`function R()` 的起止。
+3. **剥离 self-defending 调用本体**并同时移除其尾部逗号：
+   - 形如 `new d(y)['bTcNvY'](),` → 替换为 ``（空串，连带逗号）。
+   - 形如 `new A(T)['rRRNBk'](),` → 同理。
+   - 只删本体不删逗号会出现 `,` 拼接语法错误（Unexpected token ','）。
+4. **保留旋转 IIFE 原码运行**：让数组真实左移到终止条件（W 为 hex 表达式，如 `-0xe28cb*-0x1+0x716*-0xf1+0x23b31` = 636998），务必真跑完旋转，不能跳过——索引偏移即字面量减固定值（实例中为 308）。
+5. 提取后拼接：`y` + `T` + `R` + 旋转 IIFE + 导出桩，进 `vm.createContext` 最小沙箱（补 `console/Math/decodeURIComponent/parseInt` 等即可）运行，导出 y/T 供后续解码。
+6. 解码两个变体：`y(idx, key)` 走 RC4+base64；纯 `T(idx)` 走 base64-only。带 key 与纯索引的别名在最终文件中多处出现，按代码位置选对变体。
+
+### 与 string-array 常规还原的区别
+
+ob-io 常规字符串数组只需"旋转后再替换"，但 self-defending 场景下**美化产物不可执行**（源码 toString 校验），必须原码提取 + 剥离触发点。可复用案例见 `cases/ob-string-array-selfdefending-mashangpa.md`。

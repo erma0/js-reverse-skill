@@ -237,6 +237,13 @@ page1 `[263432,...]` vs 新会话 `[636803,...]`，总和差 ~180 万）。换�
 sessionid）后必须用新会话重新采集计算答案，不得复用旧答案；换会话先 `GET /api/user` 验活
 （`isLogin:true`），数据接口往往不校验登录仍 200 容易误判。
 
+**更极端形态：同 sessionid 数据也可能每次请求随机**（mashangpa 题10 实证）。题10 服务器对固定
+sessionid 每次请求返回不同随机数组，两轮拉取求和可能碰巧一致（97664）造成"数据确定"假象，实际提交
+时需实时拉取重算（103727）。**判定纪律**：① 不默认"固定会话数据恒定"——先两轮拉取对比，但仍需在
+**提交前最后一步**用当前会话实时重拉一次并立即提交（含答案时效窗口，题9/10 均为 1 分钟内）；② 单次
+采样"两轮一致"只证明短窗口稳定，不能证明提交时刻仍有效；③ 同平台逐题验证数据稳定性（题9 恒定可
+fixture、题10 随机不可复用），不跨题套用。
+
 ### 37. 站点限流 vs 签名错误的判别——"第 N 页起 403 token failed"先做单请求诊断
 
 连续快速请求时约第 3 页起 403 `token failed`、而单请求/第 1/2 页正常 = **频率墙限流**，不是签名错
@@ -349,6 +356,8 @@ wasm 输出 = f(线性内存, wasm 全局, 导入值)，全局变量（堆指针
 | `cases/yuanrenxue-match17-http2-transport-plaintext.md` | 规则 27 实战验证（请求侧无签名三条判据 + 传输层 HTTP/2/UA/Cookie 对齐）+ 反模式 27 实战验证（诱饵参数 `m` 恒 undefined 被序列化层丢弃）+ 反模式 22 二次实证（`--targets "question/17"` 误命中静态资源） |
 | `cases/yuanrenxue-match18-jsvmp-mouse-gated-signature.md` | 规则 28 实战验证（JSVMP 静默退出双层插桩定位 + 语义级环境对齐：内建自有属性 / webdriver 挂原型 / 鼠标事件门控）+ 反模式 28 实证 + 反模式 27 四次实证（`window.match18` 连环诱饵）+ 末页 page=05 双重校验 |
 | `cases/yuanrenxue-match19-tls-fingerprint-blocklist.md` | 规则 27 扩充实证（跨客户端栈对照法定位 TLS ClientHello 黑名单 + 交付语言切换依据；末页 UA 提示数组按元素类型判别）+ 反模式 27 五次实证并修正机理（丢弃在 `k.extend` 深拷贝 `copy!==undefined` 守卫，非 `$.param`——debug 文本含参数 ≠ wire URL 含参数） |
+| `cases/webpack-ob-hmac-sha1-mashangpa-p9.md` | 规则 36 实战验证（题9 数据恒定可 fixture，同平台题10 随机不可复用）+ trace 常量命中法（jscall 搜签名前缀常量直击构造点）+ 死代码伪造赋值陷阱 |
+| `cases/ob-string-array-modified-sha256-blackbox-mashangpa-p10.md` | 规则 36 极端形态实证（同 sessionid 数据每次请求随机，两轮一致是碰巧，提交前实时重拉）+ 魔改 SHA-256 识别信号（标准 crypto 输出不匹配）+ VM 沙箱黑盒整体加载 |
 | `cases/yuanrenxue-match24-jsvmp-blackbox-tl-xor30.md` | 规则 30 实战验证（逐位 diff 判分布→常量偏移 XOR 30 就地修正；VM 探针直达路径/沙箱 realm 钩子/按页构建时效窗口）+ 规则 31 实证（LEAD_MS 补偿伪需求：先测 age 窗口 2~4s，慢的根源是逐页点击派发非时间补偿）+ 规则 32 实证（jQuery expando 随机值：格式正确+运行时随机，服务端只验结构自洽）+ 反模式 23/18 实证（常量偏移 XOR 30 就地修正 / 对拍锁同源） |
 | `cases/yuanrenxue-match26-sm3-blackbox-page-drive.md` | 反模式 29/31 同族实证（SM3 魔改 8 组环境分派 IV，Firefox 取证内核 403 诱饵分支）+ 页面自驱动翻页（jq 桩 on() 记录 handler + 手动触发 click）+ 成对相同 token 的字节级折叠诊断（strToBytes `k & 0xfe` 偶数化）+ 会话验活（数据接口 200 ≠ 登录态存活）+ detect-patterns 自引用检测补强（拼接结果被 charCodeAt 形态漏报） |
 | `cases/yuanrenxue-match25-cfa-vm-blackbox-env-realm.md` | 规则 33 实战验证（环境桩必须在沙箱内执行：主 realm 定义 `win.window=globalThis` → self-reference 自检失败 → `_$VM=111` 分支 → 403 token failed；同输入双环境对比定位）+ 规则 34 实证（T 偏移矩阵 now±100s 全过 = 服务端不校验时间窗口，冻结 Date=now 即可，无需补偿）+ 反模式 34 实证 + IIFE 门禁坑（环境桩拆 browser-objects 顶层代码，check_code_quality 单函数上限） |

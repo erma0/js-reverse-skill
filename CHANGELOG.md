@@ -3,6 +3,41 @@
 
 > 历史版本（2.3.87 及更早）已归档至 CHANGELOG.archive.md。
 
+## 2.3.130 - 2026-09-19
+
+### 经验库新增：码上爬平台题9（webpack+HmacSHA1 纯算）与题10（魔改 SHA-256 沙箱黑盒）+ 规则36 补随机数据形态
+
+码上爬平台题9/题10 连续实测，两条签名链再次与题7/题8 不同，进一步证实"同平台逐题核对"。
+
+- **cases/webpack-ob-hmac-sha1-mashangpa-p9.md（新增）**：题9 = webpack + 轻度 ob-io + 标准 HmacSHA1，纯算还原 `m=HmacSHA1("9527"+ts,"xxxooo")`、`tt=base64(String(ts))`；定位方法=**trace 常量命中**（jscall 搜签名前缀常量 "9527" 直接命中 `_createHmacHelper` 构造点）；踩坑含**死代码伪造赋值**（`t(763)==t(763)` 恒真判断 else 分支的 `.m=`/`.tt=` 伪造 switch 不可达）。
+- **cases/index.json（更新）**：注册题9、题10 两条记录，`search_cases.js --domain mashangpa.com` 命中 4 条（题7/8/9/10 全链路）。
+- **references/workflow/experience-rules.md（规则36 扩充）**：补"更极端形态：同 sessionid 数据也可能每次请求随机"（题10 实证：两轮拉取求和碰巧一致 97664 造成"数据确定"假象，提交时实时重算 103727）——判定纪律：不默认固定会话数据恒定、提交前最后一步实时重拉并立即提交（答案 1 分钟时效）、同平台逐题验证数据稳定性（题9 恒定可 fixture / 题10 随机不可复用）。
+- **cases/ob-string-array-modified-sha256-blackbox-mashangpa-p10.md（此前已新增，补注册）**：题10 = 魔改 SHA-256（标准 crypto 输出不匹配 → VM 沙箱黑盒整体加载 pagination10.js 调 OOOO(url)），数组每次请求随机。
+
+**效果**：mashangpa 平台四题（7/8/9/10）签名链全部沉淀，CASE_LOOKUP 按域名命中即可快速判别题号对应算法族与数据稳定性，避免跨题复用算法与复用静态答案。
+
+## 2.3.129 - 2026-09-19
+
+### 经验库新增：码上爬平台题8 纯算签名链（b-io string-array + 环境注入全局 + 明文 JSON）
+
+码上爬平台题8（`/api/problem-detail/8/data/`）实测沉淀另一条签名链，与题7 完全不同：`m=OOOoOo(sms+ts+page, sms)`（逐字节 `(char+key[i%len])%256` 求和卷积转 hex）、`t=btoa(Date.now())`，响应为明文 JSON（无题7 的 AES r 字段）。
+
+- **cases/ob-string-array-purealgo-mashangpa-p8.md（新增）**：技术指纹（b-io 变体、纯索引解码 `idx-0x1da`、旋转终止 `0xcea7c`、环境注入全局 `sms` 等短名零脚本定义）；6 条踩坑（环境全局需由真实样本反推 `sms="oooooo"`、静态 s cookie 必带、**服务端要求 page=1..20 顺序翻页到最后一页才能提交**、频控 403 限速、csrf 需从 `/problem-detail/8/` 动态获取、b-io 家族优先用 trace JSON.parse 参数快照直读字符串映射零执行）；10 条可验证事实（4 个真实样本 OOOoOo 全 MATCH、`sms="oooooo"` 由 6 字节 0xde 前缀反推、TOTAL=96640 多次稳定并提交 success、trace seq896 泄露 `Sms="xoxoxoxo"` 等全集映射）。
+- **cases/index.json（更新）**：新增题8 记录，`domains:["mashangpa.com"]`，信号 `sms/OOOoOo/oooooo/暂无答案/index` 等，`search_cases.js --domain mashangpa.com` 命中 2 条。
+- **方法论要点**：同平台题号升级**签名链可完全更换**（题7 MD5/SHA256/AES vs 题8 卷积+btoa），CASE_LOOKUP 仅复用平台请求/提交骨架，算法须按题重取证；纯协议还原可零执行反混淆。
+
+## 2.3.128 - 2026-09-19
+
+### 经验库新增：obfuscator.io self-defending 反调试绕过 + 码上爬题7 签名链（题7实测沉淀）
+
+码上爬平台题7（`/api/problem-detail/7/data/`）实测沉淀 ob-io 特有 self-defending（防篡改）反调试的绕过方法，此前 `references/hooks/anti-debug.md` 仅覆盖 debugger/toString 检测、未知 ob-io 的 `new ctor()['method']()` + `array.push(Math.round(Math.random()))` 无限扩容自毁。
+
+- **cases/ob-string-array-selfdefending-mashangpa.md（新增）**：技术指纹（ob-io + self-defending + 旋转 IIFE + m/ts/x 签名链）、6 条踩坑（self-defending 触发、剥离调用连带逗号、T/R 定义在旋转之后勿截断原文件、旋转终止 W=636998、解码索引偏移 308、header 不齐 400）、10 条可验证事实（`m=MD5("xialuo"+ts)`、`x=SHA256(m+"xxoo")`、AES-128-CBC key=xxxxxxxxoooooooo iv=0123456789ABCDEF、求和不去重 200 项、答案口径澄清 92835 为误用去重）。
+- **cases/index.json**：新增记录，`domains:["mashangpa.com"]`，关键词 `self-defending/AKcqZX/bTcNvY/rRRNBk/xialuo/xxoo/current_array` 等，`search_cases.js` 按域名/信号/策略检索均命中。
+- **references/hooks/anti-debug.md**：新增「obfuscator.io self-defending（防篡改）反调试」专项节——识别特征、高信号命名、绕过 6 步（原始单行提取 y/T/R + 剥离调用连带逗号 + 保留旋转 IIFE 原码运行 + 最小沙箱）、与 string-array 常规还原的区别。
+
+**效果**：后续同平台/同混淆家族案例在 IDENTIFY 阶段即可按索引命中本案例与方法论；ob-io self-defending 不再被误当普通 toString 检测处理。
+
 ## 2.3.127 - 2026-09-18
 
 ### 速通路径：无加密 / 简单加密案例的 Step 2 免采机制（mashangpa 题一实测暴露的空白）

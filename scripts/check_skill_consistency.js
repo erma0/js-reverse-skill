@@ -232,6 +232,16 @@ function countFiles(dir, re) {
   }
 }
 
+function countCaseFiles(dir) {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && /\.md$/i.test(e.name) && !['README.md', '_template.md'].includes(e.name))
+      .length;
+  } catch {
+    return null;
+  }
+}
+
 // README 与 SKILL.md 的口径/计数必须一致：口径冲突（如小程序范围）或计数漂移会让使用者按错误前提作业。
 function checkReadmeConsistency(root, skillText) {
   const problems = [];
@@ -255,7 +265,7 @@ function checkReadmeConsistency(root, skillText) {
   // 计数同步：README 声称的目录/案例/模板数与实际一致
   const counts = [
     { re: /(\d+)\s*个专题目录/, actual: countDirs(path.join(root, 'references')), label: 'references 专题目录' },
-    { re: /(\d+)\s*个实证案例/, actual: countFiles(path.join(root, 'cases'), /\.md$/i), label: 'cases 实证案例' },
+    { re: /(\d+)\s*个实证案例/, actual: countCaseFiles(path.join(root, 'cases')), label: 'cases 实证案例' },
     { re: /(\d+)\s*类交付入口模板/, actual: countDirs(path.join(root, 'assets', 'templates')), label: 'templates 交付模板' },
   ];
   for (const { re, actual, label } of counts) {
