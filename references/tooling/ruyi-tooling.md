@@ -214,6 +214,12 @@ node scripts/download_ruyi_tool.js --tool ruyipage-firefox --dest <download-dir>
 > # 仅检测环境并打印计划（不启动浏览器）：
 > python scripts/forensic_ruyipage.py --url <目标页> --case-dir <project-root> --dry-run --markdown
 > ```
+>
+> **Windows/Git Bash 入参硬约束：`--targets` / `--targets-regex` 的值不要以 `/` 开头。** MSYS 会把以 `/` 开头的
+> 参数静默改写成 Windows 路径（`/api/x/data` → `D:/Program Files/Git/api/x/data`），子串永不匹配，表现为
+> 「目标明明抓到却报 NO_TARGET、真终态被降级成 related 候选」，极易误读成接口路径猜错或脚本缺陷（题13 白烧 3 轮）。
+> 写成 `--targets "api/x/data"` 即可；必须保留前导斜杠时用 `MSYS_NO_PATHCONV=1` 或 `MSYS2_ARG_CONV_EXCL="*"` 启动。
+> 脚本已内置盘符形态告警（`_looks_msys_mangled`，启动前即 WARNING）。
 > 输出：`<case-dir>/forensic/capture.json`（全部包元数据）、`target-hits.json`（目标命中元数据/小 body/预览）、`related-hits.json`（前置链元数据/小 body/预览）、`bodies/`（超过 JSON 预览阈值的完整 body）、`wasm/`（完整 WASM）、`js/original/`（JS 文件）、`notes/fingerprint-baseline.json`。
 >
 > 指定 `--targets/--targets-regex` 后，未捕获到非 OPTIONS 2xx 目标响应时脚本退出码非 0（报告 `NO_TARGET`/`PARTIAL`），作为 Step 1 缺失硬信号；未命中不得转源码搜索，需重采或由用户提供 cURL/HAR。
@@ -257,10 +263,19 @@ node scripts/download_ruyi_tool.js --tool ruyipage-firefox --dest <download-dir>
 
 ### add_preload_script 用法（页面脚本执行前注入 hook）
 
-需要 hook 页面 JS（如拦截 `XMLHttpRequest.prototype.open` 做分层定位的反向对照、导出 SDK 内部函数）时用 `page.add_preload_script(script)`，注意两个坑：
+需要 hook 页面 JS（如拦截 `XMLHttpRequest.prototype.open` 做分层定位的反向对照、导出 SDK 内部函数）时用 `page.add_preload_script(script)`，注意三个坑：
 
 1. **`script` 必须是函数声明字符串**（如 `"() => { ... }"`），传 IIFE 字符串会**静默不执行且无报错**。
 2. **hook 必须带执行标记并验证**：函数体内设置 `window.__hookInstalled = true` / 递增 `window.__hookCount`，页面加载后先读标记确认 hook 生效，再解读实验结果——否则会把页面自身行为误当成注入效果（实战：反向对照实验曾因 IIFE 静默失效得出无效结论）。
+3. **ruyipage 1.2.62 + Firefox 155 下高层封装恒抛 `BiDiError: unsupported operation: The command does not support browsing contexts in privileged scope`**（IIFE 与函数声明两种形态都抛，不是坑 1 的静默失效）。根因在库层：`FirefoxBase.add_preload_script`（即 `page.add_preload_script`）无条件传 `contexts=[self._context_id]`，而 FF155 privileged scope 不接受 `contexts` 参数——与 `session.subscribe` 的同族问题（见 `_apply_ruyipage_capture_compat_patch`）。`page.set_bypass_csp()` 内部走同一封装，同版本同样抛错。
+   → 绕过：直接调底层且**不传 contexts**（`forensic_ruyipage.py` 的 `_apply_ruyipage_preload_script_compat_patch()` 已把高层封装自动降级为该路径）。
+   → world 归属实测（2026-09，ruyipage 1.2.62 + FF155.0a1-v1.2.58，本地 file:// 页）：不传 contexts 的全局注册**落在页面主 world**——hook 内 `XMLHttpRequest/fetch` 包装被页面自身脚本触发（页面自己发的 2 次 `fetch` 使 `__hookCount=2`），hook 写的 `window.__hookWorld` 可被 `run_js` 读到，`remove_preload_script` 后停止执行。**因此「preload 必是独立 world」不能当默认前提**；需要改写页面自有全局（如给 `window.exports` 套日志 Proxy）时先做一次同 world 验证，再决定是否退回「prepend 进 SDK JS 响应体」路线（规则 42）。
+4. **hook 里调不通页面自有业务函数——不要用它驱动翻页**（mashangpa 题13 实测）：箭头函数形 hook 正常打印「preload hook 已安装」，
+   但 hook 体内 `window.loadPage(n)`（页面自己 `function loadPage(){}` 声明的全局）**零请求产出**——抓包数与不开 hook 时逐包相同；
+   改 `--click` 又因分页 DOM 从未生成而选择器必然未命中（见 `references/workflow/trace-flow.md`「翻页点击三个静默失败坑」③）。
+   本环境未定位到成因是 world 隔离还是求值时机，故只登记操作结论：
+   需要「让页面自己再发一次请求」来采序列样本时，hook 代打页面函数不是可行路径，**试一次不产请求就换路线**
+（沙箱执行落盘签名脚本取 writer 真值，或按 SKILL.md 4.4 取证例外申请豁免，须在经验沉淀与最终总结写明判定依据），不要连环试到第 3 轮。
 
 ```python
 hook = """() => {
@@ -275,6 +290,15 @@ hook = """() => {
   };
 }"""
 page.add_preload_script(hook)   # 必须在 page.get(...) 之前
+```
+
+高层封装不可用时（见坑 3）的等价写法：
+
+```python
+from ruyipage._bidi import script as bidi_script
+sid = bidi_script.add_preload_script(page._driver._browser_driver, hook)  # 不传 contexts
+# ... 取证/实验结束后
+bidi_script.remove_preload_script(page._driver._browser_driver, sid.get("script"))
 ```
 
 ## ruyiPage / RuyiTrace 指纹基线固定

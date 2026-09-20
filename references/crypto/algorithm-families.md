@@ -20,6 +20,7 @@
 | 顶象 dingxiang | dx | dingxiang | AST 反混淆 | `scripts/ast-patterns/patterns.md` |
 | 网易 yidun | 易盾验证参数 | yidun | AST 反混淆 | `scripts/ast-patterns/patterns.md` |
 | 同花顺 | token | tonghuashun | AST 反混淆 | `scripts/ast-patterns/patterns.md` |
+| 同花顺系（含整包移植站点） | hexin-v / Cookie `v` | thsi.cn、chameleon、TOKEN_SERVER_TIME、X-Antispider-Message、CHAMELEON_LOADED | **非哈希签名**：设备指纹位打包结构体 + 滚动校验和 + XOR + 自研 base64 + 明文 ts；优先最小沙箱黑盒，先实测服务端校验强度再决定是否闭式还原 | `cases/vm-sandbox-chameleon-iwencai.md`（原版）、`cases/cookie-carrier-hexinv-fingerprint-struct-mashangpa-p15.md`（移植版） |
 | 小红书 | x-s / x-t | xhs | AST 反混淆 | `scripts/ast-patterns/patterns.md` |
 | 百度指数 | ascToken token | window.aes_encrypt / gtk 哈希族 | 纯算还原（自研哈希 + AES-CBC） | 通用流程 |
 | youdao.com | sign / mysticTime | URI 伪装常量派生 + key-getter | 纯算还原（md5 + AES-128-CBC） | 通用流程 |

@@ -187,6 +187,13 @@ VM 读取页面运行时产生的随机量（match24：jQuery expando `jQuery341
 1. **格式正确**：同格式生成（match24 是 `jQuery` + 18 位数字），运行时随机，不写死副本。
 2. **先判断校验维度**：用"一个随机值 + 一次真实请求"验证服务端是否接受——接受则只保格式，拒绝才考虑固定对齐或找其他分歧。
 3. 与"固定对齐类"环境值（UA、时区、构建时钟）区分：后者服务端可能精确校验（match24 的 UA 绑定），前者只保随机性结构。
+4. **同一判据要从「随机量」扩到「整条编码链」**：参数看着穿了位打包 + 滚动校验和 + XOR keystream + 自研 base64，
+   **不等于每一层都被服务端校验**。交付形态定案（沙箱 vs 纯算闭式）前，先跑一组受控单变量请求把边界打出来——
+   缺参数 / 换载体（规则 49）/ **结构合法但内容全伪造** / 改内嵌时间戳 / 截断 / 重放 / 时间戳超前——再决定要不要还原闭式；
+   （信封型的可操作用例全单与易错点见 `references/crypto/crypto-entry.md`「信封型」节，共七个。）
+   实证：mashangpa 题15 的 45 字节指纹结构体，伪造内容体（合法长度 + 合法 ts）照样 200，服务端实际只校
+   「载体存在 + 解码后定长 + |Δts| 在窗口内」；据此把交付停在最小沙箱黑盒，省掉 18 个字段位宽与 XOR 递推常数的还原。
+   反例即按「编码链长度」推断必须闭式还原——链长是客户端混淆强度，不是服务端校验强度。
 
 ## 十七、环境桩执行位置与时间窗口量化（match25 实证）
 
@@ -319,6 +326,230 @@ vmpzl 系 VM 执行到业务层时通过 **eval 执行"反序列化生成的 JS 
 
 wasm 输出 = f(线性内存, wasm 全局, 导入值)，全局变量（堆指针/状态机）从 JS 不可恢复——**跨实例内存快照恢复是结构性死路**（恢复 7MB 后 pre-hash 一致仍 OOB，反模式 40），不要试图字节级复现历史会话。正确目标是用捕获的真实设备输入 + 运行时时间/随机做 **fresh 生成**：fresh 实例自带一致的 (初始内存, 初始全局)，产出载荷自洽即可被服务端接受（真机自身的时间/随机也每次漂移）。配套两个减负实验：①`导入调用序`每次运行漂移（24~27 条、分支性导入出现/消失），交付侧导入实现为幂等动态函数，不按静态表硬编码；②**载荷自包含性实测**——跳过注册上报直发业务接口，若 200 则注册非必需，交付流程少一次请求足迹。不确定的输入语义（如异或对的位宽语义）用双变体实测定夺，不靠猜。
 
+## 二十一、工具链根因定位与交付入库（ruyipage 1.2.62 实证）
+
+### 44. 工具高层封装报「不支持」时，先定位库层参数根因再判定能力缺失——误判会污染证据链
+
+`page.add_preload_script()` 在 ruyipage 1.2.62 + Firefox 155 恒抛 `BiDiError: unsupported operation: The command does not support browsing contexts in privileged scope`（**IIFE 与函数声明两种形态都抛**，不是「IIFE 静默不执行」那条已知坑）。据此下「本环境没有 hook 能力」结论，会把 writer 级调用栈证据整个放弃，退化成只靠源码静态判读——实战为此白跑三轮取证。
+
+根因在库层而非内核：`FirefoxBase.add_preload_script` 无条件传 `contexts=[self._context_id]`，FF155 privileged scope 不接受该参数；底层 `ruyipage._bidi.script.add_preload_script(driver, fnDecl)` **不传 contexts 即注册成功**。实测该路径落在**页面主 world**（页面自身脚本发的 2 次 `fetch` 被 hook 包装计数、hook 写的 `window.__hookWorld` 可被 `run_js` 读到、`remove_preload_script` 生效），故「preload 必是独立 world」不能当默认前提（规则 42 的响应体 prepend 路线仍是 wasm 导入捕获首选，但先做一次同 world 验证再选路）。同一封装的连带受害者：`page.set_bypass_csp()`（内部调同一方法，同版本同样抛错）。
+
+纪律：①报「不支持/不可用」前先读 site-packages 里该方法实现（分钟级成本）；②查同族已有补丁（本仓 `forensic_ruyipage.py` 的 `_apply_ruyipage_capture_compat_patch` 处理的 `session.subscribe` 是同一根因家族）；③用「同一命令换参数」的反例实测一次再定性；④定性写成「库层封装缺陷 + 绕过方式」，不得写成「能力不可用」；⑤`forensic_ruyipage.py` 已内置 `_apply_ruyipage_preload_script_compat_patch()` 与 `--preload-script <JS|文件>`，hook 仍必须带执行标记并核验（坑 2）。
+
+**判定测试**：你的「工具做不到」结论，是否有一个"同 API 少传一个参数就成功"的反例没测？
+
+### 45. 交付前对 `result/` 全量跑一次 `git check-ignore`——门禁豁免目录名可能与 workspace `.gitignore` 撞车
+
+交付规范把取证落盘的原始 JS/wasm 副本放 `result/src/target/original/`（`check_code_quality.js` 对该豁免路径不查压缩/单行长度）。若工作区 `.gitignore` 含 `**/original/`（常见的前端/取证忽略项），**这个目录连同其中的 wasm/二进制资源会被静默排除版本库**：本地跑通、别人 clone 后入口直接报文件缺失，且交付过程零报错零警告。
+
+纪律：DELIVER 前对 `result/` 逐文件 `git check-ignore -v <path>`（或 `git add --dry-run result/`）；命中即把资源改放不被忽略的路径（如实测改用 `result/src/wasm/`），或在 `最终项目总结.md` 显式写明「该文件需 `git add -f`」。二进制入库后仍要保留入口侧的 sha256 启动校验（规则 25 同源要求），入库成功 ≠ 版本正确。
+
+**判定测试**：把 `result/` 拷进一个干净目录（或 fresh clone）后，交付入口能否零改动跑通？
+
+### 46. skill 自身安装残缺（只有 `SKILL.md`）时按「手工等价登记」继续，不得误判为外部工具缺失去重装
+
+`~/.qoder-cn/skills/js-reverse-skill/` 只装了 `SKILL.md` 而无 `scripts/` 时，状态机与门禁脚本（`state_machine.js` / `check_evidence.js` / `check_trace_gate.js` / `forensic_ruyipage.py` / `capture_ruyitrace_log.js`）全部 FileNotFound。这**不是** ruyipage/RuyiTrace 未安装（`tools/` 与 pip 包可能完好），跑 `install_all.js` 只会重装外部组件、仍缺脚本。
+
+纪律：①先分辨「skill 自身残缺」与「外部工具缺失」（`ls <skill 目录>/scripts` 一条命令）；②残缺时把 SKILL.md 要求的门禁改手工等价——`case/state.json` 手写节点与 history、`case/notes/entry-chain.md` 承担证据链、取证驱动脚本落 `case/tools/`；③在 `最终项目总结.md`「偏差与未完成项」显式声明哪些门禁未机器化、证据以何种等价物替代；④**严禁**因脚本缺失而跳过 Step 2 证据要求——按 `ruyi-tooling.md` 的可用通道（含规则 44 的 hook 绕过）补真机证据；⑤手工复刻 ruyipage 驱动前，先读 `forensic_ruyipage.py` 已内置的兼容补丁清单（二进制 body 无损读取、capture 订阅降级、防挂超时），否则会把已修的坑重新踩一遍（实测：自写驱动用文本通道取响应体，wasm 被 U+FFFD 破坏 229B→241B 且无报错）。
+
+**判定测试**：你重装的到底是外部工具，还是 skill 自身的脚本目录？两者路径不同、结论不同。
+
+### 47. 目标签名器自身抛错 ≠ 补环境不足——先用还原算式对同一失败输入打真实接口判别
+
+**实证来源**：mashangpa 题12（JSVMP 自实现 SHA-1）。官方 `pagination12.js` 的字节码对约 4% 的 `(page, t)`
+组合稳定抛 `Q0OQO0O.apply is not a function`（同一 `t` 必抛、连续时间戳最长失败段 ≤2），沙箱里 1:1 复现；
+题面自己给了用户侧处置「如果页面数组无法显示请重新从首页访问即可」。把这类失败输入改用**还原出的纯算 `m`**
+打真实接口，服务端 4/4 全返回 200 + 正常数组 ⇒ 判为**目标客户端实现缺陷**，不是环境不足，也不是校验策略。
+
+**具体操作**：①先量化"是不是自抛"——固定 page 扫连续 `t`（数百个）统计失败率与最长连续失败段，随机散布且段短 = 输入内容相关缺陷；
+②用已对拍通过的独立实现（纯算式或另一条代码路径）对**同一批失败输入**发真实请求；
+③服务端接受 ⇒ 转独立实现为主路径、把抛错的一方降级为对照器；服务端拒绝 ⇒ 才是环境/分支未对齐，继续按 规则 28/29 对齐。
+
+**反例**：看到沙箱偶发抛错就认定"还差环境项"，继续加 `canvas`/`performance`/realm 桩并反复重跑——
+本 case 该缺陷在真实浏览器里同样存在，桩补得再全也不会消失，会把 IMPLEMENT 拖成无限循环；
+另一个反例是把它当成"站点有随机性"，回头去枚举算法组合或给请求加重试掩盖（重试掩盖 ≠ 判别）。
+
+**正确做法**：判别动作要在"交付主路径选型"之前完成，并把结论与证据（失败率、连续段、真实接口 200 计数）
+写进 `case/notes/` 与经验沉淀；交付物注明"站点自身缺陷 + 本实现如何规避"，避免后续维护者再判一遍。
+
+**判定测试**：这个抛错在**真实浏览器**里同输入也会发生吗？答不出就先做这次判别，别继续补环境。
+
+### 48. 「锁随机源」探针失效 ≠ 无随机性——按「锁随机源 → 锁时钟 → 受控扫描」二分，小值域即折叠索引信号
+
+**实证来源**：mashangpa 题14（URL query 签名 `m=base64(CODE4+ts+NUL)`）。签名的 4 字符前缀 `CODE4` 被误判为
+随机盐：沙箱里锁 `Math.random=0.5` 后它**仍然逐次变化**（且沙箱中 `crypto` 为 undefined，熵不可能来自 WebCrypto）
+——这恰好证明它**不是**随机量而是**确定性哈希**。改桩 `Date` 构造器把 ts 冻结后，CODE4 连续 12 次调用完全不变，
+即证明 `CODE4 = H(ts)`；再对 320 连续 ms + 200 步进 7919ms 共 520 个受控 ts 扫描，发现取值域**恰 16 个固定值**
+（结构 `(0x10+a)<<8 | (b[a]^(c?0xDE:0))`，同一 `a` 的两成员恒相差异或 `0xDE`）⇒ 4 bit 折叠索引。
+
+**具体操作**：① 锁 `Math.random` 定值重复调用——输出定住 = 随机盐（题13 的 `r`），照变 = 确定性哈希，**立即停止找随机源**；
+② 改锁 `Date` **构造器**（不是 `Date.now`，站点常用 `new Date().getTime()`；vm 内冻结必须写 context 侧，
+见 `env-debug-loop.md`「沙箱内时间/随机冻结不生效」）——输出定住 = 时间派生；
+③ 受控 ts 扫描（连续段 + 大步长段各一批）统计**取值域大小**：值域极小（2^n 量级）⇒ 先挖结构
+（配对关系/异或恒等/查找表），值域大 ⇒ 才考虑还原哈希闭式。
+
+**反例**：锁 `Math.random` 无效后继续找别的熵源（PerformanceAPI、地址熵、内部 PRNG），在源头上空转——
+本题若沿此路会错过「锁时钟一击定音」；另一反例是值域只有 16 个却去硬啃 520 组样本拟合哈希闭式
+（本 case 排除了 mod/shift/digit-sum/djb2/FNV/XOR 折叠/GF(2) 线性组合仍无解），而服务端接受黑盒产物时
+闭式只是「去依赖」优化项，不是交付阻塞项。
+
+**正确做法**：黑盒执行站方原始脚本、以**真机同输入**驱动并要求**逐字节一致**（`compare_fixture`），
+即是分支对齐的最强证据（真机出现过的输出落在沙箱输出集合内 ⇒ 非诱饵变体，免规则 29 的 nativize 对拍）；
+闭式还原记入总结的「后续建议」，不阻塞 REAL_VERIFY。
+
+### 49. 同值多载体参数（Header 与 Cookie 同时出现）——先单变量定「哪个载体被校验」，否则会往错方向排障
+
+**实证来源**：mashangpa 题15「cookie对抗」。签名以 `hexin-v` 请求头 + `v` cookie **同值双发**
+（trace 同一轮内既有 `Headers.append("hexin-v", v)` 又有 `Document.set cookie` 写 `v=`）。
+默认推定「头是被校验的那个」，单变量对照实测：**只带 Header → 拒（HTTP 200 包业务码 400）；只带 Cookie → 过**。
+载体判错时「签名算法完全正确却被拒」会被误读成算法/环境未对齐，从而白跑补环境轮次。
+
+**具体操作**：①取证阶段就把同一取值的**全部出现位置**列清（trace writer 点 × 真机请求头 × cookie 三处对齐）；
+②发真实请求前，对每个载体各做一次「只带它」与一次「去掉它」——两次请求即可定案，成本远低于事后误判；
+③结论写进 `case/notes/` 与经验沉淀，交付按「被校验载体必带 + 其余载体按真机形态同带」实现；
+④与 `analyze_cookie_attribution.js` 的**生成方**归因（server / js / both）分开——**生成方 ≠ 校验方**，
+该脚本回答"谁写的"，本规则回答"服务端认哪个位置"。
+
+**反例**：浏览器发了 Header 就认定服务端校 Header；或反过来把 cookie 里的同名值当静态凭据硬编码进交付
+（它是每请求重算的动态值，属第 3 节禁止的"把动态秘密复制进代码"）。
+
+**正确做法**：请求侧参数的三个正交维度各自实测——**存在性**（缺了会不会拒）、**载体**（校哪个位置）、
+**内容强度**（伪造值会不会过，见规则 32 第 4 条）。三者都只有真实请求能回答，读源码至多给出假设。
+
+**判定测试**：把这个参数从 Cookie 挪到 Header（或反过来）再发一次，服务端反应有区别吗？
+没做过这次对照，就不要在总结里宣布"参数校在 X 上"。
+
+## 二十二、黑盒签名 SDK 的沙箱执行与还原深度判定（mashangpa 题16 实证）
+
+### 50. 黑盒 SDK「返回 Promise 但永不 settle」——先补异步调度泵并记录回调异常，再怀疑环境检测分支
+
+**实证来源**：mashangpa 题16（上游电商 h5st 协议的移植版签名 SDK `PcSign.js`，在 vm 沙箱执行；
+协议血统与平台细节见 `cases/body-carrier-h5st-remote-algo-mashangpa-p16.md`）。症状全套"看似被反调试拦住"：
+官方 JS 顶层确实执行（`window.PcSign` 已挂载、`loadPage` 可调用、localStorage 有写入），
+`sign()` 返回 Promise 但 5 轮全不 settle，**零报错**。补上
+①`MutationObserver.observe()` 真把回调排上一轮（`Promise.resolve().then(cb)` + `setInterval` 泵）+
+`MessageChannel`/`setImmediate`/`postMessage` 可派发，②沙箱 XHR 事件回推逐个 `try/catch` 并记
+`xhr.handler-error` 之后，**同一入参第一次调用即出值**。
+
+**具体操作**：按固定顺序试，不许跳步——①调度四件套 → ②网络回调异常记录 → ③才进
+规则 28/29 的"值对≠对齐/诱饵变体"与逐字段指纹对齐。最小实现见
+`references/env/env-debug-loop.md`「异步死等：签名 Promise 永不 settle」。
+
+**反例**：一见不返回就补 canvas/WebGL 真值、去跑整包反混淆、或断定"该 SDK 有引擎检测只能靠真机"
+（本题取证浏览器确实另有引擎级阻断，但那是**另一条独立结论**，见规则 51 与
+`env-detect-bypass.md` 的 C 形态——两者混淆会让"沙箱本可跑通"这件事永远发现不了）。
+
+**判定测试**：在沙箱里 `Promise.resolve().then(()=>log('pump'))` 能打出，而 SDK 的 `.then` 打不出
+⇒ 它用的不是原生 Promise，去查它自带的调度器读了哪些全局。
+
+### 51. 摘要算法本体由服务端下发（RAC 形态）= 还原深度的止点，不要追闭式
+
+**实证来源**：mashangpa 题16。签名 SDK 运行时向 `cactus.jd.com/request_algo` POST 设备指纹，
+响应的 `data.result.algo` **就是一段 JS 源码串**（`function test(tk,fp,ts,ai,algo){…return algo.MD5(str)}`）
+＋ 远程 `data.result.tk`，客户端 eval 它再算摘要（`fv=h5_file_v5.0.6`，URL 里 `?v=<yyyyMMdd>` 按日更新）。
+
+**为什么这是止点**：闭式不存在——算法是服务端此刻决定的，今天还原的式子明天随版本变。
+交付的正确形态是**沙箱黑盒执行官方 JS + 网络桥接上游**，把上游当"动态资源"对待
+（`references/network/dynamic-resource.md`：启动抓取 + sha256 对比 + 本地副本回落），
+并在 `manifest.json`/总结里显式写明这层外部依赖与失效表现。
+
+**与规则 32 第 4 条 / 规则 49 构成三判据**：决定"要不要啃编码链闭式"的**不是链的长度**——
+本题编码链很短但服务端真验内容（伪造同长度签名直接拒）；题15 编码链极长（位打包+校验和+XOR+自研 base64）
+但服务端只验长度与时间窗（伪造内容体照过）。三判据各自实测：
+①**存在性/载体**（规则 49）、②**内容强度**（受控伪造样本打靶）、③**算法是否本地可得**（本规则）。
+
+**判定测试**：把 SDK 的哈希入口打桩截获"它 eval 的函数源码来自哪个响应字段"。若来源是网络响应，
+立刻停止闭式推导，转 ② 的打靶结论决定交付深度。
+
+### 52. 拿不到真机 oracle 时，fixture 固化为「结构基线」而非逐字节值，并显式标注证据替代关系
+
+**实证来源**：mashangpa 题16——Step 1 真机签名样本因引擎级阻断完全拿不到，
+但 SDK 内嵌 ts 自取（`sign` 内部再 `Date.now()` 一次，与调用方传入的 t 差几毫秒），逐字节本不可复现。
+
+**具体操作**：fixture 只固化**结构不变量**（字段数、各段长度、前缀、字符集判定），
+入口 `--selftest` 用同一套键现场生成再比对；fixture 文件与总结里写明
+「结构基线，非逐字节 oracle；逐字节级验证由**服务端接受该产物**承担，
+且**伪造同长度值被拒**即为反向证据」。这样既满足 REAL_VERIFY 的离线回归要求，
+又不会把「自己生成、自己对拍」读成自证。上游改版监控同样落在结构基线上（`f6Version`/段长变化即 FAIL）。
+
+**反例**：把一次沙箱产物的完整签名值写进 fixture 当期望值再让交付码去复现同一串
+（时间戳一动就 FAIL，且容易顺手改成"从样本里取参数"——踩第 3 节红线）；
+或在只有 fixture 自对拍的情况下直接宣布"与真实浏览器一致"。
+
+**判定测试**：fixture 里任何一个字段的期望值，是否在服务端**收到过**？没有，就不要称其为真机基线。
+
+## 二十三、响应侧加密还原的库语义与时间参数判定（mashangpa 题19 实证）
+
+### 54. crypto-js 家族有两种 `decrypt` 语义——按调用点第二实参类型定密钥语义，不按"库里有没有 KDF"
+
+**实证来源**：mashangpa 题19（响应体 `{"r":base64密文,"k":24 字符密钥}`，站方 `19pro.js` = 未混淆 crypto-js 打包副本 + `DES3` 包装）。
+打包文件里 `MD5` 命中 4 次、`EvpKDF` 定义在场，看起来像"口令派生 key/iv"，实际**一次都没调用**——
+目标链是 `CryptoJS.TripleDES.decrypt(cipherText, enc.Utf8.parse(k), {iv, mode, padding})`，
+第二实参是 `enc.Utf8.parse(k)` 产出的 WordArray ⇒ 直接密钥路径，密钥原样当 3DES key 用，零派生。
+（`CryptoJS.<算法>` 一律由同一个 `Cipher._createHelper` 产出，内部分叉在实参类型——静态看出处分不出两条路径。）
+误判成 passphrase 路径会导致解不出、进而误升级成"要补环境跑官方 JS"。
+
+**具体操作**（三步，全部在落盘源码里做，不需运行时）：
+① 读调用点第二实参：`enc.*.parse(...)` 产出或 WordArray ⇒ 直接密钥；字符串口令 ⇒ 派生路径（`cfg.kdf` 参与）；
+② 看密文串**自身**有无容器魔数——`Salted__`（`53616c7465645f5f`）前缀才是 OpenSSL 派生格式（走 EvpKDF，见
+`cases/yuanrenxue-match22-openssl-salted-alphabet-branch.md`）；Salted__ 容器 = 16 字节头 + 块对齐密文，
+「裸 base64 且块对齐」不能当直接密钥型判据，魔数只看前缀；
+③ 用 `grep -c` 统计候选哈希/KDF 的**调用点**（`X.execute(`、`Hash(` 形式），只有定义无调用点的即打包死代码，不进还原链。
+操作细则落 `references/crypto/crypto-entry.md`「库语义判定：同一算法的两条调用路径」。
+
+**反例**：看到文件里有 `MD5`/`EvpKDF`/`HmacSHA` 就假设参与派生；或反过来"标准库一定按标准用法"，
+不查 Helper 就照 `createDecipheriv` 写，遇到真派生型时表现为**填充错误而非明文异常**，极易误判成密钥字节序问题。
+
+**判定测试**：把 `CryptoJS.<算法>.decrypt` 在沙箱/浏览器里打桩，打印实参类型——
+`WordArray` ⇒ 直接密钥路径；字符串口令 + `cfg.kdf` 被读 ⇒ 派生路径。
+打不了桩时用 ②：密文头 8 字节是否为 `Salted__`。
+
+### 55. 时间/日期派生的 key·iv：按"加密方时区"排候选 + 双校验 + 全失败硬抛，禁止写成常量
+
+**实证来源**：mashangpa 题19。站方 `DES3.iv() = formatDate(new Date(), "yyyyMMdd")`——取的是**浏览器本地日期**，
+而加密发生在服务端（UTC+8）。两者只在客户端处于东八区时偶然一致：客户端换时区、或整轮取数跨过 UTC+8 零点，
+解密就全页失败，且症状是首块乱码 + `JSON.parse` 失败（PKCS#7 去填充照样通过，不会报 padding 异常）——填充错误对应的是密钥/派生问题（规则 54 反例），别把两处症状弄反。
+
+**具体操作**：
+① **主候选按加密发生地的时区**（服务端/站点所在地）推日期串，运行机本地日期作次候选，再各 ±1 天覆盖跨零点；
+② 每个候选都要**双校验**——PKCS7 去填充成功 **且** 明文能 `JSON.parse` 成预期结构，任一不过即换下一候选；
+③ 候选全部失败必须**抛错终止**（错误里带上试过的候选值），不许"取第一个候选硬解"或返回空串，
+否则答案会静默算错；④ 日期串的补零语义要从站方 `formatDate` 实现核对（`M+`/`d+` 是否补零、`y` 是否截断），
+不同库写法不同（`yyyyMMdd` / `yyyy-MM-dd` / 时间戳整除）。
+交付实现里把这段做成独立模块（如 `src/des3.js`），把 `ivUsed` 写进验证记录摘要，便于事后判断当天用的是哪个候选。
+
+**反例**：把 8 字节日期 IV 当常量写进代码（"今天能跑"是最强陷阱，两天后静默失效）；
+只试本地日期，在非东八区机器上首跑失败后误判"站点改版"并去重跑取证；
+或用 `try/catch` 吞掉解密失败、按 0 参与求和（答案错但全程 200，REAL_VERIFY 查不出来）。
+
+**判定测试**：把系统时区改成 UTC±0 再跑一次交付入口——仍成功说明候选集正确，
+失败说明只写了本地日期一条路径。无改时区条件时，用固定 `now` 注入跑一次 UTC+8 与一次 UTC±0 输出对比。
+
+## 二十四、交付记录与证据的写入边界（mashangpa 题17 实证）
+
+### 56. 实时验证记录只允许在线路径写；离线/`--selftest` 分支一律落 `case/tmp/`
+
+**实证来源**：mashangpa 题17（内容还原型，零沙箱零签名，交付入口 `final.js`）。`--selftest` 分支与在线分支
+共用同一个模块级 `verification` 对象（`attempts: []` 起算）并同样调用 `writeVerification()`
+⇒ 已实时落盘的 23 条真实 attempt（详情页 + 映射表 + 20 页取数 + 提交，含 `status:success` 那条）
+**被一次离线自检清空**，`check_final_artifact.js` 只报「联网模式至少需要 5 条 attempts，当前只有 0 条」，
+不给根因，最后只能重新发起一轮真实请求才恢复记录。
+
+**为什么危险**：`验证记录.json` 是 REAL_VERIFY 的唯一交付证据，规则要求"每次请求实时落盘、不事后回填"。
+离线模式覆写它＝静默销毁证据，且表象像"门禁在挑格式"，极易被当成门禁误报而手工回填（那是伪造）。
+
+**具体操作**：① 交付入口把"在线记录"与"离线自检输出"分成两个落盘目标——在线分支写
+`result/验证记录.json`；`--selftest`/离线对拍只写 `case/tmp/<实际输出>.json`（供 `compare_fixture.js` 读）；
+② 自检函数不得调用记录写入函数，也不得在共用模块作用域持有 `verification` 单例并在离线分支复用；
+③ 记录若被误毁：**重跑真实请求**恢复，禁止手工回填、禁止用另一轮运行的数据拼装。
+`check_final_artifact.js` 在 attempts 不足且入口含 selftest 分支时会直接提示本条根因。
+
+**反例**：把 `writeVerification()` 放在模块底部"反正离线模式也会提前 return"的位置直觉里——
+真实事故正是 selftest 走完对拍后照样执行了写入。
+
+**判定测试**：跑一次 `--selftest`（或等价离线模式），再看 `result/验证记录.json` 的 attempts 条数是否变化。
+变了即本条命中。
+
 ## 已合并条目指针（旧编号 → 主条目）
 
 | 旧编号 | 并入 | 原主题 |
@@ -329,18 +560,20 @@ wasm 输出 = f(线性内存, wasm 全局, 导入值)，全局变量（堆指针
 | 15 | 规则 8 | JSVMP 环境伪装优先于算法追踪 |
 | 17 | 规则 14 | 环境对比要分批采集 |
 | 18 | 规则 1 | 环境补丁必须在 JSVMP 脚本加载前完成 |
+| 53 | 规则 56 | 编号调整残留（并发编号期间曾用于 p17，后改判 56） |
 
 ## 贡献新规则
 
 不是每个案例都产生新规则：多数案例的经验已被现有条目覆盖，案例细节写进 `result/经验沉淀-<站点>.md` 交付物即可，引用现有编号（含上方指针表旧编号）优于新增。确需新增时：
 1. 先检索确认未覆盖：速查 `search_references.js --keyword <关键词>` + 通读本文件同章节条目，确认根因确实未被覆盖且可跨站点泛化。
 2. 按"### N. XXX"格式追加一条（编号顺延，不重排既有编号），必须有**实证来源**（案例/站点）、**具体操作**、**反例**、**正确做法**。
-3. **同根因合并优先**：新经验与既有条目同根因时并入既有条目（原编号保留在上方指针表），不新增编号；并入前同时检查主条目与指针条目两处。当前规模：**37 条实条 + 6 条指针**（7/9/11/15/17/18）。
+3. **同根因合并优先**：新经验与既有条目同根因时并入既有条目（原编号保留在上方指针表），不新增编号；并入前同时检查主条目与指针条目两处。当前规模：**49 条实条 + 7 条指针**（7/9/11/15/17/18/53）。
 
 ## 相关案例
 
 | 案例文件 | 关联点 |
 |---------|--------|
+| `cases/unicode-codepoint-substitution-no-font-file-mashangpa-p17.md` | 规则 56 实证（离线 `--selftest` 复用在线 `verification` 对象并 `writeVerification()`，把 23 条真实 attempts 清零，门禁只报条数不给根因）+ 反模式 41 实证（`search_cases.js` 多关键词 AND ⇒ "本地无案例"假阴性，差点漏掉 match7 同族先例）+ 反模式 11 第七种形态实证（题型名"字体加密"被当实现形态依据）+ `font-anti-crawl.md` 形态三（伪字体：零字体资源、表在 JS 明文常量） |
 | `cases/jsvmp-xhr-interceptor-env-emulation.md` | 规则 1/3/5/12/16 实战验证（原 18 已并入 1） |
 | `cases/jsvmp-dual-sign-xhr-intercept-cacheOpts-jsdom-firefox.md` | 规则 1/3/12/14/16 实战验证 |
 | `cases/jsvmp-ruishu6-cookie-412-sdenv.md` | 规则 2/6/8 实战验证 |
@@ -364,4 +597,10 @@ wasm 输出 = f(线性内存, wasm 全局, 导入值)，全局变量（堆指针
 | `cases/yuanrenxue-match28-jsvmp-rsa-purecompute.md` | 规则 35 实战验证（JSVMP 字节码 limbs 字面量直读 → 确定性 RSA-1024 纯算，无需跑 VM；固定 0x01 padding 对拍；limbs 出现序≠数组序）+ 规则 36 实证（数据绑定 sessionid：换会话数据完全不同必须重算，答案 25808383→27673886）+ 规则 37 实证（限流 403 token failed 单请求诊断法：第 3 页起 403 但单请求 200 = 频率墙；页间 3s+冷却+提交 --answer 解耦）+ 反模式 18/36 实证（换会话数据绑定重算 / 限流单请求诊断）+ JSBN hex2b64 非标准编码 |
 | `cases/yuanrenxue-match27-jsencrypt-random-rsa-purecompute.md` | 规则 38 实战验证（X.509 SPKI hex 公钥 + getRandomValues = JSEncrypt 随机 RSA → publicEncrypt 纯算；候选 X×公钥扫描实证明文常量：pubkey1+X=27 → 200、pubkey2 全 403；**沙箱跑通+结构像 ≠ 服务端接受**——_$v 依赖 document.all 分支致运行时常量算错，可纯算时转纯算不死磕沙箱）+ 反模式 27 五次实证（m=window["matchnumber"]=undefined 诱饵）+ 反模式 36 同族实证（429 限流）+ jq 桩 Proxy 缓存坑（缓存裸 obj 致二次访问缺失方法报错） |
 | `cases/yuanrenxue-match29-vmpzl-eval-log-source.md` | 规则 39 实战验证（JSVMP 业务逻辑经 eval 反序列化执行 → RuyiTrace eval 分类日志落盘业务源码，绕开 LZ 压缩/字节码/VM 指令三层直读；eval 源码变量名 `_$`+随机但结构稳定，grep `token`/`case 64` 定位请求构造）+ 反模式 37 实证（手写 `LZ.` 前缀解压器是死路，先查 eval 日志）+ 反模式 27 再实证（m=window.matchnumber 诱饵）+ match26 同款实证（页面自驱动翻页注入新 now、jQuery 桩 `.add()` 必须有）+ 46 项环境探测桩全 true（Symbol.toStringTag 补 HTMLDocument/Navigator）+ Session 门禁字面识别再实证（`client.getPage(` 不算复用，须 `client.get/post(`） |
+| `cases/wasm-zero-import-linear-signer-mashangpa-p11.md` | 规则 44 实证（`add_preload_script` 抛 privileged scope 被误判"无 hook 能力"，白跑三轮；根因是库层无条件带 contexts，底层不传即成功且落主 world）+ 规则 45 实证（交付 wasm 放 `src/target/original/` 被 workspace `.gitignore` 的 `**/original/` 静默排除）+ 规则 46 实证（skill 只装 SKILL.md 时手工等价登记）+ 规则 36 新形态（同窗口内各页数组重洗而总和稳定，判数据窗只能用聚合值）+ 反模式 11 第六形态；无 RuyiTrace 时用「真机 oracle 直调表 × 本地同 wasm 执行 × 算式全量对拍」三步闭合 writer 证据（30/30 + 4/4 + 4280/4280） |
 | `cases/wasm-harness-selfhash-fp-blackbox.md` | 规则 41~43 实战验证（自同构校验：wasm 导入自喂脚本源全文与 wasm 自身字节 → 官方包 200/重建包必 500 的真因；透明边界全量捕获 hook 两个重载/内存导出名坑；跨实例内存快照恢复 OOB 死路 → fresh 生成 + 成对设备画像；载荷自包含实测 no-register 也 200）+ 反模式 39/40 实证 + 7 轮环境层修补（逐槽对齐/全量回灌/凭据注入/TLS 替换）全部无效的教训：对照实验未锁"脚本源与 wasm 字节逐字节相同"这一前置 |
+| `cases/jsvmp-sha1-const-table-jscall-args-mashangpa-p12.md` | 规则 47 实证（目标 JSVMP 对约 4% 的 (page,t) 自抛，用还原算式打真实接口 4/4 返回 200 判为客户端缺陷，转纯算主路径）+ jscall args 直读 VM 常量表定算法族（SHA-1 族但 7 个常数仅 3 个标准、IV3 偏 1、4 个非标准 ⇒ VM 改动过 SHA-1 常数，初始化按真机表不能套标准 IV；另有盐值 fu/aa + 挂载成员名 originalAjax/requestInterceptors，未开 MOZ_DOM_JSVMP_* 也未反编译字节码）+ run_with_trace 两个静默致死形态（minimal bootstrap 缺 window 使 VM IIFE 抛 ReferenceError、setTimeout 桩不执行回调）+ 规则 36 新形态（同站题1恒定与题11/12 轮换并存，逐题实测）+ 交付瘦身（还原期沙箱挪 case/，避免 result 携带补环境主体） |
+| `cases/obfuscated-url-param-signer-safekodo-mashangpa-p14.md` | 规则 48 实证（锁 `Math.random` 仍变 ⇒ 确定性哈希，锁 `Date` 构造器定音 `CODE4=H(ts)`；值域恰 16 个 ⇒ 4bit 折叠索引 + `0xDE` 配对结构；闭式未还原不阻塞交付，黑盒在真机输入上逐字节复现即分支对齐证据）+ env-debug-loop「沙箱内时间冻结不生效」实证（vm realm 边界：宿主改 `globalThis.Date` 不跨 realm；取时入口是 `new Date().getTime()` 非 `Date.now`）+ trace-flow 竞态第④坑实证（`--targets` 把 200+业务拒绝当终态命中，取证提前收尾 `--click` 永不发生）+ 竞态非恒定（ruyipage 两轮裸发、RuyiTrace 轮成功，判「恒定」前先换工具重采）+ 规则 36 再实证（相隔 2 分钟 103291/99128，取数提交同窗） |
+| `cases/cookie-carrier-hexinv-fingerprint-struct-mashangpa-p15.md` | 规则 49 实证（`hexin-v` 头与 Cookie `v` 同值双发，只带头被拒、只带 Cookie 通过 ⇒ 服务端校 Cookie；生成方归因 ≠ 校验载体归因）+ 规则 32 第 4 条实证（45B 指纹结构体穿位打包+校验和+XOR+自研 base64，伪造内容体仍 200，ts ±540s 过 / ±600s 拒 ⇒ 链长是客户端混淆强度不是服务端校验强度，据此把交付停在黑盒沙箱）+ env-object-model Canvas 节新增 triage 实证（`getContext` 只被 `!!ctx` 消费，折成 1 个 bit）+ vm realm 新形态（沙箱键预置 `globalThis: null` 使 context 内 `defineProperty` 报 non-object）+ `forensic_ruyipage.py` 入口页被收尾轮转丢失缺陷的实证与修复 |
+| `cases/body-carrier-h5st-remote-algo-mashangpa-p16.md` | 规则 50 实证（黑盒 SDK 自带 asap 型 Promise：`MutationObserver.observe()` 空桩使 `sign()` 5 轮不 settle 且零报错，被误读成反调试；补调度四件套 + XHR 回调异常记录后 round 1 出值）+ 规则 51 实证（`request_algo` 响应 `data.result.algo` 就是摘要函数源码 ⇒ 闭式不存在，交付停在沙箱黑盒 + 上游桥接；与题15 构成"链长≠校验强度"的对偶：本题链短但伪造即拒）+ 规则 52 实证（Step 1 永久缺失时 fixture 转结构基线，逐字节交服务端承担）+ `env-detect-bypass.md` C 形态实证（3+1 轮取证浏览器 0 次目标请求、`--ua` 覆盖后包谱同构，Node/V8 同文件跑通 = 引擎级分歧）+ storage 键位进度探针首次应用（断点钉在 `WQ_gather_*` 之后、`request_algo` 之前）+ 失败处理器自身抛错的新静默形态（`onSign` 引用未定义的 `a` → `ReferenceError`，Promise 既不 resolve 也不 reject） |
+| `cases/response-carrier-tripledes-date-iv-mashangpa-p19.md` | 规则 54 实证（站方 `19pro.js` 是未混淆 crypto-js 打包副本，`MD5`/`EvpKDF` 定义在场但零调用，第二实参 `enc.Utf8.parse(k)` 即直接密钥路径，误判 passphrase 会全解不开；与 match22 的 `Salted__` 真派生型构成对偶）+ 规则 55 实证（`DES3.iv()=formatDate(new Date(),'yyyyMMdd')` 取浏览器本地日期而加密在服务端 UTC+8 ⇒ 候选排序+双校验+硬抛，IV 绝不写成常量）+ 规则 36 第三次命中（取证样本隔 25 分钟仍逐字节复现、第 4 次采样才变 ⇒ "复现一次"不能证伪轮换）+ §4.4 例外 3 内容还原型豁免第二次启用（判据三条逐条落盘形态可作模板）+ A 纯算路径（该平台 13 题里第二个完全零沙箱零补环境，前例 p17） |

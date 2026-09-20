@@ -64,7 +64,7 @@
 
 1. **新鲜度（最容易翻车的变量）**：内嵌 serverTime/时间戳的签名有有效期。对照样本必须「采集后立即重放」并记录采集→重放延迟；取证阶段抓的旧样本重放 403 **不构成任何结论**——过期签名与垃圾签名返回同一风控码时会制造「连接层拦截」假象。
 2. **正向对照做法**：ruyipage 打开目标页抓到含签名的完整请求 URL 与请求头后，立即用 curl_cffi（impersonate 与目标浏览器同族）原样重放；UA/请求头与抓包对齐，控制变量只留签名来源。
-3. **反向对照做法**：取证阶段 ruyipage `add_preload_script`（传函数声明字符串 `"() => {...}"`，IIFE 会静默不执行）hook `XMLHttpRequest.prototype.open`，命中目标接口时替换其中的签名为自己生成的值；hook 内设置 `window.__hookInstalled` 等标记并在解读结果前验证标记，防止把页面自身行为误当实验结果。
+3. **反向对照做法**：取证阶段 ruyipage `add_preload_script` hook `XMLHttpRequest.prototype.open`，命中目标接口时替换其中的签名为自己生成的值。注意 ruyipage 1.2.62 + FF155 下该 API 恒抛 `BiDiError: unsupported operation: The command does not support browsing contexts in privileged scope`（**IIFE 与函数声明两种形态都抛**，不是「IIFE 静默不执行」那条已知坑），改用 `forensic_ruyipage.py` 内置的 `_apply_ruyipage_preload_script_compat_patch()` / `--preload-script <JS|文件>` 注入（见规则 44）；hook 内设置 `window.__hookInstalled` 等标记并在解读结果前验证标记，防止把页面自身行为误当实验结果。
 4. **结论 ①=200 且 ②=403** ⇒ 服务端校验签名内容（通常是签名内嵌的环境检测结果）：进入 `references/env/env-detect-bypass.md` 的对齐探针法，测量并逐位对齐 SDK 检测输出，不要先假设要复现 canvas/行为轨迹等完整指纹，更不要转投浏览器内核取数方案。
 5. 对照结论与验证记录一并留档（两个对照各自的签名摘要、时间戳、HTTP 状态、业务码）。
 6. **对照必须在健康 session 下做**：连续失败会触发站点惩罚机制（见下方专节），惩罚期内"正反对照全 403"是污染数据，会制造"连接层不可绕过"假象（实战误判：猿人学 match6 在惩罚期内跑对照得出 TLS 硬门槛结论，实际补齐 cookie 后 curl_cffi 直接过）。每组对照前先复刻一次确定成功的基线请求，基线失败即冷却后重做。

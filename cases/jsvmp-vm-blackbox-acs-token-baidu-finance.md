@@ -107,4 +107,4 @@
 |---------|--------|
 | `references/network/ip-risk-control.md` | 双对照协议 / hit risk 语义 / 反模式 36 装饰头 |
 | `references/env/env-debug-loop.md` | missing-env-priority 门禁与补环境纪律 |
-| `cases/gitee nox/tox`（jsvmp-baidu-waf-nox-tox-gitee.md） | 百度系 JSVMP 黑盒补环境对照 |
+| `cases/jsvmp-baidu-waf-nox-tox-gitee.md` | 百度系 JSVMP 黑盒补环境对照 |

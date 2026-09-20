@@ -193,7 +193,7 @@ URL 不是证据——脚本确认文件真实存在且可归类才允许跳过�
 
 **取证前速查（R2）**：路由到 FORENSIC_CAPTURE / TRACE_CAPTURE 后、发起采集前，先按第 5 节跑 `search_cases.js`；命中则提取三项情报（校准 `--targets`、坑点与采集参数建议、题型假设）写入状态行后再取证，未命中按全新 case 取证。速查只是假设与路径提示（绝对规则 2）。
 
-网络取证（`--targets` 只写唯一标识终态接口的完整路径子串，禁止用会误命中同号旁路接口的宽正则，见反模式 22；入口页 HTML 自动存 `case/forensic/document.html` 作为 challenge cookie 强制证据）：
+网络取证（入口页 HTML 自动存 `case/forensic/document.html` 作为 challenge cookie 强制证据）：
 
 ```powershell
 python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root> --targets <最终业务接口关键词> --markdown
@@ -216,7 +216,7 @@ python scripts/forensic_ruyipage.py --url <target-url> --case-dir <project-root>
 node scripts/capture_ruyitrace_log.js --url <target-url> --case-dir <project-root> --evidence-signal <环境API或签名写入点关键词> --end-signal <明确完成事件> --import-after --markdown
 ```
 
-- 信号语义：`--evidence-signal` 只匹配 RuyiTrace 记录的 API/写入点，应选参数写入点/参数名（`noncestr`、`x-zse-96`、`Headers.set(...)`）；三类必然不命中、一律不传——①目标接口 URL ②裸 `createElement` 等泛化 API（门禁会拒绝）③密钥/常量名。`--end-signal` 只控制提前关闭，与 evidence-signal 分离；`--target-signal` 仅兼容旧调用，新流程勿用。定向收窄（`--trace-env` 组合表）、JSVMP eval 落盘核对与带栈 opcode（STACK_FULL）闸门参数见 `references/workflow/trace-flow.md`「定向 trace 策略」与 `references/tooling/ruyi-tooling.md`「闸门窗口」。
+- 信号语义：`--evidence-signal` 只匹配 RuyiTrace 记录的**浏览器内建 API/写入点**（参数名、请求头名，如 `noncestr`、`x-zse-96`、`Headers.set(...)`）；四类必然不命中、一律不传——①目标接口 URL ②裸 `createElement` 等泛化 API（门禁会拒绝）③密钥/常量名 ④站方自定义函数/方法名（改用其写入浏览器 API 的字面量）。`--end-signal` 只控制提前关闭；`--target-signal` 仅兼容旧调用。定向收窄、JSVMP eval 落盘核对与带栈 opcode 闸门参数见 `references/workflow/trace-flow.md`「定向 trace 策略」「trace 信号的记录形态与匹配规则」与 `references/tooling/ruyi-tooling.md`「闸门窗口」。
 
 用户已提供 NDJSON 用 `--input <ndjson>` 导入生成摘要，不重复采集；多进程日志用 `import_ruyitrace_log.js --input a --input b`，复制到 case 时按来源摘要命名避免同名覆盖。取证结果只进 `case/`，原始 JS 放 `case/js/original/`，临时材料放 `case/tmp/`。
 
@@ -355,7 +355,7 @@ node scripts/check_trace_api_coverage.js --case-dir <project-root> --markdown
 node scripts/run_with_trace.js --target <project-root>/case/js/original/<资源名>.js --entry <入口函数> --timeout 5000
 ```
 
-默认只观察不修改；仅当 NDJSON 缺失、截断或无法覆盖关键入口时才用 Hook 模板，且只注入 ruyipage 定制 Firefox；Hook 须在目标 SDK 加载前安装，命中后及时移除。
+默认只观察不修改；仅当 NDJSON 缺失、截断或无法覆盖关键入口时才用 Hook 模板，且只注入 ruyipage 定制 Firefox；Hook 须在目标 SDK 加载前安装，命中后及时移除。签名层未安装（栈走原版 jQuery）即重采无解，改沙箱直调落盘脚本（见 trace-flow.md）。
 
 环境补齐用证据驱动的最小集合：只有 trace 显示参与参数或服务端校验的模块才实现；每轮补齐保存输入、中间值、输出与请求结果，禁止一次性伪造大量浏览器 API。未进入关键链路的检测代码不等于服务端约束，不纳入最终环境。
 
@@ -410,7 +410,7 @@ node scripts/compare_fixture.js --fixture case/fixtures/<样本>.fixture.json --
 
 至少保留一份脱敏验证摘要与可复现命令；不得输出完整 Authorization、Cookie、Token、密钥或验证码答案。401/403/412/429 先诊断，不得用浏览器自动化或硬编码成功样本绕过。验证码交付追加两项记录：手动成功样本基线（`node scripts/check_success_baseline.js`，要求与豁免见 `references/captcha/verification-workflow.md`）与逐次 attempts 复盘（`node scripts/check_verification_attempts.js`）；成功标准 = verify 返回通过凭据且业务接口消费凭据返回正确业务数据，视觉答案正确不算通过。
 
-**403/风控码分层定位协议（R1：结论前必须完成，`check_risk_layer_diagnosis.js` 裁定）**：用「签名来源 × 连接来源」双对照隔离变量——① 正向：浏览器**新鲜**签名 + 纯协议客户端重放；② 反向：自己的签名 + 真实浏览器连接（ruyipage `add_preload_script` hook `XMLHttpRequest.prototype.open` 换参，hook 须带执行标记并验证）。**对照纪律**：过期样本的 403 不构成结论；每组对照前先复刻成功基线，健康 session 下一次只改一个变量（连续失败触发站点惩罚，惩罚期内数据作废）。结果解读矩阵、三个先量后动的子协议（时间戳 T 偏移矩阵 / 三级客户端阶梯 / 错误文案多义，规则 27/34/37、反模式 36）与操作步骤见 `references/network/ip-risk-control.md`。
+**403/风控码分层定位协议（R1：结论前必须完成，`check_risk_layer_diagnosis.js` 裁定）**：用「签名来源 × 连接来源」双对照隔离变量——① 正向：浏览器**新鲜**签名 + 纯协议客户端重放；② 反向：自己的签名 + 真实浏览器连接（ruyipage `add_preload_script` hook `XMLHttpRequest.prototype.open` 换参，取证脚本已提供入口 `forensic_ruyipage.py --preload-script <JS|文件>`；1.2.62+FF155 下库层带 `contexts` 会抛 privileged scope，脚本内置降级为全局注册，见规则 44 与 `references/tooling/ruyi-tooling.md`；hook 须带执行标记并验证）。**对照纪律**：过期样本的 403 不构成结论；每组对照前先复刻成功基线，健康 session 下一次只改一个变量（连续失败触发站点惩罚，惩罚期内数据作废）。结果解读矩阵、三个先量后动的子协议（时间戳 T 偏移矩阵 / 三级客户端阶梯 / 错误文案多义，规则 27/34/37、反模式 36）与操作步骤见 `references/network/ip-risk-control.md`。
 1. **签名内容层**（①200 + ②403）→ **对齐探针法**：测量 SDK 实际内嵌的环境检测并逐位对齐（见 `references/env/env-detect-bypass.md`），不要先假设需要复现完整浏览器指纹。
 2. **中间值断点采样**（DIAGNOSE 双对照的浏览器侧合法用途，match22 实证）：沙箱与真机同输入异输出且常规探针够不到闭包中间值时，用浏览器 MCP 调试器在真机断点 dump 中间值，与沙箱同断点 dump 逐字 diff，第一处分歧即环境分支点。须 `--guard mcp` 且用户知情；采样纪律见反模式 30。
 3. **会话状态类风控**（HTTP 200 + 业务层文案）→ 按 `references/network/ip-risk-control.md` 会话状态类专节排查，惩罚期内基线失败即冷却、不做实验。

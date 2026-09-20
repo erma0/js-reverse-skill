@@ -290,6 +290,11 @@ const localStorage = Object.create(Storage.prototype);
 
 处理原则：
 
+- **先判「返回值是否真被消费」，再决定要不要采样**：目标 JS 里出现 `getContext` / `toDataURL` / `measureText`
+  **不等于**像素或渲染结果参与计算。按 trace 的 `stack.file:line:col` 追到调用点，看返回值怎么用：
+  ① 只取真值（`!!ctx` 一类可用性探针，最终折成 1 个 bit）②只读固定枚举（如某个 `getParameter` 常量）
+  ③把 `toDataURL()` 串 / 像素和拼进参数。**只有 ③ 才需要下面的值回放纪律**；①② 给真值或固定串即可，
+  按回放流程去采一整轮 canvas 真值是纯浪费（实证见 `cases/` 内该站点 cookie 对抗题案例）。
 - 先读取 `references/fingerprint/fingerprint-value-replay.md` 中的指纹值回放原则（3 层值来源优先级）。
 - 用用户确认的取证模式采集终端 API 返回值，例如 `toDataURL`、`getImageData`、`measureText`、`getParameter`、`readPixels`、`getBoundingClientRect`。
 - 在 Node.js 中按调用特征回放采样值（参考 `references/env/env-native-protection.md` 保护策略）。

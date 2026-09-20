@@ -310,6 +310,23 @@ self() → is_undefined → object_drop_ref
 
 如果 NDJSON 中没有覆盖目标参数生成时间段，明确标记"RuyiTrace 未覆盖"，再使用 Node trace / Hook / 断点补充。
 
+### 沙箱内时间/随机冻结不生效（mashangpa题14 实证）
+
+**现象**：给 `Date.now` 打桩后目标签名里的时间戳仍是真实时间；或者对拍 fixture 全 FAIL 但毫无报错——表象像「桩没装上 / 还差环境项」，实际冻结根本没跨进目标的世界。
+
+**根因（两个独立陷阱叠加）**：
+
+1. **vm realm 边界**：`vm.createContext(sandbox)` 后 context 有**独立 realm 的内建对象**。在宿主改
+   `globalThis.Date = X` 对沙箱内代码完全无效且无任何报错。要影响沙箱读到的内建必须写 **context 侧**：
+   先 `vm.runInContext('Date', sandbox)` 取出 realm 原生 Date，再 `sandbox.Date = FrozenDate`（用完还原）。
+   在沙箱**内部**执行的 env-module（如 `run_with_trace.js --env-module`）里改 `globalThis.Date` 才有效。
+2. **取时入口不是 `Date.now`**：站点常用 `new Date().getTime()` / `Date.parse(new Date())`——桩 `Date.now`
+   只能拦住前者。判别：桩 `Date.now` 后时间戳仍走真实时间 ⇒ 入口是 `Date` 构造器；要冻结必须换掉构造器
+   （`FrozenDate.now`/`parse`/`UTC`/`prototype` 全部接原生，缺一个就内部 TypeError）。
+
+**标准动作**：先判入口（桩 `Date.now` 看是否生效）→ 再按 realm 边界把冻结写 context 侧 → 冻结后目标输出若
+同步定住（如签名前缀随 ts 一起冻结），即证明该输出是时间的确定性函数，可直接用「受控 ts 扫描」做参数化对拍。
+
 ### 真实验证 403（离线一致但服务端拒绝）
 
 **现象**：本地 fixture 对比全一致（签名结构、长度、前缀都对），真实请求却返回 403/412/429 或 JSON 风控码。
@@ -394,6 +411,53 @@ if (require.main === module) {
 }
 ```
 
+### 异步死等：签名 Promise 永不 settle（黑盒 SDK 自带 asap 调度器，mashangpa 题16 实证）
+
+**现象**：入口函数存在且能调用（`typeof loadPage === 'function'`、`window.PcSign` 已挂载），`sign()` 返回的是
+Promise，但 `.then/.catch` 都不触发；**全程零报错**，官方 JS 顶层确实执行了（挂载物、localStorage 写入都在）。
+最坏的误导是把它读成"SDK 检测到沙箱、走了反调试死循环"，于是去逐字段对齐 canvas/WebGL/plugins 或整包反混淆——方向全错。
+
+**两个真因（都与"环境像不像浏览器"无关）**：
+
+1. **SDK 自带 asap 调度型 Promise，而调度原语被写成了空桩。** 重度混淆/打包的签名 SDK 常不直接用原生
+   `Promise`，而是自实现（内部靠 `MutationObserver` + `MessageChannel` + `setImmediate` 把 microtask 排上一轮）。
+   桩里 `MutationObserver(){ this.observe = () => {} }` 这类"存在即可"的写法，会让 `resolve` 永远不被调度。
+   注意这与「`run_with_trace.js` 的 setTimeout 桩不执行回调」是**两条不同根因**：那条缺的是定时器回调，
+   这条缺的是微任务泵，宿主给了真 `setTimeout` 也一样挂死。
+2. **沙箱 XHR 事件回推里 SDK 回调抛错，被 Promise 链吞掉。** `done()` 中直接 `fire('readystatechange')`，
+   SDK 处理器一抛错就消失在 `promise.then` 的 rejection 黑洞里，症状与原因 1 完全相同。
+
+**修法（可直接抄的最小形态）**：
+
+```javascript
+// ① 调度泵：observe() 必须真的把回调排上一轮
+function MutationObserver(cb) {
+  this.observe = () => {
+    const run = () => { try { cb([{ type: 'attributes', target: doc.documentElement }], this); }
+                        catch (e) { rec('mutationObserver.error', { message: String(e.message || e) }); } };
+    Promise.resolve().then(run);
+    this._id = setInterval(run, 4);           // 登记，退出前统一 clearInterval
+  };
+  this.disconnect = () => clearInterval(this._id);
+  this.takeRecords = () => [];
+}
+// MessageChannel：port 双向 postMessage 要在下一轮真把 onmessage 打上
+// ② XHR 回推逐个包 try/catch 并记录，别把异常留给 Promise
+const fireSafe = (type) => { try { fire(xhr, type); }
+  catch (e) { rec('xhr.handler-error', { type, message: String(e.stack || e) }); } };
+```
+
+**执行纪律**：碰到「黑盒 SDK 不返回」按固定顺序试，不要跳步——
+① 补调度四件套（`MutationObserver`/`MessageChannel`/`setImmediate`/`postMessage`）→
+② 给 XHR/fetch 桩的回调加异常记录 → ③ 才怀疑环境检测分支/诱饵变体（规则 29 的 nativize 对拍）。
+本次实测：①②补上后**同一入参第一次调用即出值**（此前 5 轮全挂）。
+
+**配套判别**：SDK 常把执行进度写进 localStorage，用 `case/ruyi-trace/logs/storage/*.ndjson` 的键位序列
+（或沙箱内 `localStorage.setItem` 记录）当**进度探针**，比看请求列表更早定位断点——见
+`references/tooling/ruyitrace-cheatsheet.md`「storage 分类日志 = SDK 进度探针」。
+另注意 `node final.js --sign-only | tail` 看不到输出**不等于卡死**：值可能已全部生成，只是 SDK 的
+`setInterval` 吊住了进程（上一节），改用 `timeout N node final.js --sign-only` 不经管道直接看退出码。
+
 ## 静默退出（零报错）诊断：JSVMP 字节码环境分支判定失败
 
 「错误分类」覆盖的是**抛错**的场景；JSVMP 还有一类更隐蔽的失败：字节码对每个环境访问都有 try/catch 或条件分支，环境语义不对时走**干净退出分支**——顶层代码正常生效、无任何报错，但 VM 的挂载物（XHR hook、全局函数、命名空间）不出现。典型信号：`Date.now` 等全局重写已生效（说明目标脚本顶层跑了），但签名链路的 hook 装不上、签名不产出（match18 实证，反模式 28）。
@@ -469,6 +533,34 @@ function nativizeFn(fn, name) {
 ### 收敛标准
 
 Proxy 记录的属性访问序列与浏览器 trace 的 VM 帧序列一致 + VM 挂载物出现（hook 装上）+ 真实请求通过。`run_with_trace.js` 返回 0 事件不是"环境已足够"的信号——它只记录桩表面的访问，目标经 window 自有属性取内建、读写普通对象时产生 0 事件，此时应升级为手动 Proxy 插桩。
+
+### `run_with_trace.js` 的两个静默致死形态（mashangpa 题12 JSVMP 实证）
+
+用它给 JSVMP 定性前，先排除这两条——它们的症状都是"脚本跑通了、入口函数也在，但签名参数就是没被注入"，极易误判成"钩子没装上 / 还差环境项"，从而在错误方向上无限加桩：
+
+1. **默认上下文已注入 `window`**（`globalThis.window = globalThis`，默认 bootstrap 分支）。**只有 `--bootstrap-mode minimal`、
+   或按 `--env-module <文件>` 自动切 minimal 时才没有 `window`**——此时启动式
+   `typeof window !== 'undefined' ? window : (window = global, window)` 退到 `global`，
+   Node 的 vm 上下文同样没有 `global` → **整个 VM IIFE 抛 ReferenceError 死掉**。
+   明文体（如 `loadPage`）是独立函数声明，照常存在，于是"入口能调用、url 里没有 `m`/`t`"。
+   判定动作：先断言 `typeof window === 'object'`（默认应为 object；断言失败再排查是否误开 minimal），再看别的。
+2. **它的 `setTimeout` 桩只记日志、从不执行回调**（`globalThis.setTimeout = function(fn, delay){ __push(...); return id++ }`）。
+   任何"初始化挂在定时器里"的链路（挂钩子、装载 SDK、翻页派发）都不会发生。
+   症状补充（同平台后一题实证）：这类指纹 SDK 的打包函数常写成 `if (!ready) return "";` +
+   `setTimeout(复位采集器, 0)`，于是入口**同步返回空字符串**——与"被反调试检测走了死循环分支"表象一样，
+   但零报错、零耗时，最容易被误读成环境检测对抗。判定动作：先在沙箱里断言"手动补跑一次挂起的定时器回调后
+   返回值是否变非空"，变了就是定时器问题，不要去做环境逐字段对齐。
+   **泵的实现约束**：必须用宿主真实时钟 + 真实让出事件循环（`await hostSetTimeout(...)` 再派发到期项）。
+   忙等自旋会把 `Date.now()`/`performance.now()` 差值全塌成 0，而采集器里普遍有 `Math.max/min` 的节拍统计，
+   结果是"签名产出了但内容退化"——比空串更难查。交付运行结束统一 `clearAll()`，否则 Node 进程不退出。
+
+⇒ 结论：`run_with_trace.js` 是**探测**工具，不能当 JSVMP 类的交付级 runner。需要真定时器/真 window 时，
+**禁止自写 `node:vm` harness（SKILL.md R2）**——走 `--env-module <文件>` 注入宿主定时器（`unref()`、
+退出前统一 `clearTimeout/clearInterval`，否则进程挂住）+ `__overrideGlobal` 受控覆盖
+`window/self/top/parent/frames` 指向上下文 global；`--env-module` 自动切 minimal bootstrap，避开默认桩泄漏
+改变环境分支。确需脱离 run_with_trace 自建 runner 的，必须登记为 R2 例外且自带超时保护（手写 runner 无超时
+保护，混淆脚本死循环后分不清挂起与静默失败）。对 eval 异常把"沙箱环境访问线索"挂在 error 上再抛
+（只剩一句 `undefined.apply` 时定位极慢）。
 
 ## 自引用解码与原码执行纪律（match23 实证）
 

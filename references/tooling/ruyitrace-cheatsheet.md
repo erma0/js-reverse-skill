@@ -154,6 +154,23 @@ vmpzl 类混淆，**无需解 LZ 压缩、无需读字节码、无需逐 opcode 
 | `MOZ_DOM_JSVMP_OBSERVE_OPS` | 整数 >0 | `2000` | 仅 MIN_SPAN 模式生效：锁定前观察窗口，让真 VM 积累够跨度再择优 |
 | `MOZ_DOM_JSVMP_LIMIT` | 整数，`0`=无限 | `0` | vm_step 事件上限 |
 
+**先零成本读 jscall 的 `args`，再考虑开 JSVMP 开关**：VM 会把它的**运行时常量表当普通实参整份传出去**
+（`type:'jscall_detail'` 记录的 `args[i].value`，实测可达 148 项）。码上爬题12 在**完全没有**
+`MOZ_DOM_JSVMP_TRACE/AUTODETECT/CONST_SLOT` 的情况下，就从这里一次读到 SHA-1 族的运行时常量表
+（`1732584193 / 271733879 / 1009589776 / 1518500249 / 1859775393 / 1894007588 / 899497514`——
+7 个数里只有 3 个是标准 SHA-1 常数：1732584193=IV0、1518500249=K0、1859775393=K1；
+271733879 比标准 IV3（0x10325476=271733878）大 1，其余 4 个不在 SHA-1/MD5/SHA-256 任何常数表 ⇒
+**该 VM 用的是改动过的 SHA-1 常数，初始化必须按真机表填，不能套标准 IV**；误套算错后升级补环境正是反模式 9 要防的动作）、
+`rol / hex / encodeUTF8 / Uint8Array / Uint32Array / DataView / getUint32` 这类实现成员、
+盐值串（`"fu"` / `"aa"`），以及挂载点成员名（`jQuery / $ / originalAjax / ajax / requestInterceptors /
+addRequestInterceptor / interceptor`）——**算法族与注入机制一次定死，且不构成对字节码的反编译**（绝对规则 4 的黑盒边界仍守住：
+只用它选候选式，最终由真机样本逐字节对拍定案）。
+
+选用次序：① `MOZ_DOM_JSCALL_TRACE=1` + `MOZ_DOM_JSCALL_DETAIL_SCRIPT_URL=<挑战脚本>` 采 jscall 明细，
+先 grep `args` 里的大数组（零额外成本，`SHALLOW=0`/`DEEP_LONG_STR` 视截断情况开）；
+② 常量表没被当参数传出来、或要 opcode→语义逐条映射时，再声明 `MOZ_DOM_JSVMP_CONST_SLOT`；
+③ 需要逐条指令流时才上 `MOZ_DOM_JSVMP_AUTODETECT`（并记得 tier-pin，见下方限制）。
+
 ## 3. WASM trace（编译期静态反汇编，对时延安全）
 
 | 开关 | 可选值 | 默认 | 功能 |
@@ -256,6 +273,33 @@ folded 与 unfolded 记录同批导出时，优先用 `parent_elide_reason` 字�
 这是 opcode/带栈 trace 的典型收口用途：带栈采集拿到两侧完整中间态后，逐位 diff 一步就能把"未知环境分歧"降维成"一个常量"。详见 `cases/yuanrenxue-match24-jsvmp-blackbox-tl-xor30.md`。
 
 **带栈采集的前置条件（tier-pin）**：opcode 记录里 `tier=jit` 的条目**只有 pc 没有栈值**（match24 实测 325 万条里仅 91 条 interp 带值）——要拿带栈指令流，必须先把热函数钉在纯解释器：三层 pref `javascript.options.blinterp=false` + `baselinejit=false` + `ion=false`（blinterp 名勿写错，见 §6 纪律 4）。pref 注入见 §0「GUI/ruyipage 会重写 user.js」条目：直启或 `capture_ruyitrace_log.js --pref`。
+
+### 6.3 storage 分类日志 = SDK 执行进度探针（mashangpa 题16 实证）
+
+**用途**：判断"重度混淆的签名 SDK 到底走到哪一步停了"。这类 SDK 会把执行阶段写进 `localStorage`
+（缓存 fp、算法更新时间戳、canvas/webgl 采集结果、行为上报标记…），键位序列本身就是一条状态机轨迹。
+比看网络请求列表**更早**定位断点，且**零额外采集**——`capture_ruyitrace_log.js` 默认就把 storage 分类写到
+`case/ruyi-trace/logs/storage/trace_storage_process_<pid>.ndjson`。
+
+**读法**（按 pid 分组，content 进程才是页面）：
+
+```javascript
+// 统计每个 storage 键被写了几次，按首次出现时间排序即进度轨迹
+const c = new Map();
+for (const line of fs.readFileSync(log, 'utf8').split('\n')) {
+  try { const o = JSON.parse(line); if (o.key) c.set(o.key, (c.get(o.key) || 0) + 1); } catch {}
+}
+```
+
+**判读**：把键位序列与「已跑通的沙箱/真机」两侧对照，**第一个只在一侧出现的键就是断点**。
+题16 实例（上游电商 h5st 协议移植版，平台细节见
+`cases/body-carrier-h5st-remote-algo-mashangpa-p16.md`）：浏览器侧到
+`JDst_rac_last_update → WQ_dy1_vk → WQ_gather_cv1 → WQ_gather_wgl1 → JDst_*_nfd` 就停住，
+`request_algo` 一次未发；Node(V8) 沙箱同文件同入口在同一位置之后即出 `request_algo` ⇒
+断点定位完成（不是签名参数错、不是 `--targets` 写错），据此走 `BLOCKED_FORENSIC` 降级而不是继续加浏览器轮次。
+
+**顺带收益**：同一份日志还能直接回答"这个 Cookie/localStorage 键是 JS 写的还是服务端下发的"
+（与 `analyze_cookie_attribution.js` 互补，且带 stack 信息）。
 
 ## 7. 运行时启停闸门（TRACE_GATE）
 

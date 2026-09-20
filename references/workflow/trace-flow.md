@@ -92,7 +92,10 @@ python scripts/forensic_ruyipage.py --url <目标页> --case-dir <project-root> 
 ### 取证操作细则（match 实证）
 
 - **收尾耗时预期**：≈ `--target-settle` 秒数 + 落盘时间（通常 1 分钟内）。等待远超预期（如超 5 分钟）时先核对时间参数是否把毫秒当秒传入，不要无限轮询干等。
-- **翻页点击两个静默失败坑（match19 实测，各空耗一轮 120s）**：① 首屏 AJAX 飞行中按钮常处 `disabled` 态，click 被静默吞掉（无报错、无请求）→ `--click-delay 5~30` 等 loading 结束；② `page.ele()` 对部分属性选择器（`[data-page=5]`）查不到且不报错、盲点照打"已拟人点击" → 优先 id/结构选择器（等价替代见 match19 案例）。每轮取证覆盖 `case/forensic/capture.json` 同名产物（自动轮转 `.prev-1~3` 备份），跨轮关键样本及时转录。
+- **翻页点击四个静默失败坑（match19 + mashangpa题13/14 实测，各空耗一轮 120s）**：① 首屏 AJAX 飞行中按钮常处 `disabled` 态，click 被静默吞掉（无报错、无请求）→ `--click-delay 5~30` 等 loading 结束；② `page.ele()` 对部分属性选择器（`[data-page=5]`）查不到且不报错、盲点照打"已拟人点击" → 优先 id/结构选择器（等价替代见 match19 案例）；③ **列表/分页 DOM 从未生成**——服务端把拒绝包在 `HTTP 200` + 业务码（如 `{"code":"400"}`）里返回，页面渲染分支（判据常是 `data.status==='error'` 之类）没进去，分页控件压根不存在，此时任何 `#pagination …` 选择器都必然"未命中"，而提示语只谈选择器语法；④ **`--targets` 终态判定把业务拒绝当命中（mashangpa题14 实证）**——终态按「非 OPTIONS 2xx」判定，被拒请求也是 HTTP 200 ⇒ 脚本在首个**被拒**请求上就进入收尾窗口，`--click`/`--click-delay` 驱动的第二请求根本没机会发生。先读 `target-hits.json` 响应 body 确认业务成功再配点击；预期首屏被拒时去掉 `--targets` 改用 `--settle` 静默窗口收尾，或把翻页证据交给 RuyiTrace 轮次。⇒ 点击前先读 `target-hits.json`/`related-hits.json` 的响应 body 确认渲染分支真的进去了；`capture.json` 的 `is_failed=false` + `response_status=200` 不能当业务成功。每轮取证覆盖 `case/forensic/capture.json` 同名产物（自动轮转 `.prev-1~3` 备份），跨轮关键样本及时转录——**核对 `.prev-N` 的时间戳再断定它属于哪一轮**，否则会用后一轮的产物去反证前一轮的判定（题13 即因此误写下脚本缺陷结论，见反模式 11 第 12 项）。
+- **签名脚本注入竞态 → 浏览器侧根本产不出带签名样本（mashangpa题13 实证，4 轮取证）**：形态是入口页按题号 `document.head.appendChild(<签名脚本>)`（数百 KB、异步）异步注入签名层，而业务分页脚本（数百字节）在自身 `script.onload` 里立刻发首屏请求 → 小文件恒定先执行 → 首屏请求裸发被拒 → 因③分页 DOM 不渲染 → 页面上再没有第二个可触发的请求。判据：RuyiTrace 调用栈显示 `$.ajax` 落在**官方原版 jQuery 文件名/行号**上、`setRequestHeader` 只有 Content-Type/Accept/X-Requested-With；冷缓存（静态全 200）与暖缓存（全 304）各采一次均复现即非缓存假象（**「恒定」只对同一工具成立**：竞态是时序性的，换采集工具本身就会改变时序——mashangpa题14 在 ruyipage 冷/暖两轮均复现裸发后，RuyiTrace 轮次签名脚本却抢先执行成功、直接采到两组带签名成功样本；判「恒定」前先换工具重采一轮，两工具都复现才成立）。⇒ 这**不是** BLOCKED_FORENSIC（无引擎检测）、也**不是**工具能力缺口，别继续加浏览器轮次：writer 证据改由
+`run_with_trace.js` 沙箱执行落盘的签名脚本取得（用最小假全局对象接住写入点直调，如 `$ = {ajaxSettings:{}}`），
+属 SKILL.md §8「trace 覆盖了 API 但未覆盖签名写入点」的替代取证路线；服务端接受即反证闭环。
 - **NO_TARGET 不是死路（match18）**：脚本输出末尾的「重采候选」动态 2xx 接口列表就是校准 `--targets` 的第一手材料，按候选锁定真实接口重采即 PASS，不要凭记忆猜下一个路径。
 - **命中但全 403（match26）**：target-hits.json 的 URL/Query 参数结构仍是接口路径与参数名的有效证据，不要无限重采；签名正确性由「trace 定位 builder/writer + 沙箱对齐环境分支 + REAL_VERIFY 闭环」验证，取证侧 403 可能是环境分派诱饵分支所致（match21/26 同族）。
 - **重试型场景**：登录可能因验证码/校验失败重试时调大 `--target-settle`（单位秒，默认 3；建议 10~30，上限 120），保证重试仍在同一会话内。关联材料以最后一次有效终态向前回溯，验证码中间接口不是额外终态门禁（load → verify 由分析阶段从同一会话回溯）。
@@ -197,6 +200,8 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 - RuyiTrace 把 XHR/fetch 等对象调用记录为**分存字段** `{"type":"call","interface":"XMLHttpRequest","member":"open",...}`——不存在 `XMLHttpRequest.open` 连续子串。门禁与摘要脚本（check_evidence / check_trace_gate / import_ruyitrace_log / capture_ruyitrace_log）已支持 `Interface.member` 形态的结构化匹配，信号直接写 `XMLHttpRequest.open`、`Headers.set` 即可命中分存字段记录；旧 case 中"退化为只写 `XMLHttpRequest`"的做法不再必要（宽信号仍可用，但优先带 member 的精确形态）。
 - **xhrNative 记录含完整请求 URL**（`{"type":"xhrNative","method":"GET","url":"https://...完整 query...","headers":[...]}`）：定位参数写入链后，用 `search_trace --keyword xhrNative` 或按 URL 关键词过滤可直接核对请求侧参数（含编码形态，如 `m=eXVhbnJlbnh1ZTE%3D`），是"签名生成值 ↔ 实际请求值"逐字符比对的第一手证据。
 - 信号仍不得传目标接口 URL 字面量（网络 URL 由 Step 1 的 `--require-network-signal` 承担）、密钥/常量名；泛化 API（createElement 等）会被 `lib/trace-signal-policy.js` 拒绝。应选**参数写入点/参数名**（`noncestr`、`x-zse-96`、`Headers.set("x-zse-96", ...)`）。
+- **站方自定义函数名 / 方法名不是可检索信号**（第 ④ 类必然不命中）：RuyiTrace 的 `interface`/`member` 只会是**浏览器内建 API**（`Document.cookie`、`XMLHttpRequest.setRequestHeader`、`Window.btoa`…），目标 JS 自己定义的 `messagePack` / `getSign` / `encrypt` 之类名字不会作为任何 API 字段出现，传它们必然得到「NDJSON 已产出但目标 writer 覆盖不足」，被门禁误路由到 TRACE_RETRY。正确做法：先从落盘源码或 `Window.btoa`/`setRequestHeader` 的记录里找到**该函数最终写进浏览器 API 的字面量**（请求头名、参数名、URL 片段），用它当信号。
+  注意与 `--trace-env MOZ_DOM_JSCALL_DETAIL_FUNCS=<函数名>` 区分：后者是 **jscall 定向采集**开关，按 JS 函数名过滤，走的不是 gate 的 writer 信号通道（见 `references/tooling/ruyitrace-cheatsheet.md`）。
 
 #### TRACE_RETRY 处理顺序（按序降级，不回退）
 

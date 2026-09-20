@@ -38,7 +38,7 @@ js-reverse-skill/
 ├── assets/               进入交付产物的可复用资源（补环境片段 + fixture 模板）
 │   └── templates/        7 类交付入口模板（Node/Python、请求客户端、vm 沙箱、WASM、验证码）
 ├── references/           知识参考（13 个专题目录，按需读取；含验证码封装层与答案层资产、字体映射反爬）
-├── cases/                54 个实证案例 + `index.json` 机器索引
+├── cases/                59 个实证案例 + 4 个模板 + `index.json` 机器索引
 ├── tests/                路由/门禁回归基准（硬规则的可执行断言）+ 触发精度评估语料；CI 双平台运行
 └── scripts/              工具脚本（ruyipage+RuyiTrace 采集/导入/检查 + 密文特征识别/Cookie 归因 + 验证码题型分类/坐标/轨迹/答案校验 + 供应链 pin + AST 反混淆工具链 ast-patterns/）
 ```
