@@ -22,11 +22,11 @@
 
 | 脚本 | 功能 | 典型用法 |
 |------|------|---------|
-| `search_cases.js` | 按关键词、域名、技术信号或策略检索 `cases/index.json` | `node scripts/search_cases.js --domain jd.com --signal h5st` |
+| `search_cases.js` | 按关键词、域名、技术信号或策略检索 `cases/index.json`；各检索词之间是 **AND**，0 命中且检索词 ≥2 时输出「逐词单独命中数 + 按词序收敛过程」的 `[WARN]`，防止把"索引里没有我的措辞"读成"本地无同类案例"（反模式 41）。诊断按 flag 限定统计字段（queries 全字段 / domains→domains / signals→signals / strategies→strategy）；`--json` 时诊断写 stderr、stdout 保持纯 JSON | `node scripts/search_cases.js --domain jd.com --signal h5st` |
 | `init_env_case.js` | 初始化 case / result 目录结构并写入模板，支持 `--force` 覆盖 | `node scripts/init_env_case.js --case-dir demo --target app.js --entry makeSign --param sign --api <API_URL>` |
 | `clean_case.js` | 清理 case 内测试、临时、缓存文件和空目录 | `node scripts/clean_case.js --case-dir <project-root> --dry-run --markdown` |
 | `check_intake.js` | 校验任务说明中的目标字段（必填仅目标 URL + 参数名，其余由门禁补采/自动探测补齐，不阻塞推进） | `node scripts/check_intake.js --input task.md --markdown` |
-| `write_markdown_utf8.js` | 以 UTF-8 写入 Markdown，避免 Windows 编码问题 | `node scripts/write_markdown_utf8.js --input 草稿.md --out 最终项目总结.md --markdown` |
+| `write_markdown_utf8.js` | 以 UTF-8 写入 Markdown，避免 Windows 编码问题；输出路径守卫按「cwd 推断的项目根 **或 `--project-dir` 显式根**」判定——在 skill 仓库目录里写交付文档时必须传 `--project-dir <项目根>`，否则报「输出路径越界」；`--project-dir` 必须是存在的目录，成功后打印解析出的绝对路径 | `node scripts/write_markdown_utf8.js --input 草稿.md --out 最终项目总结.md --project-dir <项目根> --markdown` |
 | `write_stage_report.js` | 以 UTF-8 写入中文命名阶段报告 | `node scripts/write_stage_report.js --case-dir <project-root> --stage 需求信息确认 --markdown` |
 | `check_stage_reports.js` | 检查阶段报告中文文件名、UTF-8、必要阶段及动态字段 | `node scripts/check_stage_reports.js --case-dir <project-root> --require-stage 需求信息确认 --markdown` |
 
@@ -40,7 +40,7 @@
 
 | 脚本 | 功能 | 典型用法 |
 |------|------|---------|
-| `state_machine.js` | 执行状态强制跟踪：状态持久化到 case/state.json，`--set` 校验 SKILL.md §4 状态机转换合法性（跳过必经节点被拒）、`--guard replay` 拦截前置阶段重放/写请求、`--guard external` 拦截取证前的外部题解检索（越权退出码 2 并留审计）；`--init`/`--set`/`--guard` 输出均渲染单行 11 项「执行 TODO 清单」勾选表并落盘 `state.json.todo`；`--init`/`--set` 换节点时输出一行 `[GUIDE]` 指向该节点细则的权威 references（NODE_GUIDES 映射） | `node scripts/state_machine.js --case-dir <project-root> --set IMPLEMENT --markdown`；`node scripts/state_machine.js --case-dir <project-root> --guard replay`；`node scripts/state_machine.js --case-dir <project-root> --guard external` |
+| `state_machine.js` | 执行状态强制跟踪：状态持久化到 case/state.json，`--set` 校验 SKILL.md §4 状态机转换合法性（跳过必经节点被拒）、`--guard replay` 拦截前置阶段重放/写请求、`--guard external` 拦截取证前的外部题解检索（越权退出码 2 并留审计）；`--set <NODE> --exempt "<代码>:<判据与落盘材料路径>"` 登记 SKILL.md 已承认的取证例外跳转（当前码：`step2-content-only`＝§4.4 例外 3 内容还原型、`step2-fastlane`＝§4.2/例外 4 速通路径，均针对状态图缺边的 `FORENSIC_CAPTURE→CASE_LOOKUP`），登记进 `state.exemptions` 合法审计而不是 `blocks` 的 `illegal-transition-force`；码不认识/边不匹配/缺依据一律退出码 2，且非法跳转被拒时文案会列出本跳转可用的豁免码（合规豁免不必再用 `--force`）；`--init`/`--set`/`--guard` 输出均渲染单行 11 项「执行 TODO 清单」勾选表并落盘 `state.json.todo`；`--init`/`--set` 换节点时输出一行 `[GUIDE]` 指向该节点细则的权威 references（NODE_GUIDES 映射） | `node scripts/state_machine.js --case-dir <project-root> --set IMPLEMENT --markdown`；`node scripts/state_machine.js --case-dir <project-root> --guard replay`；`node scripts/state_machine.js --case-dir <project-root> --guard external` |
 | `gate.js` | 节点聚合门禁：进入节点前一次跑完该节点必验门禁并汇总 PASS/FAIL/SKIP；无 `--at` 时从 state.json 读当前节点；含 FAIL 或需参数缺失退出码非 0 | `node scripts/gate.js --case-dir <project-root> --at IMPLEMENT --url <target> --markdown` |
 
 ## 网络取证与日志采集（6 个）
@@ -51,7 +51,7 @@
 | `check_trace_gate.js` | TRACE_CAPTURE / FORENSIC_CAPTURE 出口门禁：复检 Step 2 NDJSON 及目标 writer 覆盖；网络 URL 与 trace writer 信号分开判定 | `node scripts/check_trace_gate.js --case-dir <project-root> --url <目标URL> --require-trace-signal <环境API/写入点> --markdown` |
 | `forensic_ruyipage.py` | ruyiPage 通用取证：以最终业务接口为终态，抓全会话元数据并完整落盘大 body/WASM、JS 与指纹基线 | `python scripts/forensic_ruyipage.py --url <目标URL> --case-dir <project-root> --targets "login/submit" --browser-path <定制Firefox> --markdown` |
 | `capture_ruyitrace_log.js` | 自动采集或手动导入 RuyiTrace NDJSON；默认采集窗口 120 秒，`--evidence-signal` 只做证据门禁，只有明确的 `--end-signal` 才提前收尾，等待末行完整刷盘，记录 `endReason` 并校验 Firefox 进程已退出；关闭与导入会使命令总耗时略长于窗口。`--cookie`/`--cookie-domain` 可在启动前向 trace profile 的 cookies.sqlite 预写登录态（仅自动 trace 生效）。`--trace-env KEY=VALUE`（可多次，仅 `MOZ_DOM_` 前缀）透传 RuyiTrace 定向 trace 开关（jscall 收窄 / detail 真值 / opcode / vm_step / WS 帧），先判题型再选最小开关组合从源头避免日志过大，组合表见 `references/workflow/trace-flow.md`「定向 trace 策略」，完整开关手册见 `references/tooling/ruyitrace-cheatsheet.md` | `node scripts/capture_ruyitrace_log.js --url <目标URL> --case-dir <project-root> --evidence-signal handshake --trace-env MOZ_DOM_JSCALL_TRACE=1 --trace-env "MOZ_DOM_JSCALL_SCRIPT_URL=challenge.js" --ruyitrace-home <RuyiTrace目录> --import-after --markdown` |
-| `import_ruyitrace_log.js` | 导入 RuyiTrace NDJSON，生成摘要并标记截断字段；`--signal-policy advisory` 可在人工结束/信号不确定时只报告覆盖不足而不误报日志缺失；支持 `--trace-signal`，旧 `--target-signal` 兼容 | `node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-root> --trace-signal handshake --signal-policy advisory --markdown` |
+| `import_ruyitrace_log.js` | 导入 RuyiTrace NDJSON，生成摘要并标记截断字段；`--signal-policy advisory` 可在人工结束/信号不确定时只报告覆盖不足而不误报日志缺失；支持 `--trace-signal`，旧 `--target-signal` 兼容。**注意两个脚本的同类 flag 不同名**：采集侧是 `--evidence-signal`、导入侧是 `--trace-signal`，给 `import_ruyitrace_log.js` 传 `--evidence-signal` 会直接报「未知参数」。多进程 domtrace 必须一次传多个 `--input` 合并导入（只导单个文件会把有效 trace 误判为空，见 match17/match20 案例） | `node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-root> --trace-signal handshake --signal-policy advisory --markdown` |
 | `search_capture.js` | 抓包检索：从取证产物 capture.json 盘点「哪些接口携带某请求头/状态码分布 / Set-Cookie」，替代手工 PowerShell 解析（杜绝 header 大小写与拼接漏匹配）；只回答「携带」，判定服务端是否真校验需配合 probe_endpoints.js 对照 | `node scripts/search_capture.js --capture <project-root>/case/forensic/capture.json --by-header acs-token` |
 
 ## 识别与归因辅助（2 个）
@@ -78,7 +78,7 @@
 | `search_js.js` | 大文件 / 单行压缩 bundle 关键词检索，输出 line:col 与有限字符上下文，替代 grep 大行与 node -e | `node scripts/search_js.js --file case/js/original/app.js --keyword setRequestHeader --context 200 --markdown` |
 | `analyze_trace_complexity.js` | 评估补环境复杂度、风险点与实现优先级 | `node scripts/analyze_trace_complexity.js --trace case/ruyi-trace/logs/trace.ndjson --markdown` |
 | `build_trace_runtime_contract.js` | 从原始 Trace 生成逐 API、Realm、receiver 与行为观测组成的运行时契约 | `node scripts/build_trace_runtime_contract.js --case-dir <project-root> --markdown` |
-| `run_with_trace.js` | 在隔离 vm 探测上下文运行目标脚本并输出环境访问日志 | `node scripts/run_with_trace.js --target case/js/original/app.js --entry window.makeSign --fixture case/fixtures/sample.fixture.json` |
+| `run_with_trace.js` | 在隔离 vm 探测上下文运行目标脚本并输出环境访问日志（默认分支已注入 `window`；定时器桩不回调：初始化挂在定时器上的签名 SDK 会静默返回空串。需要真定时器/真 window 时走 `--env-module` 注入，禁止自写 runner（R2），见 env-debug-loop「两个静默致死形态」） | `node scripts/run_with_trace.js --target case/js/original/app.js --entry window.makeSign --fixture case/fixtures/sample.fixture.json` |
 | `run_trace_runtime_audit.js` | 在强制 no-send 模式下运行项目审计入口并生成 Node runtime audit | `node scripts/run_trace_runtime_audit.js --case-dir <project-root> --entry result/final.js --markdown` |
 | `check_trace_runtime_conformance.js` | 比较 Trace 运行时契约与 Node audit，阻断关键行为不一致 | `node scripts/check_trace_runtime_conformance.js --case-dir <project-root> --markdown` |
 | `check_trace_api_coverage.js` | 检查 Trace API inventory、环境覆盖矩阵与运行时闭环状态 | `node scripts/check_trace_api_coverage.js --case-dir <project-root> --markdown` |
@@ -100,9 +100,9 @@
 | 脚本 | 功能 | 典型用法 |
 |------|------|---------|
 | `check_code_quality.js` | 检查代码简洁性、模块化、编码与交付代码规则 | `node scripts/check_code_quality.js --case-dir <project-root> --markdown` |
-| `check_final_artifact.js` | 检查交付目录、单一入口、禁用浏览器自动化、总结与经验沉淀等规则 | `node scripts/check_final_artifact.js --case-dir <project-root> --markdown` |
+| `check_final_artifact.js` | 检查交付目录、单一入口、禁用浏览器自动化、总结与经验沉淀等规则；联网模式 attempts 不足且入口源码含 selftest/离线分支时，报错文案追加"离线分支覆写了实时验证记录"的根因提示（规则 56） | `node scripts/check_final_artifact.js --case-dir <project-root> --markdown` |
 | `check_risk_layer_diagnosis.js` | 403/风控码分层定位门禁：验证记录含 401/403/412/429 失败尝试时，校验 `riskLayerDiagnosis` 双对照（正向新鲜签名重放 + 反向 hook 注入）齐备、新鲜、与结论自洽，拦截「无对照/过期样本下连接层结论」 | `node scripts/check_risk_layer_diagnosis.js --case-dir <project-root> --markdown` |
-| `check_skill_consistency.js` | 检查 SKILL.md frontmatter 规范（对齐官方 skill 校验器 quick_validate.py：允许键、name 形态、description 长度与尖括号、正文 TODO 占位）、description 质量（体积预算 / 禁 catchall / 必须有边界声明）、关键门禁锚点、引用路径、references 孤儿文件、scripts 索引同步，以及「反模式 N / 规则 N」编号引用真实存在（实条或合并指针） | `node scripts/check_skill_consistency.js --project-dir <project-root> --markdown` |
+| `check_skill_consistency.js` | 检查 SKILL.md frontmatter 规范（对齐官方 skill 校验器 quick_validate.py：允许键、name 形态、description 长度与尖括号、正文 TODO 占位）、description 质量（体积预算 / 禁 catchall / 必须有边界声明）、关键门禁锚点、引用路径、references 孤儿文件、scripts 索引同步；编号引用校验扩到 SKILL.md + references/**/*.md + cases/*.md 全语料（反模式 N / 规则 N / 例外 N / 反模式 N 第 M 形态，含指针表并入目标必须为实条的死链校验）；references/cases 内引用路径同样校验存在性；SKILL.md 体积超 35000 字报错、低于 500 字告警疑似误删 | `node scripts/check_skill_consistency.js --project-dir <project-root> --markdown` |
 | `eval_trigger.js` | 触发精度评估：按 `tests/trigger-eval/cases.json` 打分，衡量 description（选择阶段唯一判据）的 precision/recall/F1，逐条输出漏召与误召；`--list` 输出待判定请求、`--template` 输出 decisions 骨架。触发精度无法离线判定，需模型逐条判定后回填 | `node scripts/eval_trigger.js --list`；`node scripts/eval_trigger.js --score decisions.json` |
 | `check_vendor_leakage.js` | 检查通用文档（除 `cases/`、`references/captcha/`、识别参考与自带「知识分级」声明的文档）是否出现具体厂商名/目标平台名，防 SKILL.md §3 T1/T2 越界漂移 | `node scripts/check_vendor_leakage.js --project-dir <project-root> --markdown` |
 | `check_fingerprint_fixture.js` | 检查指纹 fixture 对 Canvas、WebGL、Audio、DOM 几何等的覆盖 | `node scripts/check_fingerprint_fixture.js --case-dir <project-root> --markdown` |
@@ -110,7 +110,7 @@
 | `check_change_memory.js` | 检查代码变更记忆中的修改原因、禁止回退与验证记录 | `node scripts/check_change_memory.js --case-dir <project-root> --markdown` |
 | `check_routing_benchmarks.js` | 状态机/门禁路由回归基准 runner：按 `tests/routing-benchmarks/cases.json` 还原证据现场、真实执行门禁脚本并断言退出码与输出。用例必须断言脚本行为，不接受纯文本锚点用例（skillAnchors 仅作防漂移补充） | `node scripts/check_routing_benchmarks.js --markdown` |
 | `check_env_prerequisites.js` | IMPLEMENT 补环境前置门禁：校验 `case/notes/entry-chain.md`（含 stack 定位）与 `missing-env-priority.md`（含优先级与证据来源标记或黑盒声明）两文件齐备达标，拦截 Node 报错盲补 | `node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` |
-| `compare_fixture.js` | 对比 fixture 样本与实际输出，定位首个偏差点（REAL_VERIFY 前置的标准离线回归步骤，退出码 0=一致 / 2=偏差 / 1=错误） | `node scripts/compare_fixture.js --fixture sample.fixture.json --actual node-output.json --field sign --markdown` |
+| `compare_fixture.js` | 对比 fixture 样本与实际输出，定位首个偏差点（REAL_VERIFY 前置的标准离线回归步骤，退出码 0=一致 / 2=偏差 / 1=错误）；不给 `--expected-path` 时自动探测顶层 `expected.<field>` 与 `samples[].expected.<field>`（翻页/批量类 fixture 的多样本形态），`--sample <page|下标>` 选样本（未命中任何样本按参数错误退 1） | `node scripts/compare_fixture.js --fixture sample.fixture.json --actual node-output.json --field sign --markdown` |
 | `probe_endpoints.js` | 多接口 × 多变体对照探针：对同一会话按 有效/垃圾/篡改末位/无 token 四态请求，输出状态矩阵与「疑似校验」启发式标记，回答「服务端是否真的校验该头」（baidu-finance 沉淀；纯 Node https，TLS 指纹被拒站点不适用） | `node scripts/probe_endpoints.js --session "<cookies>" --header acs-token --tokens '{"valid":"..."}' --endpoints '["<url>"]' --markdown` |
 
 ## 安装与下载（4 个）

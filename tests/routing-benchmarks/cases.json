@@ -806,6 +806,108 @@
       "stdoutIncludes": [
         "速通路径速查"
       ]
+    },
+    {
+      "id": "RB-043",
+      "title": "compare_fixture：--sample 未命中任何样本时退出码 1（参数错误），与实现偏差的退出码 2 区分",
+      "skillAnchors": [],
+      "script": "compare_fixture.js",
+      "args": [
+        "--fixture",
+        "{caseDir}/sample.fixture.json",
+        "--actual",
+        "{caseDir}/actual.json",
+        "--field",
+        "sign",
+        "--sample",
+        "7",
+        "--markdown"
+      ],
+      "files": {
+        "sample.fixture.json": "{\"param\": \"sign\", \"samples\": [{\"page\": \"2\", \"expected\": {\"sign\": \"abc123\"}}, {\"page\": \"3\", \"expected\": {\"sign\": \"def456\"}}]}",
+        "actual.json": "{\"output\": {\"sign\": \"xyz\"}}"
+      },
+      "expectExit": 1,
+      "stdoutIncludes": [
+        "未命中任何样本"
+      ]
+    },
+    {
+      "id": "RB-044",
+      "title": "search_cases：--json 零命中时诊断走 stderr，stdout 仍是合法 JSON（防污染管道）",
+      "skillAnchors": [],
+      "script": "search_cases.js",
+      "args": [
+        "绝不存在之关键词",
+        "--json"
+      ],
+      "files": {},
+      "expectExit": 1,
+      "stdoutIncludes": [
+        "\"count\": 0"
+      ],
+      "stdoutExcludes": [
+        "[WARN]"
+      ]
+    },
+    {
+      "id": "RB-045",
+      "title": "state_machine：文档授权合法边（EVIDENCE_GATE→CASE_LOOKUP）携带 --exempt 登记留痕，转换合法且依据落盘材料存在校验",
+      "skillAnchors": [
+        "速通路径速查"
+      ],
+      "script": "state_machine.js",
+      "args": [
+        "--case-dir",
+        "{caseDir}",
+        "--set",
+        "CASE_LOOKUP",
+        "--exempt",
+        "step2-fastlane:速通形态②对拍落盘 阶段报告/01.md",
+        "--note",
+        "速通形态①全明文采集型：判据①+源码级反证，用户确认免采 Step 2"
+      ],
+      "files": {
+        "state.json": "{\"version\":1,\"node\":\"EVIDENCE_GATE\",\"visited\":[\"INTENT_CONFIRM\",\"ENV_READY\",\"EVIDENCE_GATE\"],\"history\":[],\"blocks\":[],\"stepCount\":0,\"stepNode\":\"EVIDENCE_GATE\",\"todo\":[]}",
+        "case/阶段报告/01.md": "# 速通判定"
+      },
+      "expectExit": 0,
+      "stdoutIncludes": [
+        "豁免登记",
+        "step2-fastlane"
+      ]
+    },
+    {
+      "id": "RB-046",
+      "title": "search_cases：zeroHitDiagnosis 按 flag 限定统计字段，domain 类词不因 signals 偶合命中而误判（题17 回归）",
+      "skillAnchors": [],
+      "script": "search_cases.js",
+      "args": [
+        "--domain",
+        "webmssdk",
+        "--signal",
+        "douyin.com"
+      ],
+      "files": {},
+      "expectExit": 1,
+      "stdoutIncludes": [
+        "webmssdk=0",
+        "douyin.com=0"
+      ]
+    },
+    {
+      "id": "RB-047",
+      "title": "check_skill_consistency：全语料编号引用/形态/指针/树路径/体积预算扩展检查的 self-test 断言必须全部通过",
+      "skillAnchors": [],
+      "script": "check_skill_consistency.js",
+      "args": [
+        "--self-test"
+      ],
+      "files": {},
+      "expectExit": 0,
+      "stdoutIncludes": [
+        "self-test passed"
+      ]
     }
   ]
 }

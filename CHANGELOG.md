@@ -3,6 +3,358 @@
 
 > 历史版本（2.3.87 及更早）已归档至 CHANGELOG.archive.md。
 
+## 2.3.140 - 2026-09-21
+
+### P0 事实错误修正 + P1 工具门禁缺陷修复 + check_skill_consistency 扫描范围扩展
+
+**P0 文档事实修正（批次 A）**
+- `references/workflow/experience-rules.md`：规则 54（crypto-js 双 `decrypt` 语义）判据改为「按调用点第二实参类型定密钥语义，静态看不出处分不出」；规则 55（时间派生 key·iv）判据修正；规则 53 已并入 56、原编号进指针表（防旧编号引用变死链）；「信封型」用例数统一为 7 个（补「时间戳超前」）
+- `references/crypto/crypto-entry.md`：crypto-js 双 `decrypt` 判据补「调用点第二实参类型」
+- `references/env/env-debug-loop.md`：`run_with_trace.js` 默认注入 `globalThis.window = globalThis` 的事实修正 + R2 红线对齐（禁止手写 vm runner）
+- `references/tooling/ruyitrace-cheatsheet.md`：SHA-1 常数表结论修正（重新计算并校验）
+- `references/network/ip-risk-control.md`：旧「IIFE 会静默不执行」措辞修正为 ruyipage 1.2.62 + FF155 恒抛 privileged scope（两种形态都抛）+ `_apply_ruyipage_preload_script_compat_patch()` / `--preload-script` 注入（规则 44）
+- `SKILL.md`：例外 5→4（§4.4 仅四个例外）、形态编号统一（第八形态→第七形态）、p18/p19 案例补段与悬空行清理
+- `cases/index.json`：重写为 2 空格缩进；p17 编号修正
+- 删除冗余临时文件 `cases/index.json.bak1sp`、`tmp_ap.txt`
+
+**P1 工具脚本修复（批次 B）**
+- `scripts/compare_fixture.js`：`--sample` 非法值（page 不匹配且非合法下标）退出码 1（区别于实现偏差退 2）；catch 错误消息改走 stdout 便于门禁断言
+- `scripts/search_cases.js`：`zeroHitDiagnosis` 按 flag 限定统计字段（domains→domains 列，signals→signals 列，防止「域名词在 signals 里偶合命中」制造假阴性）；`--json` 零命中时诊断写 stderr、stdout 保持纯 JSON
+- `scripts/write_markdown_utf8.js`：`--project-dir` 必须 existsSync + isDirectory 校验；输出补「项目根目录（解析后）」行
+- `scripts/state_machine.js`：`--exempt` 登记逻辑重写——edges=非法边需 gate、docEdges=文档授权合法边可登记留痕；依据路径含 `.md/.json/.jsonl` 时 existsSync 校验（相对 caseDir 解析）；无效豁免不阻断合法转换但追加 `exemptWarn` 提示；self-test 扩 docEdges 校验与登记断言
+- `scripts/analyze_cookie_attribution.js`：删除死代码 `isCookieWriteApi`；self-test 硬编码计数改为 `assert` 辅助函数动态计数
+- 新增 RB-043~RB-046：`--sample` 未命中退 1 / `--json` 零命中 stdout 纯净 / `--exempt` 登记留痕 / `zeroHitDiagnosis` 限定字段回归
+
+**P1 门禁扩展（批次 C）**
+- `scripts/check_skill_consistency.js`：
+  - 扫描范围从「仅 SKILL.md」扩到 SKILL.md + `references/**/*.md` + `cases/*.md` 全语料（fence 内代码不参与抽取）
+  - 新增「例外 N」编号校验（目标为 SKILL.md §4.4 已声明的例外编号）
+  - 新增「反模式 N 第 M 形态」越界校验（形态数不超过该反模式段落声明的形态总数；中文数字/阿拉伯数字兼容）
+  - 新增指针表并入目标死链校验（目标必须是实条，不能指向另一个指针或空编号）
+  - 新增 `references/**/*.md` + `cases/*.md` 内引用路径存在性校验
+  - 体积预算新增 `< 500` 字告警（疑似正文被误删）
+  - `collectRefs` 前缀边界修正，排除 `src/renderer/assets/…` 等外部工具源码路径被误抽
+  - `countCaseFiles` 口径对齐 README「N 个实证案例 + M 个模板」：`index.json` 中 `kind:template` 的不计入实证案例
+  - 编号引用正则排除 `100%` 等自然语言数字误报
+  - 修复案例 `cases/jsvmp-vm-blackbox-acs-token-baidu-finance.md` 中 `cases/gitee nox/tox` 假引用为真实文件路径
+  - self-test 扩：越界形态 / 死反模式 / 死规则 / 死例外 / 指针死链 / 树内缺失路径 / 低预算告警 全部断言
+- 新增 RB-047：`check_skill_consistency.js --self-test` 断言全量新检查生效
+- `scripts/README.md`：同步 check_skill_consistency 检查范围描述
+
+## 2.3.139 - 2026-09-20
+
+### 码上爬题18（Header `m` 指纹信封）经验吸纳：cookie 归因读写混判修复 + trace 信号第④类 + 信封型签名形态入库
+
+- 新增案例 `cases/header-m-fingerprint-envelope-tail-ts-mashangpa-p18.md` 并注册 index.json（第 63 例）：
+  `m = anti(4)({serverTime:ts}).messagePack() + base64("luoge"+ts)`，`anti` 是站方 bundle 把
+  `__webpack_require__` 改名的全局别名（`n.p = "", anti = n`），交付 = B 最小 vm 沙箱黑盒执行站方
+  `actoken.js` 原样副本（sha256 漂移自检）+ `node:https` keepAlive，20 页全量求和同轮提交
+  `status:success`（答案 103848），复验轮 total 变化实证数据按运行轮换
+- **修复 `analyze_cookie_attribution.js` 读/写混判（实测假阳性，三类污染源）**：归因原按「事件是否含 cookie 字样」
+  计数，把 **JS 读整串 cookie**（`Document.get cookie`、`cookieReads.jar`）、**浏览器内核与 HTTP 层记录**
+  （`cookieSendDecisions` / `CookieService.GetCookiesForURI` / `source=http|storage|native` / `process_type=parent`）、
+  以及 **`cookieWrites` 记录里的写入后快照 `jar`** 全算成 JS 写入。后果不是漏判而是**错判方向**：
+  本题 `sessionid`（HttpOnly，JS 根本写不了）被判 `both`、`taarId` 被判 `js`，
+  两者的"下一步"都指向按写入点还原算法 = 纯浪费一轮。现：`source` 白名单只放 `document.cookie`/`cookieStore`，
+  非页面接口（CookieService/CookieStorage/nsICookie）整条排除，写入只从 `raw`/`rawHead`/`args`/`value` 取名，
+  读取降级为辅助计数并新增 `unknown` 态（旧版无该态，任何未匹配形态都保守落 `js`）。
+  自测 6→16 项断言（三代记录形态全覆盖）；回归：本题 `sessionid`→server、`_nano_fp`→js，
+  题15 `v`→js / `checkcookie`→js / `sessionid`→server 全部与已交付结论一致
+- **trace 信号「必然不命中」补第④类：站方自定义函数/方法名**。`check_trace_gate.js --require-trace-signal messagePack`
+  实测 0 命中并被误路由到 TRACE_RETRY（本次真实损失一轮门禁）——根因是 RuyiTrace 的 `interface`/`member`
+  只会是浏览器内建 API，用户函数名不作为任何字段出现。SKILL.md §4.2 由"三类"改"四类"并给出正确取法
+  （该函数最终写进浏览器 API 的字面量），`references/workflow/trace-flow.md`「trace 信号的记录形态与匹配规则」
+  补根因段并点明与 `MOZ_DOM_JSCALL_DETAIL_FUNCS`（那条通道恰恰按 JS 函数名过滤）的区分；
+  `check_trace_gate.js` 在「Step 2 已具备但信号选错」时直接打印当前信号与自查提示
+  （原提示只出现在 `missing` 为空的分支，实测本题走的是 `missing` 非空分支，等于没提示），
+  并把 `requireTraceSignal` 挂进渲染用的 result（`checkEvidence` 返回体不带该字段）；gate 自测 5 项回归通过
+- `references/crypto/crypto-entry.md`「常见案例模式」新增**「信封型：不透明体 + 明文可复算尾段（跨载体通用）」**：
+  规则 32 第 4 条只给了抽象的"打边界再定深度"，缺可操作的入手点。补齐三条——
+  ①先切段：**服务端只能复算请求里已有的信息，故尾段明文（盐/ts/回显字段）才是校验点**，不透明段含
+  `Math.random`/`getRandomValues` 时不可能按字节校验；②取证捷径：这类尾段几乎都经 `btoa`/`atob` 落地，
+  RuyiTrace `Window.btoa` 记录的 `args` 就是未编码明文，一次命中即钉死 source↔writer 配对，不必先反混淆；
+  ③两个易错点：伴生头可完全不校验（`timestamp` 改 1h 前仍过 ∧ 尾段内嵌 ts 挪 −30min 即拒 同时成立）、
+  时间窗可能不对称（+10min 同样拒，排候选须同时测超前）。四案例交叉引用（题14/15/16/18，同形态不同算法族）
+- `references/env/env-debug-loop.md`「`run_with_trace.js` 的两个静默致死形态」第 2 条补齐本题实证：
+  症状是**入口函数同步返回空串**（`if (!ready) return "";` + `setTimeout(复位采集器, 0)`），零报错零耗时，
+  与"被反调试检测走死循环"同表象，给出"手动补跑一次挂起回调看返回值是否变非空"的一秒判定动作；
+  并写下泵的实现约束——**必须真实让出事件循环**，忙等自旋会把 `Date.now()`/`performance.now()` 差值塌成 0，
+  而采集器普遍有 `Math.max/min` 节拍统计，后果是"签名产出了但内容退化"（比空串更难查）；
+  `scripts/README.md` 的 `run_with_trace.js` 行同步标注该局限
+- **正文预算实测**：SKILL.md 有 35000 字常驻注入预算（`check_skill_consistency.js` 裁定）。本次想在 §7
+  「禁止手写 vm runner」加例外指针、在 §7 cookie 归因加读写纪律，均因预算不足被拒——在飞改动已把文件推到
+  34997（HEAD 34833 + 在飞 164），任何净增都会红。处置：第 ④ 类信号在 §4.2 **以等量压缩换等量新增**
+  （删掉与 trace-flow.md 重复的 `--trace-env`/`STACK_FULL` 括注与"与 evidence-signal 分离"，正好容纳 ④），
+  其余两条全部下沉到 `references/`、`scripts/README.md` 与工具自身的 `--help`/失败输出——
+  `check_trace_gate.js` 在犯错当场打印提示，比正文规则更可达。改后 `check_skill_consistency.js` 问题 0
+- README 案例数 54→63（59 实证 + 4 模板，131-138 新增九例在本版统一刷新计数）；`check_skill_consistency.js` / `check_vendor_leakage.js` 复跑通过
+
+## 2.3.138 - 2026-09-20
+
+### 码上爬题19（响应体整包 Triple-DES + 日期型 IV）经验吸纳：新增规则 54/55 + crypto-js 库语义判定 + 检测链 tools/ 上溯修复
+
+- 新增案例 `cases/response-carrier-tripledes-date-iv-mashangpa-p19.md` 并注册 index.json（第 62 例）：
+  请求侧零加密参数（`GET /api/problem-detail/19/data/?page=N` 除 `page` 外全明文，`pagination19.js:4-8`
+  URL 构造点参数集合字面量只有 page），难点全在响应侧 `{"r":base64 密文,"k":24 字符密钥}`；
+  解密链明文可读（`19pro.js` = 未混淆 crypto-js 打包副本 + `DES3` 尾巴），交付 = **A 纯算路径**
+  （Node 原生 `crypto` 的 `des-ede3-cbc` + PKCS7，该平台第二个完全零沙箱零补环境的 case，前例 p17），
+  20 页全量求和同轮提交 `status:success`（答案 102679）；`k` 随响应下发（只读探针 3 次请求 3 个不同前缀）
+- 新增**规则 54**：crypto-js 家族有两种 `decrypt` 语义（`enc.*.parse`/WordArray 直接密钥 vs
+  字符串口令走 `cfg.kdf` 默认 EvpKDF-MD5 派生），按调用点第二实参类型定密钥语义、
+  按密文头有无 `Salted__` 魔数定容器格式——**文件里 `MD5`/`EvpKDF` 命中可为零调用的打包死代码**
+  （题19 `19pro.js` MD5 命中 4 次全为死定义；与 match22 的真派生型构成对偶）。误判时症状是
+  "填充错误"而非明文异常，极易误读成密钥字节序问题并误升级成补环境
+- 新增**规则 55**：时间/日期派生的 key·iv——站方 `DES3.iv()=formatDate(new Date(),'yyyyMMdd')` 取
+  **浏览器本地日期**而加密发生在服务端（UTC+8），两者仅在客户端处于东八区时偶然一致。交付按
+  「加密方时区 → 运行机本地 → 各 ±1 天」排候选 + PKCS7 与 `JSON.parse` 双校验 + 全候选失败硬抛
+  （错误信息带候选值），8 字节 IV 任何情况下不得写成常量；验收动作 = 把系统时区改 UTC±0 重跑交付入口
+- `references/crypto/crypto-entry.md` 响应方向四层链路补两节"怎么做"落点：
+  **「库语义判定：同一算法的两条调用路径」**（三步静态判定 + 密钥随响应下发时的探针纪律）与
+  **「时间派生的 key·iv：按加密方时区排候选」**（候选顺序/双校验/硬抛/`ivUsed` 落验证记录）
+- **检测链 tools/ 上溯修复（题19 GATE-1 实测）**：`check_external_tools.js:810` 注释声称
+  "`--project-dir` 被传成 case 目录时向上查找含 tools/ 的祖先"，实际只做 `normalizeProjectDir`
+  纯 resolve ⇒ 传无 tools/ 的 case 目录时 ruyitrace/ruyitraceKernel 双双误报、快照被拒写，
+  只能手工把 `--project-dir` 改指共享工程根。现真正接上 `paths.resolveProjectDirFromCaseDir`
+  （本目录有 tools/ 时返回自身，无 tools/ 上溯，遇 SKILL.md 停止回退输入值），
+  上溯发生时打印 `[提示]`；`check_session_resume.js --write-snapshot` 的 toolsBase 同口径修复。
+  GATE-1 模板传 `<project-root>`（多 case 布局下无 tools/）从"必失败"变为两个调用形态全过（实测）
+- `scripts/write_markdown_utf8.js` 新增 `--project-dir`：输出路径守卫原按 `findRepoRoot(process.cwd())`
+  判定，与 SKILL.md §0.0"所有脚本必须在 skill 根目录执行"互斥——写交付文档必然报
+  「输出路径越界」（题19 实测连续命中）。现支持显式项目根，报错文案给出可操作提示；
+  实测：skill 根目录执行 + `--project-dir` 指向 case 项目 = 写入成功
+- `scripts/compare_fixture.js` 支持 **`samples[]` 多样本 fixture**：原自动路径只认顶层
+  `expected.<field>`，翻页/批量类案例（题17、题19）的 fixture 都用 `samples[]` 承载，
+  首跑必判「失败/期望值未找到」，得手写 `--expected-path samples.0.expected.X`。
+  现自动探测 `samples[].expected.<field>`，`--sample <page|下标>` 选样本；旧显式路径用法回归通过
+- 修正 2.3.137 沿袭源文档的**码位区块名误差**（子代理按 p17 落盘 fixture 逐码位实测）：
+  U+09A7 = 孟加拉文（Bengali）非"天城文"、U+0AA4–U+0AB8 = 古吉拉特文（Gujarati）非"古嘉摩基"、
+  U+A66E = 西里尔文扩充-B；`pagination17.js` 实为 7 行（首行 3377B 打包行）非"单行"，
+  `var version_` 在打包行内非文件尾。教训同反模式 11 第七形态：**同源文档互相印证仍会一起错，
+  落盘样本是唯一仲裁**；cases/index.json p17 strategy 与 `font-anti-crawl.md` 同步修正，
+  p17 条目 strategy 里并发编号调整期间残留的"规则 53"引用同步改为规则 56
+- README 案例数维持（统一在 2.3.139 刷新）；`check_skill_consistency.js` 通过（问题 0）
+- `check_vendor_leakage.js` 两处存量命中清零（`experience-rules.md:425` 规则 50 实证来源、
+  `ruyitrace-cheatsheet.md:292` 题16 键位实例均出现上游厂商名）：改"上游电商 h5st 协议"通用表述 +
+  cases 指针，协议细节归属案例文件（SKILL.md §3 知识分级）；改后该门禁通过
+
+## 2.3.137 - 2026-09-20
+
+### 码上爬题17（响应侧码位单表替换「伪字体」）经验吸纳：新增规则 56 + 反模式 41 + 状态机豁免登记通道
+
+- 新增案例 `cases/unicode-codepoint-substitution-no-font-file-mashangpa-p17.md` 并注册 index.json（第 61 例）：
+  请求侧**零加密参数**（`GET /api/problem-detail/17/data/?page=N` 除 `page` 外全明文），难点全在响应侧——
+  `current_array` 是横跨天城文/古嘉摩基/西里尔补充块的**码位单表替换**串，还原表以明文字面量
+  `FONT_DECRYPT_MAP` 挂在站方 `pagination17.js`（jsjiami v7 包装，但非 ASCII 键的对象常量未被字符串化）；
+  **全站零字体资源**（14 包无 woff/ttf、无 `@font-face`），交付 = 运行时重拉脚本提表 + sha256 记录 +
+  10 项双射校验 + 表外码位硬失败，零字体解析零补环境，20 页全量求和同窗提交 `status:success`（答案 100419）
+- `references/rendering/font-anti-crawl.md` 补**形态三「伪字体（无字体文件）」**：§1 形态表加第三行、
+  §2 加反向识别信号（零字体资源 + JS 明文映射常量 + 乱码不在 PUA 区）、§3 前置**「三问分诊」**
+  （有字体资源吗 → 静态还是动态 → 站方 JS 有无明文表，命中即跳过整条 fontTools/brotli/字形指纹链）、
+  §5 加两条坑（题型命名不作实现依据；伪字体的表同样不得硬编码，须运行时重拉 + 校验 + 硬失败）
+- 新增**规则 56**：实时验证记录只允许在线路径写，离线/`--selftest` 分支一律落 `case/tmp/`——
+  题17 实证 selftest 复用在线 `verification` 单例并 `writeVerification()`，把 23 条真实 attempts 清零，
+  门禁只报「attempts 0 条」不给根因，最终只能重跑真实请求恢复（手工回填属伪造）。
+  配套 `check_final_artifact.js`：attempts 不足且入口含 selftest 分支时直接提示该根因（`--self-test` 5 例仍通过）；SKILL.md 正文不改（预算已满），enforcement 落在门禁提示与规则 56
+- 新增**反模式 41**：`search_cases.js` 多关键词是 AND（`queries.every(...)`），
+  题17 用「字体 font unicode 字形」得到假 0 命中，差点判"本地无案例"而漏掉直系先例
+  `cases/yuanrenxue-match7-dynamic-font.md`（同族内容还原型 + Step 2 豁免 + 开窗重置登录态坑）。
+  配套 `search_cases.js` 零命中且有 ≥2 个检索词时输出 `[WARN]`：逐词单独命中数 + 按词序收敛过程，
+  并区分「某词全库零命中」与「各词都有命中但交集为空」两种成因（SKILL.md 正文净零：预算已由并发会话占满，约束以脚本 WARN + 反模式 41 为 enforcement 点）
+- **反模式 11 追加第七种形态**：题型命名（"字体加密"）与同平台历史载体被当作实现形态依据，
+  正确做法第 11 条改为"命名只作检索关键词，先跑三问分诊"
+- `scripts/state_machine.js` 新增**取证例外登记通道 `--exempt "<代码>:<判据与落盘材料路径>"`**：
+  §4.4 例外 3（`step2-content-only`）与 §4.2 速通路径（`step2-fastlane`）承认跳过 TRACE_CAPTURE，
+  但状态图没有对应边，导致合规豁免只能 `--set CASE_LOOKUP --force`，每次都在 `state.json.blocks`
+  留一条 `illegal-transition-force`——把越权跳转和合规豁免混在同一审计里。
+  现按 `EXEMPTIONS` 表登记进 `state.exemptions`（码不认识/边不匹配/缺依据一律拒绝，退出码 2），
+  被拒文案追加本跳转可用码提示；`--force` 语义不变（SKILL.md 例外 3 段正文未改，指引由拒绝输出投递）。
+  `--self-test` 追加 6 项断言（缺依据/未知码/边不匹配不得登记、合规登记必须通过、登记边不得已是合法后继、提示文案可用码）；  被拒时的 `exemptionsHint` 即用户可见指引，故不改 SKILL.md 正文（预算已满）
+- 登记纪律：`cases/index.json` p17 条目 signals 写同义词族（字体加密/码位替换/单表替换/伪字体/无 @font-face…），
+  降低检索侧假阴性；README 案例数维持（统一在 2.3.139 刷新）
+
+
+
+## 2.3.136 - 2026-09-20
+
+### 码上爬题16（京东 h5st RAC 移植版 Body 内签名）经验吸纳：新增规则 50/51/52 + storage 键位进度探针 + 自动化扫描范围收窄
+
+- 新增案例 `cases/body-carrier-h5st-remote-algo-mashangpa-p16.md` 并注册 index.json（第 60 例）：
+  签名载体 = **POST body 的 `h5` 字段**（`h5 = base64(h5st + String(t))`，恒 948 字符），
+  `h5st` 为 9 字段分号串的**京东 h5st v5.0 RAC 形态整包移植**（`appId=b5216` / `fv=h5_file_v5.0.6` /
+  `cactus.jd.com/request_algo` / localStorage 键 `JDst_rac_*`、`WQ_gather_cv1`）；交付 B 路径沙箱黑盒 +
+  Node https 上游桥，20 页全量求和同窗提交 `status:success`
+- 新增**规则 50**：黑盒 SDK「返回 Promise 但永不 settle」的两个真因——① SDK 自带 asap 调度型 Promise，
+  `MutationObserver.observe()` 写成空桩 ⇒ `resolve` 永不排上（宿主给了真 `setTimeout` 也一样挂死，
+  与题12 的「`run_with_trace.js` setTimeout 桩不执行回调」是两条不同根因）；② 沙箱 XHR 事件回推里
+  SDK 回调抛错被 Promise 链吞掉。排查顺序固定为「调度四件套 → 回调异常记录 → 才怀疑环境检测分支」；
+  配套最小实现落 `references/env/env-debug-loop.md` 新节「异步死等：签名 Promise 永不 settle」
+- 新增**规则 51**：摘要算法本体由服务端下发（`request_algo` 响应 `data.result.algo` 就是一段 JS 源码串）
+  ⇒ **闭式不存在，还原深度到此为止**，交付转沙箱黑盒 + 上游当动态资源（sha256 校验 + 本地副本回落）；
+  与规则 32 第 4 条、规则 49 合成"要不要啃闭式"的三判据（存在性 / 内容强度 / 算法是否本地可得）
+- 新增**规则 52**：Step 1 真机 oracle 永久缺失时 fixture 的合规形态——固化**结构基线**
+  （字段数 / 各段长度 / 前缀）而非逐字节值，并在 fixture 与总结里写明"逐字节级验证由服务端接受承担、
+  伪造同长度被拒即反向证据"，避免"自己生成自己对拍"被读成一致性证明
+- 新增 `references/tooling/ruyitrace-cheatsheet.md` **§6.3 storage 分类日志 = SDK 执行进度探针**：
+  SDK 的阶段状态会写进 localStorage，键位序列即状态机轨迹，**第一个只在一侧出现的键就是断点**；
+  比看请求列表早一步且零额外采集（本题靠它把取证浏览器断点钉在 `WQ_gather_*` 之后、`request_algo` 之前）
+- `references/env/env-detect-bypass.md`「内核级差异检测」补**三种命中形态证据表**：A 报错型 / B 拒绝型 /
+  **C 静默断链型（目标请求一次都没发出）**——C 最易误判成"路径猜错或还差一轮浏览器"，
+  降级证据是「同一份落盘 JS 跨引擎执行进度不同」+ `--ua` 覆盖后包谱逐位同构；
+  并写明判 C 前要先排除 `--targets` 把 HTTP 200 业务拒绝当终态命中的坑
+- **门禁修正** `scripts/check_final_artifact.js`：浏览器自动化 / 指纹渲染的内容扫描原按 `isCodeLikeFile`
+  （含全部 `.json`）且只豁免 `验证记录.json` 一个文件名 ⇒ `src/target/original/manifest.json` 的
+  `captureTool` 说明被误判"包含浏览器自动化代码"（实战被迫改措辞）。改为**只扫代码文件 + `package.json`
+  依赖清单**；注释仍由 `stripComments` 豁免、代码内字符串字面量仍命中（已写入注释与自测断言），
+  自测 3 → 5 项（新增 manifest 豁免、package.json 必扫两条）
+- 计数漂移修正：`experience-rules.md`「当前规模」38 → **46 条实条 + 6 条指针**（规则 1..52 去掉 6 个并入号）；
+  README 案例数维持（统一在 2.3.139 刷新）；`check_skill_consistency.js` 复跑通过（引用 146 条全存在）
+
+## 2.3.135 - 2026-09-20
+
+### 码上爬题15（同花顺 hexin-v 移植版 Cookie 载体指纹结构体）经验吸纳：新增规则 49 校验载体归因 + 规则 32 扩条 + `forensic_ruyipage.py` 入口页丢失缺陷修复
+
+- **工具缺陷修复** `scripts/forensic_ruyipage.py`：入口页 `document.html` 在采集期写入（`:1175`），收尾
+  `_write_outputs` 又把它列进 `_rotate_previous`（`:1320`）⇒ **每轮跑完 `case/forensic/document.html` 必不存在**，
+  只剩 `.prev-N` 且不再写回；连续复现于 mashangpa 题13（3 份 prev）/题14（2 份）/题15（1 份），
+  仅早于轮转特性的题12 留有文件——而 SKILL.md §4.2 把 document.html 定为 challenge cookie 强制证据。
+  改为「本轮首次覆盖上一轮入口页时」就地轮转，并从收尾轮转列表移除；自测新增反证断言
+  （直接调 `_rotate_previous(['document.html'])` 证明旧行为会搬走本轮产物），自测项 10 → 11
+- 新增案例 `cases/cookie-carrier-hexinv-fingerprint-struct-mashangpa-p15.md` 并注册 index.json（第 59 例）：
+  hexin-v 整包移植（识别信号 `thsi.cn`/`chameleon`/`TOKEN_SERVER_TIME`/`X-Antispider-Message`），
+  值 = `base64(60 字符自研 base64url + 13 位毫秒 ts)`，体内 45 字节 = `[0x03 魔数][滚动校验和][43B 位打包指纹结构体 XOR]`；
+  交付 B 路径最小 vm 沙箱黑盒，20 页全量求和同运行同窗提交 `status:success`
+- 新增**规则 49**：同值多载体（Header 与 Cookie 同时出现）必须先单变量定「哪个载体被校验」——
+  实测只带 `hexin-v` 头被拒、只带 `v` Cookie 通过；判错会把「签名正确却被拒」误读成算法/环境问题。
+  与 `analyze_cookie_attribution.js` 的生成方归因分工写明（生成方 ≠ 校验方）；SKILL.md §7 加一行指针
+- **规则 32 新增第 4 条**：校验强度判据从「随机环境值」扩到「整条编码链」——链长是客户端混淆强度不是服务端校验强度，
+  交付形态定案前先用一组受控单变量请求（缺参/换载体/伪造内容体/改 ts/截断/重放）打边界再决定是否还原闭式；
+  本题据此把交付停在黑盒沙箱，省掉 18 字段位宽与 XOR 递推常数
+- `references/env/env-object-model.md` Canvas/WebGL 节新增 triage：**先判返回值是否真被消费**
+  （`!!ctx` 可用性探针 / 固定枚举 / 像素与串参与拼接），只有后者才走值回放；本题 webgl2 探针只折 1 个 bit
+- `references/crypto/algorithm-families.md` 站点速查表补 hexin-v 族 T1 识别信号行（原「同花顺 | token」行保留，二者不同接口族）
+- `scripts/README.md` 标注同类 flag 在两个脚本中不同名（采集 `--evidence-signal` / 导入 `--trace-signal`），
+  并强调多进程 domtrace 必须一次传多个 `--input` 合并导入
+
+## 2.3.134 - 2026-09-20
+
+### 码上爬题14（safekodo 打包器 URL query 签名）经验吸纳：探针二分法 + vm realm 时间冻结 + 竞态非恒定修订 + `--targets` 业务拒绝终态坑
+
+- 新增案例 `cases/obfuscated-url-param-signer-safekodo-mashangpa-p14.md` 并注册 index.json（第 58 例）：
+  签名挂 `XMLHttpRequest.prototype.open` 重写 URL（`m=base64(CODE4+ts+NUL)`），CODE4=H(ts) 为打包器内部哈希
+  （16 值域/4bit 索引/`0xDE` 配对，闭式未还原），交付 B 路径最小 vm 沙箱黑盒，两组真机 ts 逐字节对拍 PASS，
+  20 页全量求和同运行同窗提交 `status:success`
+- 新增规则 48（experience-rules.md + 案例对照表）：「锁随机源 → 锁时钟 → 受控扫描」探针二分法——
+  锁 `Math.random` 仍变即排除随机盐改锁 `Date` 构造器；输出值域极小（2^n 量级）先挖配对/异或/查找表结构；
+  黑盒在真机同输入上逐字节复现即分支对齐证据，闭式未还原不阻塞交付
+- env-debug-loop.md 新增「沙箱内时间/随机冻结不生效」：vm realm 边界（宿主改 `globalThis.Date` 不跨 realm，
+  冻结须 context 侧 `vm.runInContext('Date', sandbox)` 后覆盖）+ 取时入口判别（桩 `Date.now` 无效 ⇒ 目标用 `new Date().getTime()`）
+- trace-flow.md 两处修订：①「签名脚本注入竞态」补非恒定性——竞态是时序性的，换采集工具即改变时序
+  （题14 ruyipage 两轮裸发、RuyiTrace 轮成功），判「恒定」前先换工具重采一轮；②翻页点击坑 ③→④，
+  新增第④坑：`--targets` 按「非 OPTIONS 2xx」判终态，把 HTTP 200+业务拒绝当命中 ⇒ 取证提前收尾、
+  `--click` 永不发生，先读 `target-hits.json` 响应 body，预期首屏被拒时改 `--settle` 模式
+
+## 2.3.133 - 2026-09-20
+
+### 码上爬题13（ob-io 三头签名 + 签名脚本注入竞态）经验吸纳：MSYS 入参改写 + 「trace 过了门禁却没覆盖签名写入点」的替代取证路线
+
+码上爬题十三「风火轮」（标签 headers验证/js加密/js混淆）实测：签名层是挂在 `$.ajaxSettings.beforeSend` 上的单个函数，
+`s = MD5(JSON.stringify({page:"N"}) + r + t)`，`t` 为秒对齐毫秒、`r` 为 UUIDv4 风格 32hex 随机盐；
+9 组沙箱样本逐字节对拍 + 20 页真实请求 + 提交 `status:"success"`。本轮代价集中在**取证侧的四轮空转**与**一次误判共享脚本缺陷**，沉淀这两类。
+
+- **scripts/forensic_ruyipage.py（修共享脚本，非 case 内绕过）**：新增 `_looks_msys_mangled()` +
+  `_warn_mangled_target_patterns()`，在 `main()` 解析入参后（启动浏览器之前）与实时分类前各告警一次。
+  根因：Git Bash/MSYS 把以 `/` 开头的入参静默改写成 Windows 路径——`--targets "/api/x/data"` 到达 Python argv 时是
+  `D:/Program Files/Git/api/x/data/`，子串永不匹配 ⇒ 目标明明抓到却报 `NO_TARGET`、真终态被降级成 related 候选。
+  已在 `run_self_test()` 追加断言（盘符正/反斜杠两形态识别 + 合法值零误报），自测清单同步扩写。
+- **scripts/write_stage_report.js（能力补齐）**：新增 `STAGE_ALIASES`，`--stage` 接受 19 个**状态机英文节点名**
+  （`TRACE_ANALYZE`/`FORENSIC_CAPTURE`/`REAL_VERIFY` …）映射到既有固定中文阶段。此前 SKILL.md 0.0 节用英文节点推进、
+  报告脚本却要求中文阶段名，`--stage TRACE_ANALYZE` 报「未知阶段/自定义阶段名称必须包含中文」并只打印 usage，连撞两轮；
+  现在未知 token 的报错会直接列出全部可用别名。
+- **references/tooling/ruyi-tooling.md**：① 典型用法块新增 **Windows/Git Bash 入参硬约束**（targets 值勿以 `/` 开头，
+  或 `MSYS_NO_PATHCONV=1` / `MSYS2_ARG_CONV_EXCL="*"`）；② `add_preload_script` 追加**坑 4**——箭头函数形 hook 会正常
+  报「已安装」，但 hook 内调页面自有全局函数（`window.loadPage(n)`）**零请求产出**；本环境未定位到是 world 隔离还是求值时机，
+  故只登记操作结论：试一次不产请求即换路线，不要连环试到第 3 轮。
+- **references/workflow/trace-flow.md**：① 「翻页点击**两**个静默失败坑」升级为**三**个——新增③「分页/列表 DOM 从未生成」：
+  服务端把拒绝包在 `HTTP 200` + 业务码里，页面渲染分支未进 ⇒ 任何 `#pagination …` 选择器必然未命中而提示语只谈语法；
+  并补「核对 `.prev-N` 时间戳再断定产物属于哪一轮」。② 新增「签名脚本注入竞态」段：判据是 RuyiTrace 调用栈显示请求走
+  **官方原版 jQuery 文件**、`setRequestHeader` 只有标准三头，且冷/暖缓存各采一次均复现 ⇒ 非 BLOCKED_FORENSIC、非工具缺口，
+  writer 真值改由 `run_with_trace.js` 沙箱直调落盘的站方原始脚本取得。
+- **scripts/lib/query_log.js（误导修正）**：`FORENSIC_NODES` 分支的 `[STATE]` 提示原本只说"trace 质量不足应先重采，
+  重采一次仍不足才降级静态分析"——本案正是被这句推着连开 4 轮浏览器。追加一条**重采前排除项**：栈显示请求走官方原版
+  jQuery 且只有标准三头、冷暖缓存均复现 ⇒ 属注入竞态的"重采无解"分支，直接转沙箱直调。放在门禁输出里而非正文，
+  是因为它必须在该决策时刻投递才起作用（正文预算已饱和）。
+- **references/workflow/common-pitfalls.md（同根因合并，不新增编号）**：反模式 11 追加第 11 项  「判『共享脚本有 bug』前先验证入参到达进程时的真实值，再验证自己读的是哪一轮产物」——本案曾据
+  「子串形 3 轮 NO_TARGET、regex 形 1 轮 PASS」写下脚本缺陷结论并差点进案例库，实际二层根因都不在脚本里
+  （MSYS 改写 + 反证用的 `capture.json` 其实是第 4 轮 regex 产物）；`判定测试` 同步补该问句。
+- **cases/obio-md5-header-triple-script-inject-race-mashangpa-p13.md（新增）+ index.json 注册（57 条）+ README 案例数维持（统一在 2.3.139 刷新）**：
+  12 条可验证事实（`s` 拼接顺序 body→r→t、`t` 毫秒位恒 000、`r` 是随机盐不是数据哈希及其 UUIDv4 生成式、
+  **form-urlencoded 头 + JSON 串体错配**即识别该链的强信号、求和不去重、答案按分钟窗轮换 99300↔98326、
+  沙箱只需 4 类桩不需真实 jQuery、头名单字符 `r/s/t` 与题7 `m/ts/x`、题9 `m/tt`、题12 `m/t` 互不可复用）
+  与 6 条踩坑（含自写 Node 客户端 advertise `accept-encoding` 却不解压，致 gzip 正文乱码被误报「Cookie 失效」）。
+
+**SKILL.md 只做了等量替换，未增体量**（正文预算 34994/35000 已近饱和，加字必触门禁）：
+① §4.2 的 `--targets` 纪律在 196/202 两行**逐字重复**，删去引导语里的一份（`--targets` 只写唯一标识终态接口的
+完整路径子串 + 禁宽正则），-41 字、零语义损失；② 省出的额度还给 §8 一句指针——「签名层未安装（栈走原版 jQuery）
+即重采无解，改沙箱直调落盘脚本」，插在既有"才用 Hook 模板"那句之后（该句原本会把此类目标误导去装 hook，
+而 hook 实测打不通页面自有函数）。MSYS 入参改写**不再占正文**：`forensic_ruyipage.py` 已在解析入参时自行 WARNING，
+属脚本自证型经验，按第 12 节留在 references。
+
+
+
+## 2.3.132 - 2026-09-19
+
+### 码上爬题12（JSVMP 自实现 SHA-1）经验吸纳：jscall `args` 直读 VM 常量表 + 规则 47「目标自身抛错 ≠ 补环境不足」
+
+码上爬题十二（标签 `jsvmp`，难度困难）实测：签名链是 JSVMP 内自实现的 SHA-1，`m = SHA-1("fu" + 相对 url + t)`，
+8 组真机 `(page,t,m)` 逐字节对拍 + 沙箱黑盒双向对拍 + 服务端 `status:"success"` 三重确认。过程中两处代价最高，本轮只沉淀它们。
+
+- **references/tooling/ruyitrace-cheatsheet.md（扩充）**：JSVMP 表后新增「先零成本读 jscall 的 `args`」一节 ——
+  VM 会把**运行时常量表当普通实参整份传出去**（实测 148 项，`type:'jscall_detail'` 的 `args[i].value`），
+  在**完全不开** `MOZ_DOM_JSVMP_TRACE/AUTODETECT/CONST_SLOT` 的情况下即可读到 SHA-1 族的运行时常量表
+  （`1732584193/271733879/1009589776/1518500249/1859775393/1894007588/899497514`——仅 3 个是标准 SHA-1 常数，
+  IV3 偏 1、4 个非标准 ⇒ 该 VM 改过 SHA-1 常数，初始化按真机表不能套标准 IV）、实现成员名
+  （`rol/hex/encodeUTF8/Uint32Array/getUint32`）、盐值串（`"fu"/"aa"`）与挂载点成员名
+  （`originalAjax/requestInterceptors/addRequestInterceptor`），算法族与注入机制一次定死，且不越绝对规则 4 的黑盒边界。
+  同时给出三档选用次序（读 args → `CONST_SLOT` → `AUTODETECT`），补齐此前只有开关表、没有取数次序的空档。
+- **references/env/env-debug-loop.md（扩充）**：`run_with_trace.js` 两个**静默致死形态**——① 默认上下文已注入 `window`，
+  但 `--bootstrap-mode minimal`/`--env-module` 下没有，此时此类目标启动式 `typeof window !== 'undefined' ? window : (window = global, window)`
+  退到 `global`，Node 的 vm 上下文同样没有 `global` → 整个 VM IIFE 抛 ReferenceError 死掉，症状却是「脚本跑通、入口函数在、url 里没有 m/t」，
+  极易误判为"钩子没装/还差环境项"；② 它的 `setTimeout` 桩只记日志**不执行回调**，定时器初始化的链路全丢。
+  ⇒ 明确 `run_with_trace.js` 不得当 JSVMP 类的交付级 runner；需要真定时器/真 window 走 `--env-module` 注入（SKILL.md R2），
+  禁止自写 `node:vm` harness。
+- **references/workflow/experience-rules.md（新增规则 47 + 案例表行 + 规模 37→38）**：目标签名器自身抛错 ≠ 补环境不足。
+  官方 VM 对约 4% 的 `(page,t)` 稳定自抛（同一 `t` 必抛、连续时间戳最长失败段 ≤2），题面「数组无法显示请重新从首页访问」即其
+  用户可见形态；判别动作是**用已对拍通过的独立实现对同一批失败输入打真实接口**——服务端接受即转独立实现为主路径，
+  拒绝才按 规则 28/29 继续对齐环境。反例明确写为两类：继续加 `canvas/performance/realm` 桩空转、以及把自抛误读成
+  "站点有随机性"去枚举算法组合。
+- **cases/jsvmp-sha1-const-table-jscall-args-mashangpa-p12.md（新增）+ index.json 注册（56 条）+ README 案例数维持（统一在 2.3.139 刷新）**：
+  含 15 条可验证事实（sha256 基线、参数顺序 `page,m,t`、`m` 只依赖 `(page,t)` 故服务端可复算、数据按时间窗轮换
+  94522→94544、题号→挑战脚本分派表）与 9 条踩坑（含"引入真 jQuery = 同时引入它对 DOM 的全部要求"、
+  构造函数共享 `Object.prototype` 致 `instanceof` 恒真、ruyipage `run_js` realm ≠ 页面主 world）。
+- **交付瘦身纪律**（记入案例，不新增规则）：算式经双对拍确认后，还原期沙箱（740 行环境桩 + 193KB 官方 JS 副本）
+  挪 `case/tools/` 当可复跑对照器，`result/` 只留 `final.js` + 纯算模块——留在 `result/` 会被
+  `check_code_quality.js` 判失败（单文件 >500 行、单函数 >90 行、要求拆 `src/env/browser-objects/`）。
+
+**未改 SKILL.md 正文**：预算已饱和（34998/35000 字），规则 47 的可发现性由 `cases/` 内的编号引用与
+`search_references.js --id` 承担，符合「新经验默认进 references/cases」的既有纪律。
+
+**效果**：下一个 JSVMP 站点少掉两类空转——一类是"常量表就在 trace 里却没读，回头去开 opcode trace 或猜算法族"，
+一类是"把目标自身缺陷当环境不足无限加桩"；`check_skill_consistency.js` 0 问题通过。
+
+## 2.3.131 - 2026-09-19
+
+### 工具链根因定位与交付入库（规则 44~46）+ 码上爬题11 case + ruyipage preload hook 兼容补丁
+
+码上爬题十一（wasm 加密）实测：skill 安装目录只剩 `SKILL.md`（`scripts/` 缺失），被迫手写 ruyipage 取证驱动，由此暴露三件仓库此前未覆盖的事——其中一条**修正了现有文档的错误结论**。
+
+- **references/tooling/ruyi-tooling.md（修正 + 扩充）**：`add_preload_script` 一节原记「两个坑」，现补第三坑并更正：**ruyipage 1.2.62 + FF155 下 IIFE 与函数声明两种形态都硬抛** `BiDiError: ... privileged scope`（原文只说 IIFE 静默不执行，对该版本不成立）。根因定位到库层 `FirefoxBase.add_preload_script` 无条件传 `contexts=[self._context_id]`（与 `_apply_ruyipage_capture_compat_patch` 处理的 `session.subscribe` 同族）；给出底层不带 contexts 的等价写法，并记录 world 归属实测结论——**该路径落在页面主 world**（页面自身 2 次 `fetch` 被 hook 计数、hook 写的全局可被 `run_js` 读到、`remove_preload_script` 生效），故"preload 必是独立 world"不得当默认前提（规则 42 的响应体 prepend 仍为首选路线之一，选路前先做一次同 world 验证）。连带记录 `page.set_bypass_csp()` 同版本同样抛错。
+- **scripts/forensic_ruyipage.py（新增能力）**：`_apply_ruyipage_preload_script_compat_patch()`（带 contexts 抛错即降级为全局注册，日志可见）+ `--preload-script <JS|文件路径>`（可多次传，导航前安装，IIFE 形态告警，结果以 `preloadHooks` 进报告）。此前 SKILL.md 反向对照配方要求"ruyipage add_preload_script hook XHR.open"，但该脚本无任何 hook 入口，配方实际不可执行。实测验证要点：被补丁类必须是方法真实归属的 `FirefoxBase`（写成 `FirefoxPage` 会 ImportError → 静默 no-op，首次功能测试即抓到此错）。
+- **references/workflow/experience-rules.md（新增 44/45/46）**：规则 44 工具高层封装报「不支持」先定位库层参数根因再判定能力缺失（误判会污染证据链，实战白跑三轮）；规则 45 交付前对 `result/` 跑 `git check-ignore`——交付规范豁免目录 `src/target/original/` 会被 workspace `.gitignore` 的 `**/original/` 静默排除，二进制"交付了但没入库"零报错；规则 46 skill 自身安装残缺（仅 SKILL.md）时按手工等价登记推进，不得误判为外部工具缺失去重装，且手工复刻驱动前须先读 `forensic_ruyipage.py` 已内置的兼容补丁清单（二进制 body 无损读取等），否则重复踩已修坑（实测自写驱动把 229B wasm 取成 241B 带 U+FFFD）。
+- **references/workflow/common-pitfalls.md（并入反模式 11，不新增编号）**：按本仓「同根因合并优先」纪律，作为第六形态「工具能力误判不可用」并入 实战案例/正确做法(第 10 条)/判定测试/速查表，标题与形态计数同步。
+- **cases/wasm-zero-import-linear-signer-mashangpa-p11.md（新增）+ index.json 注册（55 条）+ README 案例数维持（统一在 2.3.139 刷新）**：题11 = `encrypt.wasm` 生成 Query `m`，wasm 229B **零导入**（页面预构造的 `env.stackAlloc/wasi_snapshot_preview1` 导入对象是无效装饰），Node 原生实例化即可，等价式 `m = (16358 + page + trunc(_ts/3)) | 0`；沉淀**无 RuyiTrace 时的三步 writer 证据闭合**（真机 `exports.encrypt` 直调 30 组 oracle × 本地同 wasm 执行 × 算式 4280 组对拍，全部一致）+ jsjiami v7 self-defending 分支内含假 `fetch` 诱饵 + 规则 36 新形态（同窗口内各页数组重洗而 20 页总和稳定，判数据窗只能用聚合值）。
+
+**效果**：`add_preload_script` 从"文档说可用实则抛错"变为"根因明确 + 脚本内置降级 + CLI 可传"；交付入库新增一条可执行检查；skill 安装残缺场景有明确的手工等价路径而不误重装；码上爬平台 7/8/9/10/11 五题签名链全部沉淀（逐题不同算法族，跨题复用被再次证伪）。
+
 ## 2.3.130 - 2026-09-19
 
 ### 经验库新增：码上爬平台题9（webpack+HmacSHA1 纯算）与题10（魔改 SHA-256 沙箱黑盒）+ 规则36 补随机数据形态
