@@ -85,6 +85,7 @@ function stateHint(targetPath) {
         const out = [];
         if (FORENSIC_NODES.includes(state.node)) {
           out.push(`[STATE] 状态机当前节点 ${state.node}：本节点动作边界是取证/采集，深度源码检索属于 TRACE_ANALYZE 动作——trace 质量不足应先重采（TRACE_RETRY），重采一次仍不足才允许降级做落盘 JS 静态分析（SKILL.md 4.2）；禁止跳过重采直接静态分析。`);
+          out.push(`[STATE] 重采前排除例外：若已采到的调用栈显示请求走**官方原版 jQuery 文件**、setRequestHeader 只有标准三头，且冷/暖缓存各采一次均复现 ⇒ 这是站方签名脚本尚未执行完就发首屏请求的**注入竞态**（页面自阻断），属"重采无解"分支——不要继续加浏览器轮次，改用 run_with_trace.js 沙箱直调落盘的签名脚本取 writer 真值，详见 references/workflow/trace-flow.md「签名脚本注入竞态」。`);
         }
         const ageMin = state.updatedAt ? Math.round((Date.now() - Date.parse(state.updatedAt)) / 60000) : null;
         if (ageMin && !Number.isNaN(ageMin) && ageMin >= 60) {

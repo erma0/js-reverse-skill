@@ -118,6 +118,50 @@ function truncate(value, maxLength) {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1)}…`;
 }
 
+// 多关键词是 AND 语义（每个词都至少要命中一个字段）：任一词在全库零命中 ⇒ 整体必然零命中。
+// 题17 实证：`search_cases.js 字体 font unicode 字形` 返回"未找到匹配案例"，
+// 而单词"字体"即命中直系先例——假阴性会让人误判"本地无案例"从而跳过可复用方法论（反模式 41）。
+function zeroHitDiagnosis(allCases, args) {
+  // 按 flag 限定统计字段：queries 全字段，domains/signals/strategies 只统计各自对应字段，
+  // 避免"域名词在 signals 里偶合命中"制造假阴性（题17 实证见上注释）。
+  const groups = [
+    { terms: args.queries, fields: (item) => [item.title, ...item.domains, ...item.signals, item.strategy, item.file] },
+    { terms: args.domains, fields: (item) => item.domains },
+    { terms: args.signals, fields: (item) => item.signals },
+    { terms: args.strategies, fields: (item) => [item.strategy] },
+  ];
+  const counts = [];
+  for (const g of groups) {
+    for (const term of g.terms) {
+      counts.push({ term, hit: allCases.filter((item) => matchAll(g.fields(item), [term])).length });
+    }
+  }
+  if (counts.length < 2) return '';
+  const dead = counts.filter((c) => c.hit === 0).map((c) => c.term);
+  const detail = counts.map((c) => `${c.term}=${c.hit}`).join(' ');
+  const lines = ['', `[WARN] 多关键词是 AND 语义（每个词都要至少命中一个字段），逐词单独命中数：${detail}`];
+  if (dead.length) {
+    lines.push(
+      `       「${dead.join('、')}」在全库零命中 ⇒ 组合必然为空：索引字段（title/domains/signals/strategy）` +
+        '不含你的措辞 ≠ 站点无同类案例。'
+    );
+  } else {
+    let alive = allCases;
+    const steps = [];
+    for (const c of counts) {
+      const fieldOf = (groups.find((g) => g.terms.includes(c.term)) || groups[0]).fields;
+      alive = alive.filter((item) => matchAll(fieldOf(item), [c.term]));
+      steps.push(`+${c.term}→${alive.length}`);
+    }
+    lines.push(
+      `       各词单独都有命中，但交集为空（按词序收敛：${steps.join(' ')}）⇒ 组合过严。` +
+        '先用最宽的 1–2 个词复检（只留域名或只留算法族关键词）。'
+    );
+  }
+  lines.push('       未做逐词复检就下"本地无案例"结论，会漏掉可复用的同族先例（反模式 41）。');
+  return lines.join('\n');
+}
+
 function renderTable(cases) {
   if (!cases.length) return '未找到匹配案例。';
   const rows = cases.map((item) => ({
@@ -146,7 +190,8 @@ function main() {
     process.stdout.write(`${usage()}\n`);
     return;
   }
-  const result = search(loadIndex(), args);
+  const allCases = loadIndex();
+  const result = search(allCases, args);
   if (args.json) {
     process.stdout.write(`${JSON.stringify({ count: result.length, cases: result }, null, 2)}\n`);
   } else if (args.markdown) {
@@ -165,7 +210,14 @@ function main() {
   } else {
     process.stdout.write(`${renderTable(result)}\n`);
   }
-  if (!result.length) process.exitCode = 1;
+  if (!result.length) {
+    const diagnosis = zeroHitDiagnosis(allCases, args);
+    if (diagnosis) {
+      if (args.json) process.stderr.write(`${diagnosis}\n`); // --json 时 stdout 必须纯净
+      else process.stdout.write(`${diagnosis}\n`);
+    }
+    process.exitCode = 1;
+  }
 }
 
 try {

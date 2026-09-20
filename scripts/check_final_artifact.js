@@ -358,10 +358,15 @@ function isSourceCodeFile(p) {
   return ['.js', '.mjs', '.cjs', '.py'].includes(ext(p));
 }
 
-// 内容关键词扫描目标（浏览器自动化 / 指纹渲染）：验证记录.json 是验证证据文档，
-// 行文提及取证工具名不构成代码依赖，扫描会造成误报（实战：某 case 被迫改写记录措辞来过检查）
+// 内容关键词扫描目标（浏览器自动化 / 指纹渲染）：只对**代码文件**与**依赖清单**生效。
+// 理由：交付物"是否依赖浏览器自动化"是代码性质问题，而 result/ 下的 JSON 是证据与元数据文档——
+// 行文提及取证内核名不构成依赖。实战两例：`验证记录.json` 的取证偏差说明、
+// `src/target/original/manifest.json` 的 captureTool 字段，都曾被迫改写措辞才过检查。
+// 真正该盯的依赖入口是 package.json（依赖与 scripts，见 inspectPackageJson），故对它保留扫描。
+// 注意：代码文件里注释已由 stripComments 豁免，**字符串字面量仍会命中**——
+// 把取证工具名写进交付代码的说明性常量里同样会失败，这类文字请放 case/notes 与 result/*.md。
 function isAutomationScanTarget(p) {
-  return isCodeLikeFile(p) && path.basename(p) !== '验证记录.json';
+  return isSourceCodeFile(p) || path.basename(p).toLowerCase() === 'package.json';
 }
 
 // case/ 根层代码文件：标准结构下 case/ 只有子目录，根层 .js/.py 几乎必是
@@ -735,6 +740,15 @@ function inspectExperienceReport(resultDir, requireExperience) {
 }
 
 
+// 入口是否存在离线/--selftest 分支（用于给 attempts 归零提示根因，见规则 56）
+function hasOfflineSelfTestEntry(resultDir) {
+  return ['final.js', 'final.py'].some((name) => {
+    const p = path.join(resultDir, name);
+    if (!exists(p)) return false;
+    return /selftest|self-test|自测|离线回归/i.test(readText(p));
+  });
+}
+
 function inspectValidationRecord(resultDir, networkMode) {
   const file = path.join(resultDir, '验证记录.json');
   const result = { file, present: exists(file), mode: networkMode, attempts: 0, exempt: false, valid: false };
@@ -765,7 +779,15 @@ function inspectValidationRecord(resultDir, networkMode) {
     return { result, problems, warnings };
   }
   result.attempts = data.attempts.length;
-  if (data.attempts.length < 5) problems.push(`联网模式至少需要 5 条 attempts，当前只有 ${data.attempts.length} 条。`);
+  if (data.attempts.length < 5) {
+    // 题17 实证根因：入口的离线/--selftest 分支复用在线记录对象并回写本文件，把实时 attempts 清零，
+    // 而门禁只报条数不报来路，极易被误读成"格式问题"进而手工回填（属伪造）。规则 56。
+    const hint = hasOfflineSelfTestEntry(resultDir)
+      ? ' 若入口带离线/--selftest 模式，先排查该分支是否覆写了 验证记录.json（实时记录只允许在线路径写，' +
+        '离线产物落 case/tmp/）；记录已丢只能重跑真实请求恢复，禁止手工回填。'
+      : '';
+    problems.push(`联网模式至少需要 5 条 attempts，当前只有 ${data.attempts.length} 条。${hint}`);
+  }
   data.attempts.forEach((attempt, index) => {
     const prefix = `attempts[${index}]`;
     if (!attempt || typeof attempt !== 'object' || Array.isArray(attempt)) {
@@ -1186,6 +1208,12 @@ function runSelfTest() {
     }
     if (!isAutomationScanTarget(path.join(resultDir, 'src', 'gen.js'))) {
       throw new Error('result/src 源码应参与自动化关键词扫描');
+    }
+    if (isAutomationScanTarget(path.join(resultDir, 'src', 'target', 'original', 'manifest.json'))) {
+      throw new Error('manifest.json 是依赖元数据文档，不应参与自动化关键词扫描');
+    }
+    if (!isAutomationScanTarget(path.join(resultDir, 'package.json'))) {
+      throw new Error('package.json 是依赖清单，必须参与自动化关键词扫描');
     }
     const recordDoc = path.join(resultDir, '验证记录.json');
     fs.writeFileSync(recordDoc, JSON.stringify({ mode: 'online', note: '取证由 ruyipage 定制 Firefox 完成' }), 'utf8');

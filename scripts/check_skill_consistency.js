@@ -49,11 +49,15 @@ function usage() {
 - 关键硬门禁锚点存在：GATE-0 / GATE-1 / GATE-2 / EVIDENCE_GATE / 纯协议红线 / REAL_VERIFY /
   check_evidence.js / check_final_artifact.js / 最终项目总结.md / --target-signal / TRACE_RETRY。
 - SKILL.md 中引用的 references / scripts / assets（含 assets/templates）/ cases 路径真实存在。
+- references/**/*.md + cases/*.md 内引用的 references / scripts / assets / templates / cases 路径同样真实存在。
+- 编号引用校验（反模式 N / 规则 N / 例外 N / 反模式 N 第 M 形态）扫描 SKILL.md + references + cases 全语料：
+  引用编号必须在 common-pitfalls.md / experience-rules.md / SKILL.md §4.4 中真实存在（实条或指针），
+  形态引用不得超过该反模式段落声明的形态数；指针表并入目标必须指向实条（防指针链/死目标）。
 - reference-map 若被引用，其内部相对链接同样校验。
 - scripts/README.md 索引同步：每个 scripts/ 顶层脚本都被索引、表格不指向不存在
   的脚本、头部计数（总/JS/Python）与实际文件数一致（防止加脚本忘更新索引的计数漂移）。
-- SKILL.md 体积预算（常驻注入区防再膨胀）；README.md 与 SKILL.md 的小程序口径、
-  专题目录/实证案例/交付模板计数一致性。`;
+- SKILL.md 体积预算（常驻注入区防再膨胀；超 35000 字报错、低于 500 字告警疑似被误删）；
+  README.md 与 SKILL.md 的小程序口径、专题目录/实证案例/交付模板计数一致性。`;
 }
 
 function exists(p) {
@@ -77,7 +81,8 @@ function stripRefEdge(value) {
 
 function collectRefs(text) {
   const refs = new Set();
-  const re = /\b(?:references|scripts|assets|templates|cases)\/[A-Za-z0-9_./-]+/g;
+  // 前缀边界排除「src/renderer/assets/…」这类外部工具源码路径被误抽
+  const re = /(?<![A-Za-z0-9_./-])\b(?:references|scripts|assets|templates|cases)\/[A-Za-z0-9_./-]+/g;
   let m;
   while ((m = re.exec(text)) !== null) {
     const raw = m[0];
@@ -101,6 +106,86 @@ function walkFiles(dir) {
     else out.push(full);
   }
   return out;
+}
+
+// 代码 fence（``` / ~~~）内的行不计入引用抽取：references/cases 里的示例代码
+// 可能含「规则 12」「反模式 3」等字样，会制造假死引用。
+function nonFencedLines(text) {
+  const out = [];
+  let fence = null;
+  for (const line of text.split(/\r?\n/)) {
+    const f = /^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})/.exec(line);
+    if (f) {
+      if (fence === null) fence = f[1][0];
+      else if (f[1][0] === fence) fence = null;
+      out.push(line);
+      continue;
+    }
+    if (fence === null) out.push(line);
+  }
+  return out;
+}
+
+const CN_NUM = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+
+function cnToNum(s) {
+  if (/^\d+$/.test(s)) return Number(s);
+  if (s === '十') return 10;
+  if (s in CN_NUM) return CN_NUM[s];
+  return null;
+}
+
+// 统计一个反模式段落内声明的形态总数：显式「形态X/第X形态」标记、
+// 「N 种（典型）形态」数量声明、「实战案例」小节 bullet 数（隐式形态，
+// 如反模式 11 七种形态用 bullet 列表承载）三者取最大。
+function formCount(body) {
+  let maxForm = 0;
+  for (const m of body.matchAll(/(?:第\s*)?([一二三四五六七八九十\d]+)\s*形态|形态\s*([一二三四五六七八九十\d]+)/g)) {
+    const n = cnToNum(m[1] || m[2]);
+    if (n) maxForm = Math.max(maxForm, n);
+  }
+  const cnt = body.match(/([一二三四五六七八九十\d]+)\s*种(?:典型)?\s*形态/);
+  if (cnt) {
+    const n = cnToNum(cnt[1]);
+    if (n) maxForm = Math.max(maxForm, n);
+  }
+  const caseStart = body.indexOf('实战案例');
+  if (caseStart >= 0) {
+    let endIdx = body.length;
+    for (const kw of ['AI 的辩护', '为什么辩护不成立', '为什么不成立', '正确做法']) {
+      const idx = body.indexOf(kw, caseStart + 4);
+      if (idx >= 0) endIdx = Math.min(endIdx, idx);
+    }
+    const bullets = (body.slice(caseStart, endIdx).match(/^[-*]\s/gm) || []).length;
+    if (bullets > 1) maxForm = Math.max(maxForm, bullets);
+  }
+  return maxForm;
+}
+
+// 收集 references/**/*.md + cases/*.md 的 {rel, text} 列表（SKILL.md 单独处理）。
+function collectTreeMd(root) {
+  const out = [];
+  const pushDir = (dir) => {
+    if (!isDir(dir)) return;
+    for (const full of walkFiles(dir)) {
+      if (!/\.md$/i.test(full)) continue;
+      out.push({ rel: path.relative(root, full).replace(/\\/g, '/'), text: readText(full) });
+    }
+  };
+  pushDir(path.join(root, 'references'));
+  pushDir(path.join(root, 'cases'));
+  return out;
+}
+
+// 从 SKILL.md「例外四个」段落抽取已声明的例外编号（§4.4 的 1.~4. 枚举）。
+function extractExceptions(skillText) {
+  const set = new Set();
+  const anchor = skillText.indexOf('例外四个');
+  if (anchor < 0) return set;
+  const nextSection = skillText.indexOf('\n## ', anchor);
+  const section = skillText.slice(anchor, nextSection < 0 ? undefined : nextSection);
+  for (const m of section.matchAll(/^\s*(\d+)\.\s/mg)) set.add(Number(m[1]));
+  return set;
 }
 
 // scripts/README.md 索引漂移检测：脚本文件 ↔ 索引 ↔ 头部计数 三方一致。
@@ -149,9 +234,24 @@ function checkScriptsIndex(root) {
   return problems;
 }
 
-// SKILL.md 引用的「反模式 N / 规则 N」编号必须真实存在（实条或指针），
-// 防止 references 层合并/删除条目后 SKILL.md 留下死编号。
-function checkNumberedRefs(root, skillText) {
+// 指针表解析：返回 Map(旧编号 → 目标编号)。marker 形如「反模式」「规则」。
+function parsePointerTable(text, marker) {
+  const map = new Map();
+  let inTable = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (/^##\s*已合并条目指针/.test(line)) { inTable = true; continue; }
+    if (inTable && /^##\s/.test(line)) break;
+    const m = inTable ? line.match(new RegExp(`^\\|\\s*0*(\\d+)\\s*\\|\\s*${marker}\\s*0*(\\d+)(?!\\d)`)) : null;
+    if (m) map.set(Number(m[1]), Number(m[2]));
+  }
+  return map;
+}
+
+// 编号引用校验（反模式 N / 规则 N / 例外 N / 反模式 N 第 M 形态）：
+// 扫描 SKILL.md + references/**/*.md + cases/*.md 全语料（fence 外），
+// 防止 references 层合并/删除条目或 SKILL.md 章节调整后留下死编号；
+// 指针表目标必须指向实条（防指针→指针链或死目标）。
+function checkNumberedRefs(root, skillText, treeTexts) {
   const problems = [];
   const pitfallPath = path.join(root, 'references', 'workflow', 'common-pitfalls.md');
   const rulesPath = path.join(root, 'references', 'workflow', 'experience-rules.md');
@@ -160,36 +260,67 @@ function checkNumberedRefs(root, skillText) {
   const pitfall = readText(pitfallPath);
   const rules = readText(rulesPath);
 
-  // 反模式实条编号（## 反模式 N：）+ 指针表旧编号（| N | 反模式 M |）
-  const validAntis = new Set();
-  for (const m of pitfall.matchAll(/^#{2,6}\s+反模式\s*0*(\d+)(?!\d)/gm)) validAntis.add(Number(m[1]));
-  let inPointerTable = false;
-  for (const line of pitfall.split(/\r?\n/)) {
-    if (/^##\s*已合并条目指针/.test(line)) { inPointerTable = true; continue; }
-    if (inPointerTable && /^##\s/.test(line)) break;
-    const m = inPointerTable ? line.match(/^\|\s*0*(\d+)\s*\|\s*反模式\s*0*(\d+)(?!\d)/) : null;
-    if (m) validAntis.add(Number(m[1]));
-  }
-  // 规则实条编号（### N. 全局编号 + 显式「规则 N」标题）+ 指针表旧编号（| N | 规则 M |）
-  const validRules = new Set();
-  for (const m of rules.matchAll(/^#{2,6}\s+0*(\d+)[．.、]\s/gm)) validRules.add(Number(m[1]));
-  for (const m of rules.matchAll(/^#{2,6}\s+(?:经验)?规则\s*0*(\d+)(?!\d)/gm)) validRules.add(Number(m[1]));
-  let inRulePointerTable = false;
-  for (const line of rules.split(/\r?\n/)) {
-    if (/^##\s*已合并条目指针/.test(line)) { inRulePointerTable = true; continue; }
-    if (inRulePointerTable && /^##\s/.test(line)) break;
-    const m = inRulePointerTable ? line.match(/^\|\s*0*(\d+)\s*\|\s*规则\s*0*(\d+)(?!\d)/) : null;
-    if (m) validRules.add(Number(m[1]));
+  // 反模式实条编号 + 指针表旧编号
+  const antiEntries = new Set();
+  for (const m of pitfall.matchAll(/^#{2,6}\s+反模式\s*0*(\d+)(?!\d)/gm)) antiEntries.add(Number(m[1]));
+  const antiPointers = parsePointerTable(pitfall, '反模式');
+  const validAntis = new Set([...antiEntries, ...antiPointers.keys()]);
+  // 规则实条编号（### N. 全局编号 + 显式「规则 N」标题）+ 指针表旧编号
+  const ruleEntries = new Set();
+  for (const m of rules.matchAll(/^#{2,6}\s+0*(\d+)[．.、]\s/gm)) ruleEntries.add(Number(m[1]));
+  for (const m of rules.matchAll(/^#{2,6}\s+(?:经验)?规则\s*0*(\d+)(?!\d)/gm)) ruleEntries.add(Number(m[1]));
+  const rulePointers = parsePointerTable(rules, '规则');
+  const validRules = new Set([...ruleEntries, ...rulePointers.keys()]);
+  const validExceptions = extractExceptions(skillText);
+
+  // 反模式段落切分：N → 段落文本（用于形态计数）
+  const antBodies = new Map();
+  const sections = pitfall.split(/^(?=#{2,6}\s+反模式\s*0*\d)/m);
+  for (const sec of sections) {
+    const m = /^#{2,6}\s+反模式\s*0*(\d+)(?!\d)/m.exec(sec);
+    if (m) antBodies.set(Number(m[1]), sec);
   }
 
-  for (const m of skillText.matchAll(/反模式\s*0*(\d+)(?!\d)/g)) {
-    if (!validAntis.has(Number(m[1]))) {
-      problems.push({ type: 'dead-anti-pattern-ref', message: `SKILL.md 引用的 反模式 ${m[1]} 不存在（common-pitfalls.md 无实条也无指针）` });
+  // 指针表目标死链：并入目标必须是实条，不能指向另一个指针或空编号
+  for (const [oldN, target] of antiPointers) {
+    if (!antiEntries.has(target)) {
+      problems.push({ type: 'pointer-dead-target', message: `common-pitfalls.md 指针表 ${oldN} → 反模式 ${target}：目标不是实条（指针链或死目标）` });
     }
   }
-  for (const m of skillText.matchAll(/(?<!反模式)规则\s*0*(\d+)(?!\d)/g)) {
-    if (!validRules.has(Number(m[1]))) {
-      problems.push({ type: 'dead-rule-ref', message: `SKILL.md 引用的 规则 ${m[1]} 不存在（experience-rules.md 无该编号）` });
+  for (const [oldN, target] of rulePointers) {
+    if (!ruleEntries.has(target)) {
+      problems.push({ type: 'pointer-dead-target', message: `experience-rules.md 指针表 ${oldN} → 规则 ${target}：目标不是实条（指针链或死目标）` });
+    }
+  }
+
+  const scan = [{ rel: 'SKILL.md', text: skillText }, ...treeTexts];
+  for (const { rel, text } of scan) {
+    const lines = nonFencedLines(text).join('\n');
+    for (const m of lines.matchAll(/反模式\s*0*(\d+)(?!\d|%)/g)) {
+      const n = Number(m[1]);
+      if (!validAntis.has(n)) {
+        problems.push({ type: 'dead-anti-pattern-ref', message: `${rel} 引用的 反模式 ${n} 不存在（common-pitfalls.md 无实条也无指针）` });
+      }
+    }
+    // (\d+)(?!\d) 防止「反模式 28 形态四」被回溯拆成「反模式 2 第 8 形态」类部分匹配
+    for (const m of lines.matchAll(/反模式\s*0*(\d+)(?!\d)\s*(?:第\s*)?([一二三四五六七八九十\d]+)\s*形态/g)) {
+      const n = Number(m[1]);
+      const f = cnToNum(m[2]);
+      if (f && validAntis.has(n) && formCount(antBodies.get(n) || '') < f) {
+        problems.push({ type: 'dead-form-ref', message: `${rel} 引用 反模式 ${n} 第 ${m[2]} 形态：该反模式段落内无此形态（最多 ${formCount(antBodies.get(n) || '')} 种）` });
+      }
+    }
+    for (const m of lines.matchAll(/(?<!反模式)规则\s*0*(\d+)(?!\d|%)/g)) {
+      const n = Number(m[1]);
+      if (!validRules.has(n)) {
+        problems.push({ type: 'dead-rule-ref', message: `${rel} 引用的 规则 ${n} 不存在（experience-rules.md 无该编号）` });
+      }
+    }
+    for (const m of lines.matchAll(/例外\s*0*(\d+)(?!\d)/g)) {
+      const n = Number(m[1]);
+      if (!validExceptions.has(n)) {
+        problems.push({ type: 'dead-exception-ref', message: `${rel} 引用的 例外 ${n} 不存在（SKILL.md §4.4 仅声明 ${[...validExceptions].sort((a, b) => a - b).join('/')}）` });
+      }
     }
   }
   return problems;
@@ -197,6 +328,7 @@ function checkNumberedRefs(root, skillText) {
 
 // SKILL.md 是常驻注入区：体积预算防止历史遗留重新堆积（新增内容优先沉淀到 references/ 与 cases/）。
 const SKILL_CHAR_BUDGET = 35000;
+const SKILL_CHAR_MIN = 500;
 
 function lfChars(text) {
   return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').length;
@@ -205,6 +337,12 @@ function lfChars(text) {
 function checkSkillBudget(text) {
   const problems = [];
   const chars = lfChars(text);
+  if (chars < SKILL_CHAR_MIN) {
+    problems.push({
+      type: 'skill-budget-low',
+      message: `SKILL.md 体积异常小（${chars} 字 < ${SKILL_CHAR_MIN} 字，LF 计）——疑似只剩骨架，正文/章节是否被误删？`,
+    });
+  }
   if (chars > SKILL_CHAR_BUDGET) {
     problems.push({
       type: 'skill-budget',
@@ -212,6 +350,22 @@ function checkSkillBudget(text) {
         + '本文件是常驻注入区、每加一句按激活次数付费——新经验请按第 12 节路由沉淀到 references/ 或 cases/，'
         + '正文只保留「跨题通用且不写入就会犯错」的硬规则与指针。',
     });
+  }
+  return problems;
+}
+
+// references/**/*.md + cases/*.md 内引用的 references / scripts / assets / templates / cases 路径必须真实存在
+// （reference-map.md 由 checkSkill 单独校验，这里跳过避免重复报）。
+function checkTreeRefs(root, treeTexts) {
+  const problems = [];
+  const mapRel = 'references/workflow/reference-map.md';
+  for (const { rel, text } of treeTexts) {
+    if (rel === mapRel) continue;
+    for (const ref of collectRefs(text)) {
+      if (!exists(path.join(root, ref))) {
+        problems.push({ type: 'missing-reference', message: `${rel} 引用路径不存在：${ref}` });
+      }
+    }
   }
   return problems;
 }
@@ -234,9 +388,16 @@ function countFiles(dir, re) {
 
 function countCaseFiles(dir) {
   try {
-    return fs.readdirSync(dir, { withFileTypes: true })
+    const names = fs.readdirSync(dir, { withFileTypes: true })
       .filter((e) => e.isFile() && /\.md$/i.test(e.name) && !['README.md', '_template.md'].includes(e.name))
-      .length;
+      .map((e) => e.name);
+    // 与 README「N 个实证案例 + M 个模板」口径一致：index.json 里 kind:template 的不计入实证案例
+    let templates = new Set();
+    try {
+      const index = JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8'));
+      templates = new Set((index.cases || []).filter((c) => c.kind === 'template').map((c) => c.file));
+    } catch { /* 无 index.json / 格式异常时退化为只排除 _template.md */ }
+    return names.filter((n) => !templates.has(n)).length;
   } catch {
     return null;
   }
@@ -455,8 +616,10 @@ function checkSkill(skillPath, root) {
     }
   }
 
+  const treeTexts = collectTreeMd(root);
   problems.push(...checkScriptsIndex(root));
-  problems.push(...checkNumberedRefs(root, text));
+  problems.push(...checkTreeRefs(root, treeTexts));
+  problems.push(...checkNumberedRefs(root, text, treeTexts));
   problems.push(...checkSkillBudget(text));
   problems.push(...checkReadmeConsistency(root, text));
 
@@ -491,6 +654,7 @@ function selfTest() {
       '---',
       '',
       'GATE-0 GATE-1 GATE-2 EVIDENCE_GATE 纯协议红线 REAL_VERIFY check_evidence.js check_final_artifact.js 最终项目总结.md --target-signal TRACE_RETRY',
+      `<!-- ${'padding '.repeat(70)}-->`,
       'scripts/missing.js',
     ].join('\n'));
     const result = checkSkill(skill, dir);
@@ -522,10 +686,13 @@ function selfTest() {
     assert(checkDescriptionQuality(fmSkill('name: ok-name\ndescription: 处理网页端参数')).some((p) => p.type === 'description-boundary'), '缺边界应报 description-boundary');
     assert(checkDescriptionQuality(fmSkill('name: ok-name\ndescription: ' + '补'.repeat(300) + '不用于 App')).some((p) => p.type === 'description-budget'), '超预算应报 description-budget');
     assert.strictEqual(checkDescriptionQuality(fmSkill('name: ok-name\ndescription: 网页端参数还原，不用于 App')).length, 0, '合规描述应零问题');
-    // 体积预算：超限必须报 skill-budget，正常长度零问题
+    // 体积预算：超限必须报 skill-budget、低于下限报 skill-budget-low，正常长度零问题
     assert.strictEqual(checkSkillBudget('x'.repeat(SKILL_CHAR_BUDGET)).length, 0);
     assert.strictEqual(checkSkillBudget('x'.repeat(SKILL_CHAR_BUDGET + 1)).length, 1);
     assert.strictEqual(checkSkillBudget('x'.repeat(SKILL_CHAR_BUDGET + 1))[0].type, 'skill-budget');
+    assert.strictEqual(checkSkillBudget('x'.repeat(SKILL_CHAR_MIN - 1)).length, 1);
+    assert.strictEqual(checkSkillBudget('x'.repeat(SKILL_CHAR_MIN - 1))[0].type, 'skill-budget-low');
+    assert.strictEqual(checkSkillBudget('x'.repeat(SKILL_CHAR_MIN)).length, 0);
 
     // README 一致性：口径冲突与计数漂移必须被捕获；口径一致且计数正确时零问题
     fs.writeFileSync(path.join(dir, 'README.md'), '不用于 App、小程序、桌面程序及 Native 逆向。\n', 'utf8');
@@ -540,6 +707,70 @@ function selfTest() {
     assert.strictEqual(checkReadmeConsistency(dir, '').length, 0, '口径一致且计数正确应零问题');
     fs.writeFileSync(path.join(dir, 'README.md'), '小程序限纯 JS 参数还原\nreferences/ 含 2 个专题目录\n', 'utf8');
     assert(checkReadmeConsistency(dir, '').some((p) => p.type === 'readme-count'), '计数漂移应报 readme-count');
+
+    // 编号引用 + 树路径校验：构造最小 references/cases 语料，全语料扫描必须捕获
+    // 死编号 / 越界形态 / 指针表死链 / 树内缺失路径；合法引用零误报
+    fs.mkdirSync(path.join(dir, 'references', 'env'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'references', 'workflow', 'common-pitfalls.md'), [
+      '## 反模式 1：自证假阳性',
+      '',
+      '**实战案例**（三种典型形态）：',
+      '- 形态一：A',
+      '- 形态二：B',
+      '- 形态三：C',
+      '',
+      '## 已合并条目指针（旧编号 → 主条目）',
+      '',
+      '| 旧编号 | 并入 | 原主题 |',
+      '|-------|------|--------|',
+      '| 2 | 反模式 1 | 旧条目 |',
+      '| 60 | 反模式 99 | 死链目标 |',
+    ].join('\n'), 'utf8');
+    fs.writeFileSync(path.join(dir, 'references', 'workflow', 'experience-rules.md'), [
+      '### 1. 测例',
+      '',
+      '## 已合并条目指针（旧编号 → 主条目）',
+      '',
+      '| 旧编号 | 并入 | 原主题 |',
+      '|-------|------|--------|',
+      '| 2 | 规则 1 | 旧条目 |',
+    ].join('\n'), 'utf8');
+    fs.writeFileSync(path.join(dir, 'references', 'env', 't.md'), '引 references/workflow/common-pitfalls.md（合法）与 scripts/ghost.js（缺失）\n', 'utf8');
+    fs.writeFileSync(path.join(dir, 'cases', 'x.md'), [
+      '反模式 1 第三形态（合法）',
+      '反模式 1 第九形态（越界形态）',
+      '反模式 99（死编号）',
+      '规则 1（合法）',
+      '规则 99（死编号）',
+      '例外 4（合法）',
+      '例外 9（死编号）',
+    ].join('\n'), 'utf8');
+    fs.writeFileSync(skill, [
+      '---',
+      'name: test',
+      'description: 网页端参数还原；不用于 App 与桌面程序',
+      '---',
+      '',
+      'GATE-0 GATE-1 GATE-2 EVIDENCE_GATE 纯协议红线 REAL_VERIFY check_evidence.js check_final_artifact.js 最终项目总结.md --target-signal TRACE_RETRY',
+      `<!-- ${'padding '.repeat(70)}-->`,
+      '### 4.4 状态记录与 IMPLEMENT 前置条件',
+      '例外四个：',
+      '1. A',
+      '2. B',
+      '3. C',
+      '4. D',
+      '',
+      '树引用：references/workflow/common-pitfalls.md references/workflow/experience-rules.md references/env/t.md',
+      'scripts/missing.js',
+    ].join('\n'), 'utf8');
+    const result2 = checkSkill(skill, dir);
+    const t2 = result2.problems.map((p) => p.type);
+    assert(t2.includes('dead-form-ref'), '越界形态引用应报 dead-form-ref');
+    assert(t2.includes('dead-anti-pattern-ref'), '死反模式编号应报 dead-anti-pattern-ref');
+    assert(t2.includes('dead-rule-ref'), '死规则编号应报 dead-rule-ref');
+    assert(t2.includes('dead-exception-ref'), '死例外编号应报 dead-exception-ref');
+    assert(t2.includes('pointer-dead-target'), '指针表死链目标应报 pointer-dead-target');
+    assert(t2.includes('missing-reference'), '树内缺失路径应报 missing-reference');
 
     return 'self-test passed';
   } finally {

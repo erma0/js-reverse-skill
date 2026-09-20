@@ -361,6 +361,28 @@ def is_js_packet(pkt: Dict[str, Any]) -> bool:
     return "javascript" in ct.lower() or "ecmascript" in ct.lower()
 
 
+def _looks_msys_mangled(value: str) -> bool:
+    """URL 子串/正则不可能以 Windows 盘符开头；出现盘符即说明入参被 Git Bash/MSYS 改写。"""
+    v = str(value or "")
+    return bool(re.match(r"^[A-Za-z]:[\\/]", v)) or "Program Files" in v
+
+
+def _warn_mangled_target_patterns(values: List[str], flag: str) -> None:
+    """检测被 MSYS/Git Bash 改写过的 --targets 入参。
+
+    Git Bash 会把以 `/` 开头的参数静默重写成 Windows 路径（`/api/x` → `D:/Program Files/Git/api/x`），
+    子串永不匹配 → 目标明明抓到却报 NO_TARGET，极易被误判成"接口路径猜错"或脚本缺陷。
+    """
+    for v in values:
+        if _looks_msys_mangled(v):
+            logger.warning(
+                "%s 的值 %r 看起来像被 Git Bash/MSYS 改写过的路径（原意可能是去掉盘符前缀的 URL 子串）。"
+                "URL 子串不会以盘符开头——请改用不带前导斜杠的子串（如 --targets \"api/x/data\"），"
+                "或以 MSYS_NO_PATHCONV=1 / MSYS2_ARG_CONV_EXCL=\"*\" 启动。否则本次终态必然不命中。",
+                flag, v,
+            )
+
+
 def match_targets(pkt: Dict[str, Any], substrings: List[str], regexes: List[re.Pattern]) -> bool:
     """目标接口只按 URL 匹配，避免 Referer/响应头中的字样冒充真实接口命中。"""
     if not substrings and not regexes:
@@ -1152,6 +1174,11 @@ def _classify_packets(steps, args, substrings, regexes, body_cache=None):
             os.makedirs(args.out_dir, exist_ok=True)
             doc_path = os.path.join(args.out_dir, "document.html")
             if body:
+                # 轮转只发生在「本轮首次要覆盖上一轮入口页」时；写在收尾轮转里会把本轮产物搬成 .prev-1
+                # 且不再写回，导致 document.html 每轮跑完都不存在（mashangpa 题13/14/15 三轮连续复现）。
+                if not getattr(args, "_document_html_rotated", False):
+                    args._document_html_rotated = True
+                    _rotate_previous(args.out_dir, ["document.html"])
                 with open(doc_path, "wb") as f:
                     f.write(body)
             document = {
@@ -1295,7 +1322,9 @@ def _rotate_previous(out_dir: str, names: List[str], keep: int = 3) -> None:
 def _write_outputs(args, browser_path, records_meta, target_hits, related_hits, fingerprint, baseline_id, js_dir):
     """落盘抓包元数据、终态目标、关联链路与指纹基线，返回输出路径字典。"""
     os.makedirs(args.out_dir, exist_ok=True)
-    _rotate_previous(args.out_dir, ["capture.json", "target-hits.json", "related-hits.json", "document.html"])
+    # document.html 不在此列：它在采集期就已写成本轮产物（见 is_doc 分支内的就地轮转），
+    # 放进这里会把本轮入口页搬成 .prev-1 并让 document.html 消失。
+    _rotate_previous(args.out_dir, ["capture.json", "target-hits.json", "related-hits.json"])
     with open(os.path.join(args.out_dir, "capture.json"), "w", encoding="utf-8") as f:
         json.dump(records_meta, f, ensure_ascii=False, indent=2)
     with open(os.path.join(args.out_dir, "target-hits.json"), "w", encoding="utf-8") as f:
@@ -1645,6 +1674,84 @@ def _apply_ruyipage_capture_compat_patch():
         logger.warning("capture privileged-scope 兼容补丁安装失败：%s", e)
 
 
+def _apply_ruyipage_preload_script_compat_patch():
+    """Firefox 155+（privileged scope）add_preload_script 兼容补丁（依赖 ruyipage 内部实现，失败仅告警不阻断）。
+
+    ruyipage 1.2.62 的 ``FirefoxBase.add_preload_script``（即 ``page.add_preload_script``）
+    无条件传 ``contexts=[self._context_id]``，
+    而 FF155 privileged scope 下 ``script.addPreloadScript`` 不接受该参数，直接抛 BiDiError
+    （实测 IIFE 与函数声明两种形态都抛，不是「IIFE 静默不执行」那条已知坑）；
+    ``page.set_bypass_csp()`` 内部走同一封装，同版本同样失败。
+    这里包一层：带 contexts 抛错时降级为**不传 contexts 的全局注册**。
+    实测（1.2.62 + FF155.0a1-v1.2.58，本地 file:// 页）该路径落在页面主 world：
+    页面自身脚本发出的 fetch 会被 hook 包装计数，故 hook 页面自有全局可用；
+    首次使用前仍按 references/tooling/ruyi-tooling.md 的要求验证执行标记。
+    """
+    try:
+        from ruyipage._pages.firefox_base import FirefoxBase
+    except Exception as e:
+        logger.warning("add_preload_script 兼容补丁跳过（导入 FirefoxBase 失败）：%s", e)
+        return
+    orig = getattr(FirefoxBase, "add_preload_script", None)
+    if orig is None or getattr(orig, "_ruyipage_privileged_fallback", False):
+        return
+
+    def add_preload_script(self, script):
+        try:
+            return orig(self, script)
+        except Exception as e:
+            msg = str(e)
+            if "privileged scope" not in msg and "browsing contexts" not in msg:
+                raise
+            logger.warning("add_preload_script 带 contexts 失败，降级为全局注册（不传 contexts）：%s", msg[:120])
+            from ruyipage._bidi import script as _bidi_script
+            from ruyipage._units.script_tools import PreloadScript
+
+            result = _bidi_script.add_preload_script(self._driver._browser_driver, script) or {}
+            return PreloadScript(result.get("script", ""))
+
+    add_preload_script._ruyipage_privileged_fallback = True
+    FirefoxBase.add_preload_script = add_preload_script
+
+
+def _install_preload_scripts(page, args) -> List[Dict[str, Any]]:
+    """安装 --preload-script hook（必须在 page.get 之前，才能赶在页面自身脚本前执行）。
+
+    每项可以是 JS 函数声明字符串本身，也可以是包含该字符串的文件路径。
+    按 ruyi-tooling.md 的约束：必须是函数声明形态（IIFE 静默不执行），且 hook 体内
+    自带执行标记（window.__hookInstalled 等），由使用方在取证后核验。
+    """
+    installed: List[Dict[str, Any]] = []
+    for raw in getattr(args, "preload_script", None) or []:
+        item = {"source": raw[:120]}
+        script = raw
+        try:
+            if os.path.isfile(raw):
+                with open(raw, "r", encoding="utf-8") as fh:
+                    script = fh.read()
+                item["file"] = raw
+        except OSError as e:
+            logger.warning("--preload-script 读取 %s 失败，跳过：%s", raw, e)
+            item.update(ok=False, error=str(e)[:200])
+            installed.append(item)
+            continue
+        stripped = script.strip()
+        if stripped.startswith("(()") or stripped.startswith("(function") or stripped.startswith("!function"):
+            logger.warning(
+                "--preload-script 疑似 IIFE 形态：库要求函数声明字符串（\"() => { ... }\"），"
+                "IIFE 会静默不执行且无报错，请改为函数声明后再传：%s", stripped[:60]
+            )
+        try:
+            sid = page.add_preload_script(script)
+            item.update(ok=True, scriptId=getattr(sid, "id", str(sid))[:40])
+            logger.info("preload hook 已安装（%s）", item["scriptId"])
+        except Exception as e:
+            item.update(ok=False, error=str(e)[:200])
+            logger.warning("add_preload_script 失败，本次 hook 未生效：%s", e)
+        installed.append(item)
+    return installed
+
+
 def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
     """ruyiPage 取证主流程：启动浏览器 → 抓全部包 → 分类（元数据/JS/目标）→ JS 落盘 → 报告。
 
@@ -1654,6 +1761,7 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
     from ruyipage import FirefoxPage
     _apply_ruyipage_anti_hang_patch()
     _apply_ruyipage_capture_compat_patch()
+    _apply_ruyipage_preload_script_compat_patch()
 
     page = None
     result = None
@@ -1689,6 +1797,11 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
                 if r:
                     regexes.append(re.compile(r))
         substrings = [s.strip() for s in (args.targets or "").split(",") if s.strip()]
+        _warn_mangled_target_patterns(substrings, "--targets")
+        _warn_mangled_target_patterns([r.pattern for r in regexes], "--targets-regex")
+
+        # --preload-script 必须在 capture.start / get 之前：preload 只对之后的导航生效
+        preload_hooks = _install_preload_scripts(page, args)
 
         # 硬约束：capture.start 必须在 get 之前
         page.capture.start(targets=True, collect_bodies=True)
@@ -1895,6 +2008,7 @@ def run_forensic(args: argparse.Namespace, browser_path: str) -> Dict[str, Any]:
             end_reason=end_reason,
         )
         result["getTimedOut"] = get_timed_out
+        result["preloadHooks"] = preload_hooks
         result["liveBodyPrefetch"] = _live_body_summary(live_body_state)
         result["observedDynamicCandidates"] = _observed_dynamic_candidates(records_meta)
         result["outputs"] = _write_outputs(
@@ -1980,6 +2094,11 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     p.add_argument("--click", default="", help="导航后拟人点击的选择器；优先用 id/结构选择器（css:#pgxNext、css:#pgxPages button:nth-child(5)），部分属性选择器（[data-page=5]）查不到且不报错")
     p.add_argument("--click-delay", type=float, default=0.0, help="导航后延迟 N 秒再执行 --click（单位秒，默认 0）。页面 DOMContentLoaded 时自身首屏 AJAX 常还在飞行中、操作按钮处于 disabled 态，立即点击会被静默吞掉（disabled 控件不派发 click）；建议 5~30 秒")
     p.add_argument("--scroll", type=int, default=0, help="导航后滚动像素数")
+    p.add_argument("--preload-script", action="append", default=[], metavar="JS|文件路径",
+                   help="在页面自身脚本之前注入 hook（可多次传）；值为 JS 函数声明字符串或包含该字符串的文件路径。"
+                        "必须带执行标记（如 window.__hookInstalled）并在取证后核验，否则结论无效；"
+                        "1.2.62+FF155 下库层带 contexts 会抛 privileged scope，脚本已内置降级为全局注册"
+                        "（细则见 references/tooling/ruyi-tooling.md 的 add_preload_script 节）")
     p.add_argument("--manual-pause", action="store_true", help="导航后暂停，等待手动完成登录/业务再继续；AI 后台运行遇非交互 stdin（EOF）时自动退化为等待 --wait，不阻塞")
     p.add_argument("--cookie", action="append", default=[], metavar="NAME=VALUE", help="预置 Cookie，可多次传；支持 'name=value' 或 'a=1; b=2' 分号分隔（注入到页面所在域名）。用于绕过需登录态/预置会话的页面，缺省域名取 --url 的主机，可用 --cookie-domain 显式指定")
     p.add_argument("--cookie-domain", default="", help="--cookie 注入的目标域名（如 .example.com）；缺省从 --url 解析主机")
@@ -2269,6 +2388,12 @@ def run_self_test() -> int:
         no_target = _classify_packets([_SelfTestPacket(r) for r in records], args, [], [])
         assert len(no_target[2]) == 0, "未指定 targets 时不应把所有包当成目标包"
 
+        # Git Bash/MSYS 会把以 / 开头的入参改写成 Windows 路径，导致终态永不命中——必须给出显式告警。
+        assert _looks_msys_mangled("D:/Program Files/Git/api/x/data/"), "MSYS 改写形态（正斜杠盘符）未识别"
+        assert _looks_msys_mangled("C:\\api\\x"), "MSYS 改写形态（反斜杠盘符）未识别"
+        for legit in ("/api/x/data/", "api/x/data", "problem-detail/13/data", ""):
+            assert not _looks_msys_mangled(legit), f"合法 targets 被误报为 MSYS 改写：{legit!r}"
+
         # 动态下发脚本（XHR 拿到的 text/html）必须落到 case/js/original，不能被当成入口文档丢弃。
         script_records = [
             dict(entry_doc, response_body="<html><script src=/m.js></script></html>"),
@@ -2346,6 +2471,17 @@ def run_self_test() -> int:
         assert os.path.exists(os.path.join(args.out_dir, "capture.json")), "capture.json 应写出"
         assert not os.path.exists(partial_path), "正常收尾后应删除 partial 快照"
 
+        # 3b) 入口页 document.html 在采集期就已写成本轮产物，收尾轮转不得再把它搬成 .prev-1
+        #     （缺陷复现于 mashangpa 题13/14/15：每轮跑完 forensic/ 里只有 document.html.prev-N，
+        #      而 SKILL.md §4.2 把 document.html 定为 challenge cookie 强制证据）。
+        doc_path_selftest = os.path.join(args.out_dir, "document.html")
+        with open(doc_path_selftest, "wb") as f:
+            f.write(b"<html>round-current</html>")
+        _write_outputs(args, "browser", records, [], [], None, "baseline-selftest", None)
+        assert os.path.exists(doc_path_selftest), "收尾轮转不得搬走本轮 document.html"
+        with open(doc_path_selftest, encoding="utf-8") as f:
+            assert f.read() == "<html>round-current</html>", "document.html 应保持本轮产物内容"
+
         # 4) _pid_alive：零值 PID 不存活、当前进程存活
         assert _pid_alive(0) is False, "PID=0 应判不存活"
         assert _pid_alive(os.getpid()) is True, "当前进程应判存活"
@@ -2359,7 +2495,7 @@ def run_self_test() -> int:
         md = render_markdown({"endReason": "browser-closed", "jsFileCount": 0})
         assert "结束原因：browser-closed" in md and "手动关闭" in md, "结束原因渲染缺失"
 
-    print("forensic_ruyipage.py 自测通过：终态 OR、URL 匹配、多次终态回溯、完整 body/WASM 落盘、预算拒绝半包、分类落盘、断连探测、partial 快照、信号中断、结束原因渲染")
+    print("forensic_ruyipage.py 自测通过：终态 OR、URL 匹配、多次终态回溯、完整 body/WASM 落盘、预算拒绝半包、分类落盘、断连探测、partial 快照、入口页收尾不被轮转、信号中断、结束原因渲染")
     return 0
 
 
@@ -2368,6 +2504,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.self_test:
         return run_self_test()
+
+    # 入参告警放在启动浏览器之前：MSYS 改写会让整轮取证白跑，越早发现越省时间。
+    _warn_mangled_target_patterns(
+        [s.strip() for s in (args.targets or "").split(",") if s.strip()], "--targets"
+    )
+    _warn_mangled_target_patterns(
+        [r.strip() for r in (args.targets_regex or "").split(",") if r.strip()], "--targets-regex"
+    )
 
     ok, ver, err = detect_ruyipage()
     if not ok:

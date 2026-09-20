@@ -22,6 +22,30 @@ const STAGES = {
   'validation': { index: '07', title: '验证与清理记录' },
 };
 
+// 状态机节点名 → 固定阶段：SKILL.md 0.0 节用英文节点推进，报告脚本按中文阶段归档，
+// 不给别名时 `--stage TRACE_ANALYZE` 会报「未知阶段/必须包含中文」并白跑一轮。
+const STAGE_ALIASES = {
+  INTENT_CONFIRM: '需求信息确认',
+  ENV_READY: '需求信息确认',
+  EVIDENCE_GATE: '取证方案确认',
+  FORENSIC_CAPTURE: '取证方案确认',
+  TRACE_CAPTURE: '取证方案确认',
+  TRACE_RETRY: '取证方案确认',
+  MATERIALS_FALLBACK: '取证方案确认',
+  BLOCKED_FORENSIC: '取证方案确认',
+  CASE_LOOKUP: '请求样本与可疑参数确认',
+  EXTERNAL_LOOKUP: '请求样本与可疑参数确认',
+  IDENTIFY: 'JS文件与入口定位',
+  TRACE_ANALYZE: 'JS文件与入口定位',
+  IMPLEMENT: '补环境实现记录',
+  REAL_VERIFY: '验证与清理记录',
+  DIAGNOSE: '验证与清理记录',
+  DELIVER: '验证与清理记录',
+  SIGN_ONLY_DELIVER: '验证与清理记录',
+  CLEANUP: '验证与清理记录',
+  DONE: '验证与清理记录',
+};
+
 function parseArgs(argv) {
   const args = {
     caseDir: '',
@@ -103,11 +127,17 @@ function normalizeIndex(index) {
 }
 function normalizeStage(stage, index) {
   const s = String(stage || '').trim();
-  const ret = STAGES[s];
+  const alias = STAGE_ALIASES[s];
+  const ret = STAGES[s] || (alias ? STAGES[alias] : undefined);
   const normalizedIndex = normalizeIndex(index);
   if (ret) return normalizedIndex ? { index: normalizedIndex, title: ret.title } : ret;
   if (!s) throw new Error('必须提供 --stage');
-  if (!hasChinese(s)) throw new Error(`未知阶段：${s}。自定义阶段名称必须包含中文。`);
+  if (!hasChinese(s)) {
+    throw new Error(
+      `未知阶段：${s}。可用 token：${Object.keys(STAGE_ALIASES).join(' / ')}（状态机节点名）、`
+      + `${Object.keys(STAGES).join(' / ')}；其它自定义阶段名称必须包含中文并配 --index。`
+    );
+  }
   return { index: normalizedIndex || '自定义', title: s };
 }
 function defaultOut(caseDir, stage) {

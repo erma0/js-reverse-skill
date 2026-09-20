@@ -807,9 +807,17 @@ async function main() {
     if (args.markdown) process.stdout.write(renderQuickMarkdown(result));
     return;
   }
-  // 多 case 项目共享 tools 时，--project-dir 可能被传成 case 目录：向上查找含 tools/ 的祖先，
-  // 否则已装在共享工程根 tools/ 的 RuyiTrace/ruyipage runtime 会被误判缺失
-  if (args.projectDir) args.projectDir = paths.normalizeProjectDir(args.projectDir);
+  // 多 case 项目共享 tools 时，--project-dir 可能被传成 case 目录：本目录无 tools/ 时向上查找
+  // 含 tools/ 的祖先（检测复用共享 tools；安装侧 install_all 仍"传哪装哪"，不受影响），
+  // 否则已装在共享工程根 tools/ 的 RuyiTrace/ruyipage runtime 会被误判缺失（题19 GATE-1 实测：
+  // 传入无 tools/ 的 case 目录时 ruyitrace/ruyitraceKernel 双双误报，快照被拒写）
+  if (args.projectDir) {
+    const requested = paths.normalizeProjectDir(args.projectDir);
+    args.projectDir = paths.resolveProjectDirFromCaseDir(requested);
+    if (args.projectDir !== requested) {
+      console.error(`[提示] --project-dir 目录下无 tools/，检测上溯到共享工程根：${args.projectDir}`);
+    }
+  }
   const result = withNextSteps(detect(args));
   if (args.offline) {
     result.latest = {};

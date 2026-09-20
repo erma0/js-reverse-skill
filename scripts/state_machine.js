@@ -43,6 +43,64 @@ const EDGES = {
   'DONE': [],
 };
 
+// SKILL.md §4.4 的「已声明取证例外」通道：跳过 TRACE_CAPTURE 类必经节点时不再只能走 --force。
+// 理由：例外 3（内容还原型）/例外 4（速通路径）是正文承认的合法路径，但状态图里没有对应边，
+// 结果每次合法豁免都在 state.json 留一条 illegal-transition-force 审计噪声，把真正的越权跳转
+// 和合规豁免混在一起。用 --exempt <代码> 登记后归入 state.exemptions（合法审计），--force 语义不变。
+// 值格式：`<代码>：<依据与落盘材料路径>`，依据缺失（冒号后为空）按未登记处理。
+// edges = 需 gate 的非法边（绕过必经节点）；docEdges = SKILL.md 文档授权合法边（如速通/内容还原从
+// EVIDENCE_GATE 直转 CASE_LOOKUP，RB-041 已固化），转换本身合法，但允许带 --exempt 登记留痕审计。
+const EXEMPTIONS = {
+  'step2-content-only': {
+    label: 'SKILL.md §4.4 例外 3（内容还原型，请求侧全明文）',
+    edges: ['FORENSIC_CAPTURE→CASE_LOOKUP'],
+    docEdges: ['EVIDENCE_GATE→CASE_LOOKUP'],
+  },
+  'step2-fastlane': {
+    label: 'SKILL.md §4.2 速通路径 / §4.4 例外 4（Step 2 免采，须用户确认）',
+    edges: ['FORENSIC_CAPTURE→CASE_LOOKUP'],
+    docEdges: ['EVIDENCE_GATE→CASE_LOOKUP'],
+  },
+};
+
+// 解析 --exempt `<代码>：<依据>`；返回 { ok, code, basis, route, edge, why }
+function resolveExemption(raw, from, to, caseDir) {
+  const text = String(raw || '').trim();
+  if (!text) return { ok: false, why: '--exempt 值为空' };
+  const sep = text.search(/[：:]/);
+  const code = (sep < 0 ? text : text.slice(0, sep)).trim();
+  const basis = sep < 0 ? '' : text.slice(sep + 1).trim();
+  const edge = `${from}→${to}`;
+  const route = EXEMPTIONS[code];
+  if (!route) {
+    return { ok: false, code, why: `未知豁免码 ${code}；可用：${Object.keys(EXEMPTIONS).join(' / ')}` };
+  }
+  if (!route.edges.includes(edge) && !(route.docEdges || []).includes(edge)) {
+    return { ok: false, code, why: `豁免码 ${code} 不适用于跳转 ${edge}（登记边：${route.edges.join(' / ')}）` };
+  }
+  if (!basis) {
+    return { ok: false, code, why: `豁免必须带依据：--exempt "${code}:<判据与落盘材料路径>"（口头声明不登记）` };
+  }
+  // 依据里引用的落盘材料必须真实存在（相对 case-dir 解析）；无扩展名的纯判据文字不做文件校验
+  if (caseDir) {
+    const refs = basis.match(/[^，,。、；;\s:："]+\.(?:md|json|jsonl)/gi) || [];
+    const missing = refs.filter((r) => !fs.existsSync(path.join(caseDir, r)));
+    if (missing.length) {
+      return { ok: false, code, why: `豁免依据里的落盘材料不存在：${missing.join(' / ')}（相对 case-dir 解析）` };
+    }
+  }
+  return { ok: true, code, basis, route, edge };
+}
+
+// 被拒时提示本跳转可用的豁免码，避免使用者退回 --force 把合规豁免写成违规审计
+function exemptionsHint(from, to) {
+  const edge = `${from}→${to}`;
+  const codes = Object.keys(EXEMPTIONS).filter((code) => EXEMPTIONS[code].edges.includes(edge));
+  if (!codes.length) return '';
+  return `；若属 SKILL.md 已声明的取证例外，改用 --exempt <代码>:"<判据与落盘材料路径>"` +
+    `（本跳转可用：${codes.join(' / ')}），不要用 --force 掩盖合规豁免`;
+}
+
 // 允许发起重放/写请求的节点（重放类动作守卫）
 const REPLAY_NODES = ['REAL_VERIFY', 'DIAGNOSE'];
 
@@ -181,6 +239,7 @@ const NODE_RULES = {
   ],
   IDENTIFY: [
     '识别结果必须引用落盘资源/NDJSON/网络包字段，不以站点名称直接定类；参数名存在 ≠ 参数生效（以 target-hits.json 或 trace xhrNative 的 url 为准）。',
+    '同值多载体（Header + Cookie/query）≠ 都被校验：存在性、载体、内容强度三个维度各需一次单变量真实请求才能定性（规则 49 / 规则 32 第 4 条）；未做过这次对照就不得在结论里写「参数校在 X 上」。',
   ],
   TRACE_ANALYZE: [
     '先 trace 后读源码：先 import 摘要 + search_trace 定位 stack.file:line:col，再切源码片段；禁止先读大 bundle 猜 webpack module id（R2 默认，偏离需说明理由）。',
@@ -274,6 +333,7 @@ function parseArgs(argv) {
     node: '',
     note: '',
     force: false,
+    exempt: '',
     json: false,
     markdown: false,
     help: false,
@@ -296,6 +356,7 @@ function parseArgs(argv) {
     else if (a === '--node') args.node = nextVal();
     else if (a === '--note') args.note = nextVal();
     else if (a === '--force' || a === '-f') args.force = true;
+    else if (a === '--exempt') args.exempt = nextVal();
     else if (a === '--json') args.json = true;
     else if (a === '--markdown') args.markdown = true;
     else if (a === '--self-test') args.selfTest = true;
@@ -309,7 +370,7 @@ function parseArgs(argv) {
 function usage() {
   return `用法：
   node scripts/state_machine.js --case-dir <case-dir> --init [--node INTENT_CONFIRM] [--markdown]      # 初始化状态跟踪（不存在时）
-  node scripts/state_machine.js --case-dir <case-dir> --set <NODE> [--note "<关键结论>"] [--markdown]  # 状态转换（非法跳转被拒绝，--force 放行）
+  node scripts/state_machine.js --case-dir <case-dir> --set <NODE> [--note "<关键结论>"] [--exempt "<代码>:<依据>"] [--markdown]  # 状态转换（非法跳转被拒绝；已声明例外用 --exempt 登记，其余靠 --force）
   node scripts/state_machine.js --case-dir <case-dir> --get [--json]                                   # 查看当前状态、TODO 清单与历史
   node scripts/state_machine.js --case-dir <case-dir> --guard replay [--force] [--markdown]            # 动作守卫：重放/写请求入口必须调用
   node scripts/state_machine.js --case-dir <case-dir> --guard external [--force] [--markdown]          # 动作守卫：外部题解检索（联网搜索）前必须调用
@@ -325,6 +386,10 @@ function usage() {
   --guard mcp：当前节点不在 BLOCKED_FORENSIC/DIAGNOSE 时拒绝（退出码 2）；
   DIAGNOSE 仅限已过 BLOCKED_FORENSIC 的引擎检测 case 双对照浏览器侧（未经过则拒绝）；
   --force 放行但保留审计记录。
+- --exempt "<代码>:<判据与落盘材料路径>"：登记 SKILL.md 已承认的取证例外跳转（当前可用码：
+  ${Object.keys(EXEMPTIONS).join(' / ')}，各自适用边见脚本内 EXEMPTIONS 表）。
+  登记进 state.json 的 exemptions（合法审计），不再混进 blocks 的 illegal-transition-force；
+  缺依据、码不认识或边不匹配都会拒绝（退出码 2）。合规豁免请用本项，不要用 --force。
 - --init/--set/--get 都会渲染 state.json.todo 中的 11 项 TODO 清单（含 [x]/[~]/[ ] 勾选态），
   该清单必须同步到宿主 TODO 工具；宿主无 TODO 工具时把清单原样输出给用户。
 - 步数预算（SKILL.md §4.4）：同一节点每次 --guard 或 --set 回到自身都累加 stepCount，
@@ -579,6 +644,29 @@ function main() {
     if (!GUARDS.mcp.check({ node: 'DIAGNOSE', visited: ['EVIDENCE_GATE', 'FORENSIC_CAPTURE', 'BLOCKED_FORENSIC', 'DIAGNOSE'] })) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: MCP 守卫应放行引擎检测语境的 DIAGNOSE'); }
     if (GUARDS.mcp.check({ node: 'DIAGNOSE', visited: ['EVIDENCE_GATE', 'DIAGNOSE'] })) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: MCP 守卫不应放行未经过 BLOCKED_FORENSIC 的 DIAGNOSE'); }
     if (typeof GUARDS.mcp.deny('DIAGNOSE', { node: 'DIAGNOSE', visited: [] }) !== 'string') { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: MCP 守卫 DIAGNOSE 拒绝文案缺失'); }
+    // 取证例外登记（§4.4 例外 3/4 与 STEP2_ONLY）：只在"码认识 + 边匹配 + 带依据"时成立
+    if (resolveExemption('step2-content-only', 'FORENSIC_CAPTURE', 'CASE_LOOKUP').ok) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: 缺依据的豁免不应登记'); }
+    if (resolveExemption('no-such-code:依据', 'FORENSIC_CAPTURE', 'CASE_LOOKUP').ok) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: 未知豁免码不应登记'); }
+    if (resolveExemption('step2-fastlane:依据', 'FORENSIC_CAPTURE', 'IDENTIFY').ok) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: 边不匹配的豁免不应登记'); }
+    if (!resolveExemption('step2-content-only:三条判据见 case/阶段报告/02', 'FORENSIC_CAPTURE', 'CASE_LOOKUP').ok) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: 合规豁免被拒'); }
+    for (const [code, route] of Object.entries(EXEMPTIONS)) {
+      if (!route.label.includes('SKILL.md')) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(`self-test: 豁免码 ${code} 缺少 SKILL.md 出处标注`); }
+      for (const edge of route.edges) {
+        const [eFrom, eTo] = edge.split('→');
+        if (!(eFrom in EDGES) || !(eTo in EDGES) || (EDGES[eFrom] || []).includes(eTo)) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(`self-test: 豁免登记边 ${edge} 指向非法节点或本就是合法后继（无需豁免）`); }
+      }
+      for (const edge of route.docEdges || []) {
+        const [dFrom, dTo] = edge.split('→');
+        if (!(dFrom in EDGES) || !(dTo in EDGES) || !(EDGES[dFrom] || []).includes(dTo)) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(`self-test: 豁免 docEdges ${edge} 必须是 EDGES 已承认的合法边`); }
+      }
+    }
+    // 文档授权合法边（EVIDENCE_GATE→CASE_LOOKUP，RB-041）带 --exempt 应可登记留痕；依据引用的落盘材料必须存在
+    fs.mkdirSync(path.join(tmp, 'case', '阶段报告'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'case', '阶段报告', '01.md'), '# 速通判定', 'utf8');
+    if (!resolveExemption('step2-fastlane:速通形态②对拍落盘 case/阶段报告/01.md', 'EVIDENCE_GATE', 'CASE_LOOKUP', tmp).ok) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: 文档授权合法边携带 --exempt 应可登记'); }
+    if (resolveExemption('step2-fastlane:依据见 case/missing.md', 'EVIDENCE_GATE', 'CASE_LOOKUP', tmp).ok) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: 依据引用的落盘材料不存在不应登记'); }
+    if (!exemptionsHint('FORENSIC_CAPTURE', 'CASE_LOOKUP').includes('step2-content-only')) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: 被拒文案未给出可用豁免码'); }
+    if (exemptionsHint('IMPLEMENT', 'REAL_VERIFY')) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('self-test: 无豁免通道时不应提示豁免码'); }
     for (const kind of ['replay', 'external', 'mcp']) {
       if (typeof GUARDS[kind].deny('EVIDENCE_GATE') !== 'string') { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(`self-test: 守卫 ${kind} 拒绝文案缺失`); }
     }
@@ -726,9 +814,21 @@ function main() {
 
   if (args.set) {
     const to = args.set.toUpperCase();
+    const fromNode = state.node;
     const allowed = to === state.node || (state.visited || []).includes(to) || (EDGES[state.node] || []).includes(to);
-    if (!allowed && !args.force) {
-      const msg = `非法状态跳转：${state.node} → ${to}（跳过必经节点）；${suggestNext(state)}`;
+    const exemption = args.exempt ? resolveExemption(args.exempt, fromNode, to, caseDir) : { ok: false, why: '' };
+    if (!allowed && args.exempt && !exemption.ok) {
+      const msg = `豁免登记无效：${exemption.why}`;
+      state.blocks = (state.blocks || []).concat({ at: new Date().toISOString(), type: 'invalid-exemption', node: fromNode, message: msg });
+      syncTodo(state);
+      writeState(caseDir, state);
+      if (args.markdown) console.log(renderMarkdown(state, ['', `> 拒绝：${msg}`], caseDir));
+      else console.error(`INVALID_EXEMPTION: ${msg}`);
+      return 2;
+    }
+    if (!allowed && !exemption.ok && !args.force) {
+      const hint = exemptionsHint(fromNode, to);
+      const msg = `非法状态跳转：${state.node} → ${to}（跳过必经节点）；${suggestNext(state)}${hint}`;
       state.blocks = (state.blocks || []).concat({ at: new Date().toISOString(), type: 'illegal-transition', node: state.node, message: msg });
       syncTodo(state);
       writeState(caseDir, state);
@@ -742,7 +842,16 @@ function main() {
     state.updatedAt = new Date().toISOString();
     if (!state.visited.includes(to)) state.visited.push(to);
     state.history = (state.history || []).concat({ from, to, at: state.updatedAt, note: args.note || '' });
-    if (!allowed) {
+    if (exemption.ok) {
+      state.exemptions = (state.exemptions || []).concat({
+        at: state.updatedAt,
+        from,
+        to,
+        code: exemption.code,
+        doc: exemption.route.label,
+        basis: exemption.basis,
+      });
+    } else if (!allowed) {
       state.blocks = (state.blocks || []).concat({ at: state.updatedAt, type: 'illegal-transition-force', node: from, message: `--force 放行非法跳转 ${from} → ${to}` });
     }
     // 步数计数：换节点即归零；停在同一节点则累加，除非 --note 指向真实存在的阶段报告
@@ -763,14 +872,24 @@ function main() {
     writeState(caseDir, state);
     const hint = todoHint(to, to === from ? 'same' : wasVisited ? 'back' : 'enter');
     const guide = to !== from ? nodeGuide(to) : '';
+    const exemptNote = exemption.ok
+      ? `豁免登记：${exemption.code}（${exemption.route.label}）依据 ${exemption.basis}`
+      : '';
+    const exemptWarn = allowed && args.exempt && !exemption.ok
+      ? `豁免登记未生效（转换合法，不影响本次转换）：${exemption.why}`
+      : '';
     if (args.markdown) {
       const extra = [`> 状态转换：${from} → **${to}**${args.note ? '（' + args.note + '）' : ''}`];
+      if (exemptNote) extra.push('', `> ${exemptNote}`);
+      if (exemptWarn) extra.push('', `> WARN：${exemptWarn}`);
       if (stepNote) extra.push('', `> ${stepNote}`);
       if (hint) extra.push('', hint);
       if (guide) extra.push('', guide);
       console.log(renderMarkdown(state, ['', ...extra], caseDir));
     } else {
       console.log(`STATE_TRANSITION: ${from} → ${to}${args.note ? ' | ' + args.note : ''}`);
+      if (exemptNote) console.log(exemptNote);
+      if (exemptWarn) console.log(`WARN: ${exemptWarn}`);
       if (stepNote) console.log(stepNote);
       if (hint) console.log(hint);
       if (guide) console.log(guide);

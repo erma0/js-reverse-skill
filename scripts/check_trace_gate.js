@@ -85,12 +85,21 @@ function renderMarkdown(result, step2Ready) {
   if (!step2Ready) {
     lines.push('', '## 缺失原因（不可跳过）');
     const reasons = step2MissingReasons(result);
+    const hasEvidenceButNoCoverage = !!(result.step2 && result.step2.evidence && !result.step2.targetCoverage);
     if (reasons.length) {
       for (const m of reasons) lines.push(`- ${m}`);
     } else {
-      lines.push(result.step2 && result.step2.evidence
+      lines.push(hasEvidenceButNoCoverage
         ? '- NDJSON 已产出，但目标 writer/参数链信号未命中；这不是“没有 trace”，应修正信号或进入 TRACE_RETRY。'
         : '- Step 2 NDJSON 未产出或未通过内容校验');
+    }
+    // 证据已产出、只是信号选错：两种分支都要给信号形态自查提示（站方自定义函数名必然 0 命中）
+    if (hasEvidenceButNoCoverage && (result.requireTraceSignal || []).length) {
+      lines.push(`  - 当前信号：${result.requireTraceSignal.join('、')}。`);
+      lines.push('  - 先自查信号形态：RuyiTrace 的 interface/member 只会是浏览器内建 API，站方自定义函数/方法名'
+        + '（如 messagePack、getSign、encrypt）必然 0 命中；改用该函数最终写进浏览器 API 的字面量'
+        + '（请求头名、参数名、XMLHttpRequest.setRequestHeader 实参）。'
+        + '详见 references/workflow/trace-flow.md「trace 信号的记录形态与匹配规则」。');
     }
   }
 
@@ -120,6 +129,8 @@ function checkStep2Gate(args) {
     requireTraceSignal: traceSignals,
   });
   const step2Ready = !!(result.step2 && result.step2.evidence && result.step2.targetCoverage !== false);
+  // checkEvidence 的返回体不带本次要求的信号列表；渲染「信号选错」提示时要用，在这里挂上去
+  result.requireTraceSignal = traceSignals;
   return { result, step2Ready };
 }
 

@@ -12,7 +12,7 @@ const path = require('path');
 
 function parseArgs(argv) {
 
-  const args = { input: '', out: '', stdout: false, append: false, requireChineseName: false, json: false, markdown: false };
+  const args = { input: '', out: '', projectDir: '', stdout: false, append: false, requireChineseName: false, json: false, markdown: false };
 
   for (let i = 2; i < argv.length; i++) {
     const nextVal = (fb) => (i + 1 < argv.length && typeof argv[i + 1] === 'string' && !argv[i + 1].startsWith('-')) ? argv[++i] : fb;
@@ -22,6 +22,8 @@ function parseArgs(argv) {
     if (a === '--input' || a === '-i') args.input = nextVal('');
 
     else if (a === '--out' || a === '-o') args.out = nextVal('');
+
+    else if (a === '--project-dir') args.projectDir = nextVal('');
 
     else if (a === '--stdout') args.stdout = true;
 
@@ -149,8 +151,23 @@ function main() {
 
     if (args.requireChineseName && !hasChinese(path.basename(args.out))) throw new Error(`输出 Markdown 文件名必须包含中文：${args.out}`);
 
-    const allowedRoot = findRepoRoot(process.cwd());
-    if (!isInside(args.out, allowedRoot)) throw new Error(`输出路径越界（必须位于项目根目录内）：${args.out}`);
+    let allowedRoot;
+
+    if (args.projectDir) {
+
+      if (!fs.existsSync(args.projectDir)) throw new Error(`--project-dir 不存在：${args.projectDir}`);
+
+      if (!fs.statSync(args.projectDir).isDirectory()) throw new Error(`--project-dir 不是目录：${args.projectDir}`);
+
+      allowedRoot = path.resolve(args.projectDir);
+
+    } else {
+
+      allowedRoot = findRepoRoot(process.cwd());
+
+    }
+
+    if (!isInside(args.out, allowedRoot)) throw new Error(`输出路径越界（必须位于项目根目录内）。在 skill 仓库目录执行时请传 --project-dir <项目根目录>：${args.out}`);
 
     ensureParent(args.out);
 
@@ -160,7 +177,7 @@ function main() {
 
   }
 
-  const result = { out: args.out || '', bytes: Buffer.byteLength(input, 'utf8'), encoding: 'utf8', chineseFileName: args.out ? hasChinese(path.basename(args.out)) : true, ok: true };
+  const result = { out: args.out || '', bytes: Buffer.byteLength(input, 'utf8'), encoding: 'utf8', chineseFileName: args.out ? hasChinese(path.basename(args.out)) : true, projectDir: args.projectDir ? path.resolve(args.projectDir) : '', ok: true };
 
   if (args.json) console.log(JSON.stringify(result, null, 2));
 
@@ -177,6 +194,8 @@ function main() {
     console.log(`- 中文文件名：${result.chineseFileName ? '是' : '否'}`);
 
     console.log(`- 字节数：${result.bytes}`);
+
+    if (result.projectDir) console.log(`- 项目根目录（解析后）：${result.projectDir}`);
 
     console.log('- 状态：写入完成，中文应正常显示');
 

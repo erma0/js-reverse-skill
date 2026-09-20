@@ -68,7 +68,7 @@ function usage() {
 --case-dir 指项目根（其下应有 case/ 和 result/ 两个平级子目录）；兼容直接传 case 目录。
 --project-dir <dir>：用户工程目录（tools/ 所在）。未传时从 --case-dir 自动推断（向上查找
   包含 tools/ 的目录，兼容多 case 项目 <project-root>/<case-name>/ 与 <project-root>/tools/ 平级布局）；
-  显式传入可覆盖推断，安装模式下建议按 GATE-1 与 check_external_tools.js 一致显式传 <project-root>。
+  显式传入的目录若无 tools/ 也会上溯共享工程根（与 check_external_tools 检测口径一致）。
 --write-snapshot：仅在五项环境检测全部通过时写入/更新 case/notes/env-snapshot.json；失败退出非零且不写文件。
 不带 --write-snapshot 时只做判定，不写文件。
 --ruyitrace-home / --ruyitrace-exe：透传给 check_external_tools.js（安装模式下 tools/ 在用户工程目录而非 skill 根，靠此定位 RuyiTrace）。`;
@@ -252,7 +252,13 @@ function main() {
   const caseDir = resolveCaseDir(args.caseDir);
   // tools/ 所在工程根：显式 --project-dir 优先；未传时从 --case-dir 自动推断（多 case 项目向上查找 tools/）。
   // 快照的 projectRoot 字段记录真实工程根而非 skill 安装根，避免 junction / 目录布局变更后续接失败。
-  const toolsBase = args.projectDir ? path.resolve(args.projectDir) : paths.resolveProjectDirFromCaseDir(caseDir);
+  // tools/ 所在工程根：显式 --project-dir 优先，但其下无 tools/ 时上溯共享工程根（与
+  // check_external_tools 的检测口径一致），否则 GATE-1 模板传 <project-root>（多 case 布局
+  // 下该目录无 tools/）会误判 RuyiTrace 缺失、快照被拒写（题19 实测）。两处均找不到 tools/
+  // 时回退输入值，行为与旧版一致。
+  const toolsBase = paths.resolveProjectDirFromCaseDir(
+    args.projectDir ? path.resolve(args.projectDir) : caseDir
+  );
   const notesDir = paths.resolveNotesDir(caseDir);
   const snapshotPath = path.join(notesDir, 'env-snapshot.json');
   const snapshotExists = exists(snapshotPath);
