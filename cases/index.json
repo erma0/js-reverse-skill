@@ -1191,6 +1191,286 @@
       "strategy": "B vm 沙箱黑盒：魔改 SHA-256 标准 crypto 输出不匹配，整体加载 pagination10.js 补浏览器 API stub 直接调用 OOOO(url) 生成 t；响应明文 JSON；数组每次请求随机，提交前实时拉取计算并立即提交",
       "file": "ob-string-array-modified-sha256-blackbox-mashangpa-p10.md",
       "verifiedAt": "2026-09-19"
+    },
+    {
+      "title": "零导入确定性 wasm 线性混合签名 + 数据窗轮换（码上爬平台题11）",
+      "domains": [
+        "mashangpa.com"
+      ],
+      "signals": [
+        "encrypt.wasm",
+        "WebAssembly",
+        "window.exports",
+        "零导入",
+        "jsjiami.com.v7",
+        "self-defending",
+        "pagination11.js",
+        "problem-detail",
+        "current_array",
+        "_ts",
+        "m=16358+page+trunc(ts/3)",
+        "答案正确10积分"
+      ],
+      "strategy": "C WASM 黑盒（Node 原生实例化，无补环境）+ A 纯算等价式作改版探针；真机 oracle 直调表替代 RuyiTrace 取 writer 证据；20 页求和后同运行内立即提交（数据按窗口轮换）",
+      "file": "wasm-zero-import-linear-signer-mashangpa-p11.md",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "title": "JSVMP 内自实现 SHA-1 + 从 jscall args 直读 VM 常量表定算法族（码上爬平台题12）",
+      "domains": [
+        "mashangpa.com"
+      ],
+      "signals": [
+        "jsvmp",
+        "interpreter",
+        "jsjiami.com.v7",
+        "pagination12.js",
+        "problem-detail",
+        "current_array",
+        "m=",
+        "t=",
+        "40位hex",
+        "SHA1",
+        "sha1('fu'+url+t)",
+        "originalAjax",
+        "requestInterceptors",
+        "vm常量表",
+        "navigator.webdriver",
+        "canvas getContext",
+        "答案正确10积分"
+      ],
+      "strategy": "A 纯算还原（m=SHA1(\"fu\"+相对url+t)，t=unix毫秒）；还原期用 B node:vm 沙箱黑盒执行官方 pagination12.js + 真 jQuery 作权威对照源；算法族由 RuyiTrace jscall 明细 args 里整份带出的 VM 常量表（SHA-1 IV/轮常数 + 盐值 fu/aa + 挂载成员名）直接确定，不反编译字节码；8 组真机 (page,t,m) 逐字节对拍 + 4 轮 20 页真实请求 + 提交 status:success",
+      "file": "jsvmp-sha1-const-table-jscall-args-mashangpa-p12.md",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "title": "ob-io 混淆的 $.ajaxSettings.beforeSend 三头签名 + 签名脚本注入竞态致浏览器无成功样本（码上爬平台题13）",
+      "domains": [
+        "mashangpa.com"
+      ],
+      "signals": [
+        "ob-io",
+        "obfuscator.io",
+        "a0_0x",
+        "jqueryxhr.js",
+        "ajaxSettings",
+        "beforeSend",
+        "setRequestHeader",
+        "r=",
+        "s=",
+        "t=",
+        "32位hex",
+        "MD5(body+r+t)",
+        "Date.parse(new Date())",
+        "毫秒位000",
+        "UUIDv4随机盐",
+        "pagination13.js",
+        "appendChild注入",
+        "脚本注入竞态",
+        "小鸡，别爬了",
+        "form头+JSON体错配",
+        "current_array",
+        "答案正确10积分"
+      ],
+      "strategy": "A 纯算还原：s=MD5(JSON.stringify({page:\"N\"}) + r + t)，t 为秒对齐毫秒，r 为 UUIDv4 风格 32hex 随机盐；签名层是挂在 $.ajaxSettings.beforeSend 的单个函数，取证侧因「签名脚本异步注入 + 首屏小文件先发」的恒定竞态拿不到带签名样本（4 轮 ruyipage/RuyiTrace 均复现），改用 run_with_trace.js 沙箱以假 $ 桩接住 beforeSend 直调取 writer 真值，锁 Math.random 三组探针区分随机盐/数据哈希，9 组样本逐字节对拍；交付零依赖 Node https 直连，20 页全量求和不去重后同窗提交 status:success",
+      "file": "obio-md5-header-triple-script-inject-race-mashangpa-p13.md",
+      "verifiedAt": "2026-09-20"
+    },
+    {
+      "title": "safekodo 打包器把签名挂上 XMLHttpRequest.prototype.open 重写 URL，CODE4=H(ts) 沙箱黑盒逐字节对齐（码上爬平台题14）",
+      "domains": [
+        "mashangpa.com"
+      ],
+      "signals": [
+        "safekodo",
+        "V8.2.8",
+        "xhr.js",
+        "XMLHttpRequest.prototype.open",
+        "defineProperty",
+        "URL query 签名",
+        "m=",
+        "base64(CODE4+ts+NUL)",
+        "16值域",
+        "0xDE配对",
+        "fDawx",
+        "new Date().getTime",
+        "pagination14.js",
+        "appendChild注入",
+        "脚本注入竞态",
+        "小鸡，别爬了",
+        "current_array",
+        "vm realm 时间冻结",
+        "compare_fixture逐字节对拍"
+      ],
+      "strategy": "B 最小 vm 沙箱黑盒：CODE4=H(ts) 打包器内部哈希(16值域/4bit索引/0xDE配对结构，闭式未还原)，交付沙箱执行站方原始 xhr.js 取 open() 重写后 URL 提取 m；两组真机 ts 驱动沙箱逐字节复现 fixture 对拍 PASS；20 页全量求和同运行同窗提交 status:success",
+      "file": "obfuscated-url-param-signer-safekodo-mashangpa-p14.md",
+      "verifiedAt": "2026-09-20"
+    },
+    {
+      "title": "同花顺 hexin-v 移植版以 Cookie v 承载 45 字节指纹结构体，服务端只校「载体+定长+ts 窗口」（码上爬平台题15）",
+      "domains": [
+        "mashangpa.com"
+      ],
+      "signals": [
+        "hexin-v",
+        "v cookie",
+        "thsi.cn",
+        "chameleon",
+        "TOKEN_SERVER_TIME",
+        "X-Antispider-Message",
+        "CHAMELEON_LOADED",
+        "pagination15.js",
+        "反转字符串数组混淆",
+        "指纹结构体",
+        "45字节",
+        "base64url+13位ts",
+        "滚动校验和",
+        "XOR keystream",
+        "同花顺 hexin-v 移植",
+        "Cookie 载体",
+        "strhash(navigator.userAgent)",
+        "getBrowserFeature",
+        "localStorage hexin-v",
+        "载体单变量对照",
+        "小鸡，别爬了",
+        "current_array"
+      ],
+      "strategy": "B 最小 vm 沙箱黑盒：结构体 18 字段位宽与 XOR 递推常数未闭式还原——实测服务端只校「Cookie v 存在 + base64 解出 73 字符 + |Δts| 在窗口内」，伪造内容体仍 200，故按链长推断闭式还原属浪费；沙箱内 fetch 为记录桩，从被 SDK hook 的 fetch 最终 (url,headers) 同步取 hexin-v，真实请求走 node:https keepAlive；20 页×10 项全量求和同运行同窗提交 status:success",
+      "file": "cookie-carrier-hexinv-fingerprint-struct-mashangpa-p15.md",
+      "verifiedAt": "2026-09-20"
+    },
+    {
+      "title": "京东 h5st v5.0（RAC 算法下发型）移植为 POST body 内 h5=base64(h5st+t)，服务端真验内容（码上爬平台题16）",
+      "domains": [
+        "mashangpa.com"
+      ],
+      "signals": [
+        "h5st",
+        "PcSign.js",
+        "js-security-v3-rac.js",
+        "window.PcSign",
+        "appId b5216",
+        "cactus.jd.com/request_algo",
+        "h5_file_v5.0.6",
+        "JDst_rac_last_update",
+        "WQ_dy1_vk",
+        "WQ_gather_cv1",
+        "pagination16.js",
+        "safekodo V8.2.8",
+        "Body 内签名",
+        "base64(h5st+ts)",
+        "9 字段分号串",
+        "服务端下发型算法 RAC",
+        "asap Promise 调度泵",
+        "MutationObserver 空桩",
+        "Promise 永不 settle",
+        "引擎级阻断",
+        "storage 键位进度探针",
+        "结构基线 fixture",
+        "小菜鸡，别爬了",
+        "current_array"
+      ],
+      "strategy": "B 最小 vm 沙箱黑盒 + 上游网络桥：摘要函数体由 request_algo 响应下发（data.result.algo 是 JS 源码串）⇒ 闭式不存在，交付停在沙箱执行 PcSign.js + js-security-v3-rac.js 本地副本，Node https 桥接 cactus.jd.com；关键排障是先补 MutationObserver/MessageChannel 调度泵并记录 XHR 回调异常（否则 sign() 零报错永不 settle）；Step 1 真机样本因取证浏览器 0 次发出目标请求而永久缺失，改以沙箱直调取 writer + 11 次单变量打靶（伪造即拒、ts 窗口 ~600s、body t 不验）+ 结构基线 fixture，20 页全量求和同窗提交 status:success",
+      "file": "body-carrier-h5st-remote-algo-mashangpa-p16.md",
+      "verifiedAt": "2026-09-20"
+    },
+    {
+      "title": "码位单表替换「伪字体」——无字体文件、还原表在站方 JS 明文常量（码上爬题17）",
+      "domains": [
+        "mashangpa.com"
+      ],
+      "signals": [
+        "字体加密",
+        "码位替换",
+        "单表替换",
+        "FONT_DECRYPT_MAP",
+        "pagination17.js",
+        "jsjiami.com.v7",
+        "无字体文件",
+        "无 @font-face",
+        "非 PUA 码位",
+        "请求侧明文",
+        "内容还原型",
+        "Step 2 豁免",
+        "current_array",
+        "20 页求和",
+        "status:info 已完成",
+        "search_cases 多词 AND"
+      ],
+      "strategy": "A 纯算还原（内容还原型，Step 2 豁免）：响应 current_array 是横跨孟加拉文/古吉拉特文/西里尔文扩充-B 区块的码位串，还原表以明文字面量 FONT_DECRYPT_MAP 挂在站方 pagination17.js（jsjiami v7 包装但常量未字符串化）；交付运行时重新拉表 + sha256 记录 + 10 项双射校验 + 表外码位硬失败，零字体解析零补环境，20 页全量求和同窗提交 status:success；教训三条：题型命名不作工具链选型依据（反模式 11 第七形态）、CASE_LOOKUP 多关键词是 AND 会假阴性（反模式 41）、离线 selftest 分支覆写在线验证记录致 attempts 清零（规则 56）",
+      "file": "unicode-codepoint-substitution-no-font-file-mashangpa-p17.md",
+      "verifiedAt": "2026-09-20"
+    },
+    {
+      "title": "响应体整包 {r,k} = 标准 Triple-DES/CBC/PKCS7 + 日期型 IV（crypto-js 直接密钥路径）（码上爬题19）",
+      "domains": [
+        "mashangpa.com"
+      ],
+      "signals": [
+        "响应加密",
+        "TripleDES",
+        "des-ede3-cbc",
+        "DES3.decrypt",
+        "r 与 k 双字段",
+        "19pro.js",
+        "pagination19.js",
+        "crypto-js 打包副本",
+        "EvpKDF 死代码",
+        "日期型 IV",
+        "yyyyMMdd",
+        "formatDate",
+        "请求侧明文",
+        "内容还原型",
+        "Step 2 豁免",
+        "current_array",
+        "20 页求和",
+        "零沙箱纯算"
+      ],
+      "strategy": "A 纯算还原（内容还原型，Step 2 豁免，该平台第二个完全零沙箱零补环境，前例 p17）：请求侧仅明文 page，响应 {r=base64 密文, k=24 字符密钥} 用 Node 原生 des-ede3-cbc + PKCS7 直解；三条硬判据——①crypto-js 有两种 decrypt 语义，按调用点第二实参类型（enc.*.parse/WordArray vs 字符串口令）定密钥语义，文件里 MD5/EvpKDF 命中 4 次可为零调用的打包死代码（与 match22 的 Salted__ 真派生型构成对偶，规则 54）；②iv 实参是函数调用 DES3.iv()=formatDate(new Date(),'yyyyMMdd') ⇒ 站方取浏览器本地日期而加密在服务端 UTC+8，交付按「服务端时区→本地→各±1 天」候选 + PKCS7 与 JSON.parse 双校验 + 全失败硬抛，IV 绝不写成常量（规则 55）；③k 看着像站点常量，用一次只读探针连打 3 次（前缀 3/3 不同）即定性为随响应下发，禁硬编码；另规则 36 第三次命中：取证样本隔 25 分钟仍逐字节复现、第 4 次采样才变 ⇒ 复现一次不能证伪轮换，取数与提交恒须同轮完成",
+      "file": "response-carrier-tripledes-date-iv-mashangpa-p19.md",
+      "verifiedAt": "2026-09-20"
+    },
+    {
+      "title": "站方 webpack 指纹 SDK（anti = __webpack_require__ 改名全局别名）以 Header m 承载「不透明信封 + base64(盐+ts)」，服务端只校长度与尾段 ts（码上爬平台题18）",
+      "domains": [
+        "mashangpa.com"
+      ],
+      "signals": [
+        "actoken.js",
+        "anti = n",
+        "webpack require 别名",
+        "anti(4)",
+        "messagePack",
+        "messagePackSync",
+        "updateServerTime",
+        "Header m",
+        "base64(\"luoge\"+ts)",
+        "pagination18.js",
+        "ajaxPrefilter",
+        "VM_OPS",
+        "jsjiami RC4 字符串表",
+        "自定义 base64url 字母表",
+        "253 字节信封",
+        "0xD1 0xAA 魔数",
+        "23 个采集器",
+        "setTimeout 复位采集器",
+        "run_with_trace 返回空串",
+        "站方函数名不是 trace 信号",
+        "client-version",
+        "timestamp 头不校验",
+        "_nano_fp",
+        "cookie 读写归因假阳性",
+        "CookieService.GetCookiesForURI",
+        "无 canvas 无 WebGL",
+        "同长度随机伪造体通过",
+        "内嵌 ts 时间窗不对称",
+        "小菜鸡，别爬了",
+        "current_array",
+        "20 页求和"
+      ],
+      "strategy": "B 最小 vm 沙箱黑盒（前段 253 字节信封不闭式还原）：签名链在 pagination18.js 明文可读，m = anti(4)({serverTime:ts}).messagePack() + base64(\"luoge\"+ts)，anti 是 actoken.js 把 __webpack_require__ 改名的全局别名，交付沙箱执行站方 bundle 原样副本（sha256 校验漂移）+ node:https keepAlive；三点决定成败——① P0 环境是「真实可回推的 setTimeout」（re() 靠 setTimeout(te,0) 复位采集器，桩不回调则 messagePack() 恒空串且零报错，与反调试死循环同表象；泵须真实让出事件循环，忙等会把 Math.max/min 节拍统计塌成 0）；② trace writer 信号只能用浏览器 API 实参字面量（client-version 命中 / 站方方法名 messagePack 必 0 命中并误进 TRACE_RETRY）；③ 11 个单变量打靶钉死校验集 = m 存在 ∧ 长度结构 ∧ 尾段内嵌 ts 新鲜度（同长度随机伪造体 200、截断拒、ts −30min/+10min 拒），timestamp/client-version 头与 _nano_fp cookie 全不校 ⇒ 闭式还原零增益；20 页全量求和同轮提交 status:success，复验轮 total 变化证实数据按运行轮换",
+      "file": "header-m-fingerprint-envelope-tail-ts-mashangpa-p18.md",
+      "verifiedAt": "2026-09-20"
     }
   ]
 }
