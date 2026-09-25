@@ -34,6 +34,15 @@
 
 > **阻塞点 #5 例外（合规降级，即 SKILL.md 状态机的 MATERIALS_FALLBACK 节点）**：取证工具链（ruyipage/RuyiTrace）整体不可用且 `install_all.js` 自动安装失败时，**不强制暂停**——只要用户手动提供了**真实存在的** JS 文件 / cURL / HAR（白名单③合法来源，先经 `node scripts/check_evidence.js --case-dir <project-root> --url <目标URL> --inputs <材料路径> --markdown` 验证，仅 URL 不算材料、不触发降级），即可走 MATERIALS_FALLBACK → CASE_LOOKUP → IDENTIFY，并以「Node 直连真实接口、服务端 `code:0` 反证」作为正确性证据（坑#8）。此路径合规，但**必须在 `result/经验沉淀-<站点>.md` 与最终总结写明取证偏差**（未走 ruyipage/RuyiTrace、证据来源为手动材料 + 黑盒反证），且 REAL_VERIFY 不可豁免。注意：该降级路径的前提是目标接口无登录态要求，可直接用真实响应校验还原结果；且用户仅提供 URL 时不允许降级，仍须先安装工具链走完整两步取证。
 
+## 取证例外通道（SKILL.md §4.4 例外四个细则）
+
+例外四个（**AI 自行判定「trace 采集不到/太难」不构成降级理由**；例外 1、2、4 的 REAL_VERIFY 不可豁免；四个例外都须在经验沉淀与最终总结写明取证偏差或判定依据，例外 3 另写请求侧明文参数清单 + 响应自包含证据，例外 4 另写速通形态与判定材料落盘引用）：
+
+1. **MATERIALS_FALLBACK**（需用户显式确认，细则见本文档阻塞点 #5）：RuyiTrace 不可用且自动安装失败 + 用户材料过 check_evidence.js 校验，以「Node 直连真实接口、服务端响应反证」替代 Step 2。
+2. **BLOCKED_FORENSIC**（需用户显式确认，检测证据要求见 `references/env/env-detect-bypass.md`）：内核级检测使 RuyiTrace 无法触发目标路径，以 Step 1 网络证据 + 落盘 JS 源码分析替代。
+3. **内容还原型豁免（无需用户确认）**：请求侧参数全明文（三条判据见 SKILL.md 路径 E，无 trace 时用①网络层+③Cookie/存储层）且难点在响应解密/内容还原（字体映射、图片拼装等）、Step 1 已捕获完整响应证据——EVIDENCE_GATE 判定「只有 Step 1」时声明「Step 2 豁免：内容还原型，无运行时签名链路」后跳过 TRACE_CAPTURE 直接 CASE_LOOKUP。请求侧存在任何待还原参数即不适用本豁免。
+4. **速通路径（Step 2 免采，需用户确认）**：按 SKILL.md 4.2「速通路径速查」命中且用户确认；形态②对拍任一样本不一致即失格，回 TRACE_CAPTURE，禁止枚举猜算法。REAL_VERIFY 不豁免。
+
 ## JSVMP 路径选择决策树
 
 > **核心原则**：路径选择基于反爬类型直接决定，不基于"快速测试 30 分钟"。

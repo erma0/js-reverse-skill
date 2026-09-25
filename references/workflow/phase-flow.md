@@ -269,3 +269,23 @@ RuyiTrace NDJSON 狙击式采集:
 - 内容：题型 / 反爬类型 / 关键踩坑 / 由踩坑转成的具体编码约束 / 验证结论
 - **5.3 默认交付门禁会检查经验沉淀文档**：result/ 下必须存在 `经验沉淀-*.md`，缺失则门禁失败
 - **开发者周期回写**：skill 维护者定期把 `result/` 中质量高的经验按 `_template.md` 合并进 skill 的 `cases/` 库；agent 运行期只产出、不回写 skill 目录
+
+## 阶段动作边界与外部检索时序（横切规则，R1）
+
+**阶段动作边界（R1，`--guard replay|external|mcp` 裁定）**：每个节点只做本节点允许的动作，前置阶段不得发起外部重放/对照实验。
+
+- 允许范围：TRACE_CAPTURE / CASE_LOOKUP / EXTERNAL_LOOKUP / IDENTIFY / TRACE_ANALYZE 只做取证（`forensic_ruyipage.py`/`capture_ruyitrace_log.js`）、本地分析（`import_ruyitrace_log.js`/`search_trace.js`/`search_js.js`）与案例/网络检索；重放归 DIAGNOSE——先 TRACE_ANALYZE 定位 builder/writer，IMPLEMENT 写出实现，再对照实验。越权代价：签名链未定位时易误判问题层，并白耗会话状态、触发风控。
+- 技术入口：向目标接口发真实请求（含“只发一次看看返回什么”）前先过 `--guard replay`，退出码 0 才允许发；自我判断“这算 DIAGNOSE”不构成放行依据——守卫读 `state.json` 的实际节点。
+
+**外部检索时序（R1，`--guard external` 裁定）**：外查只允许在 CASE_LOOKUP / EXTERNAL_LOOKUP / DIAGNOSE 进行，执行前过 `--guard external`（退出码 0 放行，越权退出 2 并写 `blocks` 审计）。EVIDENCE_GATE 及更早阶段不得外查——取证前外查会被过期情报带偏。情报到手后：① 一律标为**假设**，用本次 trace/capture 逐条验证后才升级为结论；② 冲突时无条件以本次证据为准（绝对规则 2）；③ 不因外部方案更“完整”而改读证据或跳过取证；④ 优先查已按平台/题型归类的索引库（如 GitHub `kanadeblisst00/high-quality-biz`），命中后仍按前三条处置。
+
+## 上下文防耗尽检查点（横切规则，R1）
+
+按硬计数触发，不以「预防性落盘」「提前对齐用户」为由提前触发。TRACE_ANALYZE / IMPLEMENT / REAL_VERIFY 满足其一即已触发：
+
+① 同一节点 20+ 步未推进或上下文接近耗尽（`state_machine.js` 记入 `state.json.stepCount`，12 步 WARN、20 步起 `--guard` 拒绝；只有 `--set <同节点> --note "<阶段报告路径>"` 且文件真实存在才归零）；
+② 「想问用户 vs 再试一轮」摇摆超 2 轮；
+③ 同一决策重新权衡 ≥2 次或重复查询已查过的索引；
+④ 脚本 WARN：`search_js.js` / `search_trace.js` 对同一（文件、关键词）第 2 次检索即 WARN，收到换检索词/方法。
+
+触发后按序：① 回看准入三件套两份文件是否覆盖当前崩溃点，未覆盖先补全；② 已覆盖仍打转 → 落阶段报告并立即按报告继续；③ 仍无进展 → 输出卡点与默认方向（继续攻坚；仅证据已证伪当前方向才换路径）并继续，用户打断才改道。

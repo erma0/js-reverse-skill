@@ -40,7 +40,8 @@
 - 已经定位或初步定位加密入口。
 - 相关 JS 文件已经保存到本地，或确认可以获取。
 - 已经整理 `source → entry → builder → writer` 四层链路，至少确认 writer。
-- 已按 SKILL.md 4.4 产出 `notes/entry-chain.md` 与 `notes/missing-env-priority.md`，且 `node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` 退出码 0（两份文件缺一或门禁未过不得开始补环境）。
+- 已按 SKILL.md 4.4 产出 `notes/entry-chain.md`（入口函数 → 请求链 → 关键 `stack.file:line:col`，即第一实现目标）与 `notes/missing-env-priority.md`（`analyze_trace.js --summary` 抽取的 SDK 实际读取环境清单 + 补齐优先级 + 「证据 / Node trace 补充 / 推断」标记；环境项须带显式 `P0`/`P1`/`P2` 依据；黑盒执行无法逐项复现时标注「黑盒执行，不逐项精确复现」），且 `node scripts/check_env_prerequisites.js --case-dir <project-root> --markdown` 退出码 0（**两文件缺一不得开始补环境**；门禁未过同样不得开始）。
+- **禁止先根据 Node.js 报错盲补**环境——盲补会陷入十几轮「加载→崩→猜」空转；每轮补齐必须先有 trace/源码证据支撑。
 - 取证来源为 ruyiPage + RuyiTrace 时，已导入 NDJSON 日志并生成 `notes/ruyitrace-summary.md`；尚未导入时按默认自动 trace 采集（`capture_ruyitrace_log.js`）并导入，自动失败或需登录/验证码/复杂交互时转手动由用户提供日志；用户明确确认无法提供时才降级。
 - 已经检查 Node 泄露阻断，不把 `process/Buffer/require/module/global` 暴露给目标 JS。
 - 已经在补环境初始化阶段启用 JS 层 NativeProtect 保护，或记录用户明确豁免原因。

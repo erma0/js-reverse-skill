@@ -3,6 +3,24 @@
 
 > 历史版本（2.3.87 及更早）已归档至 CHANGELOG.archive.md。
 
+## 2.3.141 - 2026-09-25
+
+### §4 节点级细则整体外迁 references（常驻体积 35000 → 32639 字符）
+
+**SKILL.md §4 外迁（正文只留节标题 + 触发条件 + 指针 + 关键判据句）**
+- §4.2：网络取证/日志采集命令段的重复细则删（trace-flow.md 已有）；速通路径两形态判据迁 trace-flow.md 新增「速通路径判定」节；质量判定与出口门禁段压为指针行（核心判据由 state_machine `[RULE]` 换节点投递 + trace-flow 承接）
+- 阶段动作边界与外部检索时序、§4.4 防耗尽检查点：细则迁 phase-flow.md 新增两节（横切规则），正文留判据行
+- §4.4 例外四个：判据明细迁 decision-tree.md 新增「取证例外通道」节；SKILL.md 保留编号目录（check_skill_consistency 的 extractExceptions 解析依赖，删则全库「例外 N」引用批量死链）
+- §4.3 EXTERNAL_LOOKUP 豁免、§4.4 准入三件套/IMPLEMENT 前置：压缩保留判据句（含 RB 锚点句）
+
+**references 承接（搬迁保措辞 → RB 锚点自动承接，41/41 通过）**
+- `trace-flow.md`：新增「速通路径判定」节；出口门禁「不得写成"没有 trace"」措辞对齐；质量判定补「禁止跳过重采直接转静态分析」；多进程合并补「合并所有 tab/content 进程文件」；信号规则补「纯网络接口 URL 不在 trace 中属预期」条与「裸 `createElement`」措辞；自动 trace 执行要求补「已触发」确认纪律；取证细则补 Windows `PYTHONUTF8` 兜底
+- `env-debug-loop.md`：进入条件补两文件内容要求、「两文件缺一不得开始补环境」与「禁止先根据 Node.js 报错盲补」原串
+- `phase-flow.md`：新增「阶段动作边界与外部检索时序」「上下文防耗尽检查点」两节
+- `decision-tree.md`：新增「取证例外通道（SKILL.md §4.4 例外四个细则）」节
+
+**验证**：check_skill_consistency 0 问题（147 引用）；check_routing_benchmarks 41/41 通过；state_machine --self-test PASS；RB-034 锚点「按来源摘要命名」在首轮验证中丢失去向已修复（回归守卫生效）
+
 ## 2.3.140 - 2026-09-21
 
 ### P0 事实错误修正 + P1 工具门禁缺陷修复 + check_skill_consistency 扫描范围扩展

@@ -100,10 +100,20 @@ python scripts/forensic_ruyipage.py --url <目标页> --case-dir <project-root> 
 - **命中但全 403（match26）**：target-hits.json 的 URL/Query 参数结构仍是接口路径与参数名的有效证据，不要无限重采；签名正确性由「trace 定位 builder/writer + 沙箱对齐环境分支 + REAL_VERIFY 闭环」验证，取证侧 403 可能是环境分派诱饵分支所致（match21/26 同族）。
 - **重试型场景**：登录可能因验证码/校验失败重试时调大 `--target-settle`（单位秒，默认 3；建议 10~30，上限 120），保证重试仍在同一会话内。关联材料以最后一次有效终态向前回溯，验证码中间接口不是额外终态门禁（load → verify 由分析阶段从同一会话回溯）。
 - **翻页/序列类目标**：取证交互覆盖 ≥2 个请求序号（如翻 2 页再收尾），单序号样本看不见计数器递增语义（反模式 24）。
+- **Windows 编码兜底**：Python 输出仍现编码异常时用 `PYTHONUTF8=1`（PowerShell：`$env:PYTHONUTF8="1"`）；仓库脚本已内置 UTF-8 强制，正常无需手动加。
 
 ## RuyiTrace 日志采集流程
 
 取证来源需要 RuyiTrace 时，默认自动 trace（脚本自动启动 trace Firefox 捕获，不询问用户选择采集方式）；用户已提供 NDJSON 时直接导入，不重复采集。自动 trace 失败、需要登录/验证/权限交互时转手动 trace。
+
+### 速通路径判定（Step 2 免采，先于采集执行）
+
+EVIDENCE_GATE 判定「只有 Step 1」时、启动日志采集前，先判定可否免采 Step 2；命中即单行向用户提议（形态 + 判定依据 + 免采 Step 2），用户确认 → 跳过 TRACE_CAPTURE 直接 CASE_LOOKUP，未确认或未命中 → 正常采集。两种形态：
+
+1. **全明文采集型**：请求侧无任何待还原参数——判据①（见 SKILL.md 路径 E）+ 落盘 JS 源码级反证（判据②③的源码替代：全部脚本读毕无 cookie 写入/crypto 调用/网络封装，条件加载与动态注入脚本已核实不适用本题）+ 响应明文自包含。
+2. **简单加密源码可读型**：签名链在落盘 JS 中完整可读（链上无混淆/JSVMP/WASM），Step 1 已捕 ≥2 组不同输入的成功样本，Node 复现算法对全部样本逐字节一致；任一样本不一致即未命中，禁止枚举猜算法，正常采集 trace。
+
+判定材料须落盘引用，不得凭页面观感定性；AI 不得以「看起来简单」自行免采。速通不经 TRACE_CAPTURE 不触发出口门禁复检，Step 2 缺失合法性由 SKILL.md §4.4 例外 4 承担。
 
 ### 定向 trace 策略（先判题型，再选最小开关组合）
 
@@ -154,7 +164,7 @@ node scripts/capture_ruyitrace_log.js --url <target-page-url> --case-dir <projec
 1. 自动创建或使用 `case/ruyi-trace/logs/` 作为日志目录，使用 `case/tmp/ruyitrace-profile/` 或临时 Profile。
 2. 使用 RuyiTrace 随包 trace Firefox，而不是普通系统 Firefox、普通 Playwright 或 ruyiPage 的 Firefox runtime。
 3. 设置 `MOZ_DOM_TRACE=1`、`MOZ_DOM_TRACE_FILE=<case trace file>`、`MOZ_DOM_TRACE_LIMIT=<limit>` 和 `MOZ_DISABLE_LAUNCHER_PROCESS=1`。
-4. 打开目标页面后触发最少量必要业务动作；如果需要登录、验证码、MFA、设备验证或权限确认，暂停让用户在该 trace Firefox 中手动完成，再继续采集。
+4. 打开目标页面后触发最少量必要业务动作；如果需要登录、验证码、MFA、设备验证或权限确认，暂停让用户在该 trace Firefox 中手动完成，再继续采集；用户确认「已触发」前不得结束采集，也不得把「没触发目标路径」当成「采集完成」。
 5. 自动 trace 结束后，立即运行 `import_ruyitrace_log.js` 导入日志、生成 `notes/ruyitrace-summary.md`，并检查长字段截断风险。
 6. 如果自动 trace 没有生成 NDJSON，先记录失败原因和已执行命令，再转手动 trace（方式二）；不要把"没有日志"误写成目标没有环境访问。
 
@@ -168,7 +178,7 @@ node scripts/import_ruyitrace_log.js --input <trace.ndjson> --case-dir <project-
 
 > **触发条件**：TRACE_CAPTURE 采集到 NDJSON 并导入生成 `notes/ruyitrace-summary.md` 后立即读。本节合并了原先散落在采集流程、RuyiTrace 优先诊断原则、验证码覆盖三处的质量规则，统一判定标准与处理顺序，消除「生成了但质量不足」的规则盲区。
 
-采集到 NDJSON ≠ 质量达标。导入后必须先按质量标准判定，未达标不得推进 `CASE_LOOKUP`。
+采集到 NDJSON ≠ 质量达标。导入后必须先按质量标准判定，未达标不得推进 `CASE_LOOKUP`。重度不足必须先重采一次才允许降级做静态分析——缺 trace 时静态分析极易在「参数来源靠猜」上打转，**禁止跳过重采直接转静态分析**。
 
 #### TRACE_CAPTURE 出口门禁复检（不可跳过，先于质量判定）
 
@@ -180,7 +190,7 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 
 退出码 0（Step 2 已具备：NDJSON 存在 + 关联目标域；如要求 writer/API 信号则本次全部有效进程文件聚合后命中）才可进入 CASE_LOOKUP；退出码 1 时区分两类：无有效 NDJSON = Step 2 缺失，停在 TRACE_CAPTURE；NDJSON 存在但 writer/API 未命中 = Step 2 已具备、目标链路覆盖不足，停在 TRACE_RETRY。两类都不得进入 CASE_LOOKUP / EXTERNAL_LOOKUP，不得以边界声明或 mock 替代。FORENSIC_CAPTURE → TRACE_CAPTURE 路径同样适用：FORENSIC_CAPTURE 补采后必须通过出口门禁才进 CASE_LOOKUP。STEP2_ONLY 路径（用户已提供 NDJSON）同样需要按是否要求 trace 信号判断覆盖。
 
-本脚本同时报告 Step 2 是否真产出（`step2.evidence`）和目标链路是否覆盖（`step2.targetCoverage`）；产出后的栈/API 整体质量是否达标见下方「质量判定标准」。三件事不混淆：Step 2 未产出 = 停在 TRACE_CAPTURE；NDJSON 已产出但 writer 未命中 = 不得说“没有 trace”，停在 TRACE_RETRY；writer 命中但整体质量不足 = 仍进 TRACE_RETRY。`evidence-signal` 只影响证据门禁，`end-signal` 只影响自动采集生命周期；不传 `end-signal` 时不得因证据信号命中而提前关闭。
+本脚本同时报告 Step 2 是否真产出（`step2.evidence`）和目标链路是否覆盖（`step2.targetCoverage`）；产出后的栈/API 整体质量是否达标见下方「质量判定标准」。三件事不混淆：Step 2 未产出 = 停在 TRACE_CAPTURE；NDJSON 已产出但 writer 未命中 = 不得写成“没有 trace”，停在 TRACE_RETRY；writer 命中但整体质量不足 = 仍进 TRACE_RETRY。`evidence-signal` 只影响证据门禁，`end-signal` 只影响自动采集生命周期；不传 `end-signal` 时不得因证据信号命中而提前关闭。
 
 #### 质量判定标准
 
@@ -191,7 +201,7 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 
 阈值用建议值，AI 可按目标站点复杂度自主判断上调或下调，但「无 stack.file」是硬性重度不足信号，不得自行放宽。
 
-> **多进程与跨域 trace 合并**：RuyiTrace 一次采集会按进程写多个 `domtrace/trace_process_<pid>.ndjson`——`process_type` 为 `tab`/`content` 的内容进程才是业务 JS，`parent` 是浏览器父进程/内核活动（`resource://gre/modules/*`、`builtin-addons/*` 等，不含页面 JS，参与 trace-signal 必然误报）。`capture_ruyitrace_log.js` 会把所有非 parent 的 domtrace 文件合并导入，`ruyitrace-summary.md` 反映合并全量；手动导入多文件用 `import_ruyitrace_log.js --input a --input b ...` 合并统计。只取单个进程文件（尤其 mtime 最新的那个）会漏掉真正的业务 JS 调用，把有效 trace 误判为空。验证码/支付 SDK 常运行在第三方 iframe：日志未出现业务站点 hostname，但明确的 writer/API 信号在有效内容进程中全部命中时，仍可确认 Step 2；没有明确信号时不得用任意跨域日志替代目标证据。
+> **多进程与跨域 trace 合并**：RuyiTrace 一次采集会按进程写多个 `domtrace/trace_process_<pid>.ndjson`——`process_type` 为 `tab`/`content` 的内容进程才是业务 JS，`parent` 是浏览器父进程/内核活动（`resource://gre/modules/*`、`builtin-addons/*` 等，不含页面 JS，参与 trace-signal 必然误报）。`capture_ruyitrace_log.js` 会把所有非 parent 的 domtrace 文件合并导入（即**合并所有 tab/content 进程文件**，排除 `parent` 内核进程），`ruyitrace-summary.md` 反映合并全量；手动导入多文件用 `import_ruyitrace_log.js --input a --input b ...` 合并统计。只取单个进程文件（尤其 mtime 最新的那个）会漏掉真正的业务 JS 调用，把有效 trace 误判为空。验证码/支付 SDK 常运行在第三方 iframe：日志未出现业务站点 hostname，但明确的 writer/API 信号在有效内容进程中全部命中时，仍可确认 Step 2；没有明确信号时不得用任意跨域日志替代目标证据。
 >
 > **摘要仅 1 行 / 「未覆盖页面 JS」时的诊断顺序**（match12 实测：自动导入后摘要只反映 1 行内核记录，实际 domtrace/ 下有 4 个内容进程文件未纳入）：① `LS case/ruyi-trace/logs/domtrace/` 确认是否存在多个 `trace_process_*.ndjson`；② 存在但摘要未覆盖 → 手动 `import_ruyitrace_log.js --input <每个内容进程文件>` 合并重导（`--no-summary-write` 可避免分类日志覆盖主摘要）；③ 合并后仍不足才按 TRACE_RETRY 重采。禁止把"摘要 1 行"直接当成"trace 只有 1 行"进入重采。
 
@@ -199,9 +209,10 @@ node scripts/check_trace_gate.js --case-dir <project-root> --url <target-url> --
 
 - RuyiTrace 把 XHR/fetch 等对象调用记录为**分存字段** `{"type":"call","interface":"XMLHttpRequest","member":"open",...}`——不存在 `XMLHttpRequest.open` 连续子串。门禁与摘要脚本（check_evidence / check_trace_gate / import_ruyitrace_log / capture_ruyitrace_log）已支持 `Interface.member` 形态的结构化匹配，信号直接写 `XMLHttpRequest.open`、`Headers.set` 即可命中分存字段记录；旧 case 中"退化为只写 `XMLHttpRequest`"的做法不再必要（宽信号仍可用，但优先带 member 的精确形态）。
 - **xhrNative 记录含完整请求 URL**（`{"type":"xhrNative","method":"GET","url":"https://...完整 query...","headers":[...]}`）：定位参数写入链后，用 `search_trace --keyword xhrNative` 或按 URL 关键词过滤可直接核对请求侧参数（含编码形态，如 `m=eXVhbnJlbnh1ZTE%3D`），是"签名生成值 ↔ 实际请求值"逐字符比对的第一手证据。
-- 信号仍不得传目标接口 URL 字面量（网络 URL 由 Step 1 的 `--require-network-signal` 承担）、密钥/常量名；泛化 API（createElement 等）会被 `lib/trace-signal-policy.js` 拒绝。应选**参数写入点/参数名**（`noncestr`、`x-zse-96`、`Headers.set("x-zse-96", ...)`）。
+- 信号仍不得传目标接口 URL 字面量（网络 URL 由 Step 1 的 `--require-network-signal` 承担）、密钥/常量名；泛化 API（如裸 `createElement`）会被 `lib/trace-signal-policy.js` 拒绝。应选**参数写入点/参数名**（`noncestr`、`x-zse-96`、`Headers.set("x-zse-96", ...)`）。
 - **站方自定义函数名 / 方法名不是可检索信号**（第 ④ 类必然不命中）：RuyiTrace 的 `interface`/`member` 只会是**浏览器内建 API**（`Document.cookie`、`XMLHttpRequest.setRequestHeader`、`Window.btoa`…），目标 JS 自己定义的 `messagePack` / `getSign` / `encrypt` 之类名字不会作为任何 API 字段出现，传它们必然得到「NDJSON 已产出但目标 writer 覆盖不足」，被门禁误路由到 TRACE_RETRY。正确做法：先从落盘源码或 `Window.btoa`/`setRequestHeader` 的记录里找到**该函数最终写进浏览器 API 的字面量**（请求头名、参数名、URL 片段），用它当信号。
   注意与 `--trace-env MOZ_DOM_JSCALL_DETAIL_FUNCS=<函数名>` 区分：后者是 **jscall 定向采集**开关，按 JS 函数名过滤，走的不是 gate 的 writer 信号通道（见 `references/tooling/ruyitrace-cheatsheet.md`）。
+- **纯网络接口 URL 不在 trace 中属预期**：trace 覆盖的是浏览器内建 API 调用，目标接口 URL 字面量常不出现——不算采集失败、不反复重试；改用参数写入点（如 `Headers.set("x-zse-96", ...)`）或参数名定位签名链，并把「trace 未覆盖目标接口 URL 字面量；签名链定位依据为 <写入点/关键词>」写入 `notes/ruyitrace-summary.md` 与最终总结；未声明不得进入 IMPLEMENT。
 
 #### TRACE_RETRY 处理顺序（按序降级，不回退）
 
