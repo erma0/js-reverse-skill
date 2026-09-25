@@ -55,6 +55,7 @@ GATE-2 EVIDENCE（R1 硬阻断）
   node scripts/check_evidence.js --case-dir <project-root> --url <target-url> --inputs <材料路径> --markdown
   Step 1 接口已知加 --require-network-signal <目标接口URL或关键词>；Step 2 writer/API 已知加 --require-trace-signal <环境 API / writer / 参数写入点>
   （两类信号分开约束；不要把 JSONP/script/导航 URL 当 trace 信号）
+  用户材料旁路（取证源③）：用户直接提供 cURL/HAR/请求文本/NDJSON/JS 时，先落盘再走 --inputs 组合判定——材料命中 Step 1/Step 2 即免对应取证（两类齐备免启动 ruyipage/RuyiTrace），按状态机正常节点推进，并在经验沉淀写明材料来源。
   退出码 0 且无「缺失证据」→ 进入状态机；否则停在 EVIDENCE_GATE，按 4.2 补证后复检。
 ```
 

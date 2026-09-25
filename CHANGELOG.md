@@ -3,6 +3,13 @@
 
 > 历史版本（2.3.87 及更早）已归档至 CHANGELOG.archive.md。
 
+## 2.3.142 - 2026-09-25
+
+### GATE-2 用户材料旁路显性化（取证源③路由缺口修复）
+
+- `SKILL.md` GATE-2 块补「用户材料旁路」一行：用户直接提供 cURL/HAR/请求文本/NDJSON/JS 时先落盘走 `--inputs` 组合判定，材料命中即免对应取证（两类齐备免启动 ruyipage/RuyiTrace），并在经验沉淀声明材料来源。机制（check_evidence.js `--inputs` 计入 Step 1/Step 2）自 2.0 起已存在，但 SKILL.md 无显式路由，AI 易忽略此免取证通道；references 侧 `phase-flow.md` 0.1 节早有条目，本次在门禁处对齐显性化
+- 验证：check_skill_consistency 0 问题；check_routing_benchmarks 41/41 通过
+
 ## 2.3.141 - 2026-09-25
 
 ### §4 节点级细则整体外迁 references（常驻体积 35000 → 32639 字符）
